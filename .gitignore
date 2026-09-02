@@ -11,10 +11,10 @@
 Thumbs.db
 artifacts/
 coverage/
-haven-hub
-haven-agent
-haven-hub.exe
-haven-agent.exe
+/haven-hub
+/haven-agent
+/haven-hub.exe
+/haven-agent.exe
 
 # Generated web assets are embedded into release builds.
 internal/webui/dist/*

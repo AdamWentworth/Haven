@@ -14,7 +14,9 @@ HAVEN must not store passwords, session cookies, authenticator seeds, recovery-c
 
 ## Current boundary
 
-Milestone 0.5 performs continuous read-only collection, explainable baseline evaluation, privacy-bounded finding-transition logging, and authenticated device reporting. On Windows, the Go collector launches one fixed, internally defined PowerShell script with no user-controlled commands or parameters. The dashboard and agent listener bind to loopback by default, there is no CORS policy or remote-control route, and the dashboard sends restrictive browser security headers.
+Milestone 0.6 performs continuous collection, explainable baseline evaluation, privacy-bounded finding-transition logging, authenticated device reporting, and an authenticated local action boundary. On Windows, the collector launches one fixed, internally defined PowerShell script with no user-controlled commands or parameters. The two available controls also select fixed internal PowerShell commands for a Defender quick scan or security-intelligence update; browser text is never interpolated into them.
+
+The owner registers a discoverable passkey through a one-time CLI bootstrap code and signs in using WebAuthn/Windows Hello. Passkey credential data is encrypted at rest with a random key outside the repository. Session and anti-forgery tokens are random; only hashes are stored in SQLite. Sessions expire after 12 hours. Mutating routes require an authenticated session, an exact configured Origin, and a matching anti-forgery cookie/header pair. Authentication attempts are rate limited.
 
 The agent endpoint uses TLS 1.3. Enrollment tokens are random, short-lived, one-time values; each accepted certificate has a distinct key and device identity. Observation identity, device identity, sequence, timestamp, schema, media type, body size, and request rate are validated. Revoked devices cannot submit reports.
 
@@ -32,18 +34,19 @@ Current mitigations:
 
 - Bind the development hub to loopback.
 - Do not enable CORS.
-- Keep the dashboard API read-only and separate from the agent listener.
+- Require a WebAuthn owner session for observation and control APIs while keeping only health and authentication ceremonies public.
+- Require exact-origin and anti-forgery validation for every state-changing dashboard request.
 - Return no authentication secrets.
 - Send a restrictive Content Security Policy and related browser headers.
 
-Before adding state-changing routes, HAVEN requires authenticated sessions, origin validation, anti-forgery protection, and reauthorization for sensitive actions. Loopback and private networking are not authentication.
+Passkey verification provides the session boundary, and the current UI requires explicit confirmation for each Defender action. A later remote-action protocol must add fresh reauthorization and an independently authenticated native agent capability; loopback and private networking are not authentication.
 
 ### A compromised dashboard becomes a remote-administration tool
 
-Planned mitigations:
+Current mitigations and requirements:
 
 - Never expose arbitrary command, script, file-write, registry-write, or process-launch APIs.
-- Model actions as named capabilities with strict schemas.
+- Model actions as named capabilities with strict schemas. The current allowlist contains exactly two Defender operations.
 - Separate read-only collection from any privileged helper.
 - Require confirmation and reauthorization for sensitive operations.
 - Give changes an expiry or rollback path where practical.

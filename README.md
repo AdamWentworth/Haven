@@ -4,9 +4,9 @@
 
 HAVEN is a personal security observatory for home devices and networks. It presents native operating-system protections in one understandable console without trying to replace Microsoft Defender, host firewalls, or other trusted security controls.
 
-HAVEN is pre-release software. The current milestone combines local device trust with an explainable Windows security baseline; it is not yet an authenticated household deployment or a replacement for native protection.
+HAVEN is pre-release software. The current milestone adds an authenticated local action boundary to the explainable Windows security baseline; it is not yet a household deployment or a replacement for native protection.
 
-## Milestone 0.5 — Monitor & Respond
+## Milestone 0.6 — Authenticated Action Center
 
 The current implementation provides:
 
@@ -24,6 +24,11 @@ The current implementation provides:
 - Continuous local collection every 15 minutes by default, with serialized manual refreshes
 - A privacy-bounded activity ledger that records only when a finding opens or resolves
 - An activity-first dashboard with opt-in browser desktop alerts for new high- and medium-severity findings while HAVEN is open
+- Passwordless owner authentication with a discoverable passkey backed by Windows Hello
+- Expiring server-side sessions, strict same-origin checks, anti-forgery tokens, and rate-limited authentication ceremonies
+- Finding acknowledgement, 24-hour snooze, accepted-risk notes, and a privacy-bounded audit trail
+- Confirmed, asynchronous allowlisted controls for a Defender quick scan and Defender security-intelligence update on a local Windows hub
+- No browser endpoint for arbitrary commands, scripts, paths, process launches, firewall changes, or Defender exclusions
 - Privacy-bounded collection: administrator names, update titles, threat names, and detected resource paths are not collected
 - A hardened, single-service Docker Compose definition for the future Ubuntu hub
 - Visible collector failures instead of silently treating unavailable information as healthy
@@ -50,7 +55,15 @@ Set-Location ..
 go run .\cmd\haven-hub
 ```
 
-Open <http://127.0.0.1:5080>. The hub binds to loopback by default and writes its development database to the operating system's per-user application-data directory, outside the repository.
+Open <http://localhost:5080>. The hub binds to loopback by default and writes its development database to the operating system's per-user application-data directory, outside the repository. The `localhost` name is required because browsers grant WebAuthn's local-development secure-context exception to localhost, not arbitrary loopback IP literals.
+
+On first use, keep the hub running and create a one-time bootstrap code in another terminal:
+
+```powershell
+go run .\cmd\haven-hub auth bootstrap
+```
+
+Paste the code into HAVEN and follow the Windows Hello prompt. The code expires after 10 minutes and is consumed only by a successful passkey registration. The passkey credential is encrypted with a random key stored beside the database outside the repository. Back up both the state directory and that key together; losing the key makes the passkey record unusable.
 
 The hub takes an observation immediately at startup and every 15 minutes thereafter. Set `HAVEN_COLLECTION_INTERVAL` to a duration from `1m` through `24h` to change it during development.
 
@@ -89,7 +102,7 @@ Remove-Item Env:HAVEN_DEMO_MODE
 
 Demo mode neither runs the local collector nor exposes non-synthetic devices through the dashboard API. Its clearly labeled cross-platform machines are invented examples, not network discovery results. Conversely, normal mode hides all demo fixtures. Keep demo mode enabled for the entire screenshot session.
 
-For frontend development, run the hub and then start `npm run dev` from `web`. Vite binds to loopback and proxies `/api` to the hub.
+For frontend development, set `$env:HAVEN_PUBLIC_ORIGIN = "http://localhost:5173"` before starting the hub, then run `npm run dev` from `web`. Vite binds to localhost and proxies `/api` to the hub. Remove the environment variable when returning to the embedded UI on port 5080.
 
 ## Checks
 
@@ -114,9 +127,9 @@ The hub image and Compose definition are intended to be built and run on the alw
 docker compose up --build -d
 ```
 
-Compose publishes the dashboard on the host loopback interface only and persists SQLite in the `haven-data` volume. A private reverse proxy or VPN can be connected in a deployment-specific override after application authentication is implemented.
+Compose publishes the dashboard on the host loopback interface only and persists SQLite in the `haven-data` volume. Passkeys are implemented, but a remote deployment still requires an exact `HAVEN_PUBLIC_ORIGIN` using private HTTPS, a reverse proxy/VPN routing decision, backups that include the credential-encryption key, and a recovery procedure.
 
-The Compose file intentionally does not publish the agent listener. Deployment comes after the server resource check, browser authentication, private routing decision, and CI/CD design. Endpoint agents must run natively, not as privileged containers.
+The Compose file intentionally does not publish the agent listener. Deployment comes after the server resource check, private HTTPS/routing decision, passkey recovery test, and CI/CD design. Endpoint agents must run natively, not as privileged containers.
 
 ## Repository layout
 
@@ -144,12 +157,12 @@ Haven/
 2. **Use native protections.** HAVEN coordinates trusted OS security controls instead of replacing them.
 3. **Centralize understanding, not secrets.** Passwords, recovery codes, MFA seeds, cookies, and unrestricted device credentials do not belong in HAVEN.
 4. **Treat unavailable as unknown.** A failed collector is never shown as a healthy signal.
-5. **Keep actions narrow and reversible.** Future controls use named, allowlisted operations with confirmation and audit history—never a remote shell.
+5. **Keep actions narrow and reversible.** Controls use named, allowlisted operations with confirmation and audit history—never a remote shell.
 6. **Collect proportionately.** Connection details are live-only by default; packet payloads and browsing content are outside HAVEN's scope.
 7. **Respect every household member.** Monitoring another person's device requires visible opt-in and transparent collection.
 
 ## Next security milestone
 
-The next milestone is the authenticated action boundary: browser authentication, origin and anti-forgery protections, finding acknowledgement and accepted-risk notes, an audit ledger, and the first narrowly allowlisted actions such as opening the relevant native settings page or requesting a Defender quick scan. Private HTTPS access, native agent service packaging, deployment resource measurements, and scheduled backups remain gates for the household pilot. GitHub Actions verifies the current Go, frontend, dependency, and public-repository safety checks on each proposed change.
+The next milestone is network explainability: classify listeners and connections by process, scope, ownership, and expected purpose without pretending that every open port is malicious. Private HTTPS access, native agent service packaging, deployment resource measurements, passkey recovery, and scheduled backups remain gates for the household pilot. Remote controls will require an authenticated native agent action protocol; the Ubuntu hub does not execute Windows actions on another machine. GitHub Actions verifies the Go, frontend, dependency, and public-repository safety checks on each proposed change.
 
 Read the [architecture](docs/ARCHITECTURE.md), [threat model](docs/THREAT_MODEL.md), and [public repository policy](docs/PUBLIC_REPOSITORY.md) before expanding the trust boundary.

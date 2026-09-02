@@ -1,6 +1,6 @@
 # Hub deployment
 
-The checked-in Compose definition is a secure baseline for the Ubuntu application server, not a local-development requirement or a complete household deployment. Docker is not used to run HAVEN on development workstations. Agent ingestion is implemented but its container listener is intentionally unpublished; browser authentication and private routing are still required.
+The checked-in Compose definition is a secure baseline for the Ubuntu application server, not a local-development requirement or a complete household deployment. Docker is not used to run HAVEN on development workstations. Agent ingestion and passkey authentication are implemented, but the container listener remains unpublished; private HTTPS/routing, recovery, resource, and backup decisions are still required.
 
 ## Baseline
 
@@ -11,7 +11,7 @@ docker compose up -d
 docker compose ps
 ```
 
-The published port is bound to host loopback. Do not change it to an all-interface binding merely to make the dashboard reachable. Add private access through a TLS reverse proxy or VPN after HAVEN has application authentication.
+The published port is bound to host loopback. Do not change it to an all-interface binding merely to make the dashboard reachable. Add private access through a TLS reverse proxy or VPN and set `HAVEN_PUBLIC_ORIGIN` to the exact externally visible private HTTPS origin. WebAuthn and anti-forgery validation intentionally reject a different origin.
 
 ## Persistent data
 

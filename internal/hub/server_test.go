@@ -13,6 +13,7 @@ import (
 	"testing/fstest"
 	"time"
 
+	"github.com/AdamWentworth/haven/internal/authn"
 	"github.com/AdamWentworth/haven/internal/model"
 	"github.com/AdamWentworth/haven/internal/storage"
 )
@@ -73,12 +74,59 @@ func TestHealthEndpointHasSecurityHeaders(t *testing.T) {
 	}
 }
 
+func TestAuthenticatedBoundaryAndAntiforgery(t *testing.T) {
+	server, store := testServer(t)
+	defer store.Close()
+	service, err := authn.New(store, filepath.Join(t.TempDir(), "auth.key"), "http://localhost:5080")
+	if err != nil {
+		t.Fatal(err)
+	}
+	server.auth = service
+
+	unauthenticated := httptest.NewRecorder()
+	server.Handler().ServeHTTP(unauthenticated, httptest.NewRequest(http.MethodGet, "/api/devices", nil))
+	if unauthenticated.Code != http.StatusUnauthorized {
+		t.Fatalf("expected authentication boundary, got HTTP %d", unauthenticated.Code)
+	}
+
+	session, err := service.NewSession(context.Background(), time.Now().UTC())
+	if err != nil {
+		t.Fatal(err)
+	}
+	authenticatedRequest := httptest.NewRequest(http.MethodGet, "/api/devices", nil)
+	authenticatedRequest.AddCookie(&http.Cookie{Name: authn.SessionCookie, Value: session.Token})
+	authenticated := httptest.NewRecorder()
+	server.Handler().ServeHTTP(authenticated, authenticatedRequest)
+	if authenticated.Code != http.StatusOK {
+		t.Fatalf("expected authenticated read, got HTTP %d: %s", authenticated.Code, authenticated.Body.String())
+	}
+
+	forbiddenRequest := httptest.NewRequest(http.MethodPost, "/api/security/snapshot", nil)
+	forbiddenRequest.AddCookie(&http.Cookie{Name: authn.SessionCookie, Value: session.Token})
+	forbidden := httptest.NewRecorder()
+	server.Handler().ServeHTTP(forbidden, forbiddenRequest)
+	if forbidden.Code != http.StatusForbidden {
+		t.Fatalf("expected origin or antiforgery rejection, got HTTP %d", forbidden.Code)
+	}
+
+	allowedRequest := httptest.NewRequest(http.MethodPost, "/api/security/snapshot", nil)
+	allowedRequest.Header.Set("Origin", "http://localhost:5080")
+	allowedRequest.Header.Set("X-HAVEN-CSRF", session.CSRFToken)
+	allowedRequest.AddCookie(&http.Cookie{Name: authn.SessionCookie, Value: session.Token})
+	allowedRequest.AddCookie(&http.Cookie{Name: authn.CSRFCookie, Value: session.CSRFToken})
+	allowed := httptest.NewRecorder()
+	server.Handler().ServeHTTP(allowed, allowedRequest)
+	if allowed.Code != http.StatusOK {
+		t.Fatalf("expected authenticated mutation, got HTTP %d: %s", allowed.Code, allowed.Body.String())
+	}
+}
+
 func TestDeviceInventoryEndpoints(t *testing.T) {
 	server, store := testServer(t)
 	defer store.Close()
 
 	collect := httptest.NewRecorder()
-	server.Handler().ServeHTTP(collect, httptest.NewRequest(http.MethodGet, "/api/security/snapshot", nil))
+	server.Handler().ServeHTTP(collect, httptest.NewRequest(http.MethodPost, "/api/security/snapshot", nil))
 	list := httptest.NewRecorder()
 	server.Handler().ServeHTTP(list, httptest.NewRequest(http.MethodGet, "/api/devices", nil))
 	if list.Code != http.StatusOK || !strings.Contains(list.Body.String(), `"id":"test-device"`) {
@@ -96,7 +144,7 @@ func TestSnapshotEndpointPersistsObservation(t *testing.T) {
 	defer store.Close()
 
 	response := httptest.NewRecorder()
-	server.Handler().ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/api/security/snapshot", nil))
+	server.Handler().ServeHTTP(response, httptest.NewRequest(http.MethodPost, "/api/security/snapshot", nil))
 
 	if response.Code != http.StatusOK {
 		t.Fatalf("unexpected status: %d", response.Code)
@@ -133,7 +181,7 @@ func TestSecurityEventEndpointReturnsFindingTransitions(t *testing.T) {
 	server.collector = staticCollector{snapshot: snapshot}
 
 	collect := httptest.NewRecorder()
-	server.Handler().ServeHTTP(collect, httptest.NewRequest(http.MethodGet, "/api/security/snapshot", nil))
+	server.Handler().ServeHTTP(collect, httptest.NewRequest(http.MethodPost, "/api/security/snapshot", nil))
 	events := httptest.NewRecorder()
 	server.Handler().ServeHTTP(events, httptest.NewRequest(http.MethodGet, "/api/events?deviceId=test-device&limit=10", nil))
 
@@ -211,7 +259,7 @@ func TestDemoModeExcludesLiveDevices(t *testing.T) {
 		t.Fatalf("demo mode exposed live device detail with HTTP %d", liveDetail.Code)
 	}
 	snapshot := httptest.NewRecorder()
-	server.Handler().ServeHTTP(snapshot, httptest.NewRequest(http.MethodGet, "/api/security/snapshot", nil))
+	server.Handler().ServeHTTP(snapshot, httptest.NewRequest(http.MethodPost, "/api/security/snapshot", nil))
 	if snapshot.Code != http.StatusOK || !strings.Contains(snapshot.Body.String(), `"deviceId":"demo-`) {
 		t.Fatalf("demo snapshot was not synthetic: %d %s", snapshot.Code, snapshot.Body.String())
 	}

@@ -14,6 +14,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/AdamWentworth/haven/internal/action"
+	"github.com/AdamWentworth/haven/internal/authn"
 	"github.com/AdamWentworth/haven/internal/collector"
 	"github.com/AdamWentworth/haven/internal/model"
 	"github.com/AdamWentworth/haven/internal/posture"
@@ -27,6 +29,8 @@ type Server struct {
 	fileSystem fs.FS
 	fileServer http.Handler
 	demoMode   bool
+	auth       *authn.Service
+	actions    *action.Service
 
 	collectionMutex sync.Mutex
 	latestMutex     sync.RWMutex
@@ -39,6 +43,14 @@ type ServerOption func(*Server)
 
 func WithDemoMode() ServerOption {
 	return func(server *Server) { server.demoMode = true }
+}
+
+func WithAuthentication(service *authn.Service) ServerOption {
+	return func(server *Server) { server.auth = service }
+}
+
+func WithActions(service *action.Service) ServerOption {
+	return func(server *Server) { server.actions = service }
 }
 
 func NewServer(
@@ -64,11 +76,19 @@ func NewServer(
 func (server *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/health", server.health)
-	mux.HandleFunc("GET /api/security/snapshot", server.securitySnapshot)
-	mux.HandleFunc("GET /api/security/latest", server.latestSecuritySnapshot)
-	mux.HandleFunc("GET /api/devices", server.devices)
-	mux.HandleFunc("GET /api/devices/{deviceID}", server.deviceDetail)
-	mux.HandleFunc("GET /api/events", server.securityEvents)
+	server.registerAuthenticationRoutes(mux)
+	mux.Handle("GET /api/runtime", server.protected(http.HandlerFunc(server.runtimeStatus)))
+	mux.Handle("POST /api/security/snapshot", server.mutating(http.HandlerFunc(server.securitySnapshot)))
+	mux.Handle("GET /api/security/latest", server.protected(http.HandlerFunc(server.latestSecuritySnapshot)))
+	mux.Handle("GET /api/devices", server.protected(http.HandlerFunc(server.devices)))
+	mux.Handle("GET /api/devices/{deviceID}", server.protected(http.HandlerFunc(server.deviceDetail)))
+	mux.Handle("POST /api/devices/{deviceID}/revoke", server.mutating(http.HandlerFunc(server.revokeDevice)))
+	mux.Handle("GET /api/events", server.protected(http.HandlerFunc(server.securityEvents)))
+	mux.Handle("GET /api/finding-reviews", server.protected(http.HandlerFunc(server.findingReviews)))
+	mux.Handle("POST /api/finding-reviews", server.mutating(http.HandlerFunc(server.reviewFinding)))
+	mux.Handle("GET /api/audit", server.protected(http.HandlerFunc(server.auditEvents)))
+	mux.Handle("GET /api/actions", server.protected(http.HandlerFunc(server.securityActions)))
+	mux.Handle("POST /api/actions", server.mutating(http.HandlerFunc(server.requestSecurityAction)))
 	mux.HandleFunc("/", server.webApplication)
 	return server.securityHeaders(mux)
 }
@@ -78,9 +98,20 @@ func (server *Server) health(writer http.ResponseWriter, _ *http.Request) {
 		"status":         "ready",
 		"service":        "HAVEN",
 		"agentIngestion": "mutual-tls",
-		"demoMode":       server.demoMode,
-		"monitor":        server.monitorStatus(),
 		"timestamp":      time.Now().UTC(),
+	})
+}
+
+func (server *Server) runtimeStatus(writer http.ResponseWriter, _ *http.Request) {
+	server.writeJSON(writer, http.StatusOK, map[string]any{
+		"status":           "ready",
+		"service":          "HAVEN",
+		"agentIngestion":   "mutual-tls",
+		"demoMode":         server.demoMode,
+		"authentication":   server.auth != nil,
+		"actionsAvailable": server.actions != nil,
+		"monitor":          server.monitorStatus(),
+		"timestamp":        time.Now().UTC(),
 	})
 }
 

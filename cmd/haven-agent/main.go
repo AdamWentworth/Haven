@@ -1,0 +1,94 @@
+package main
+
+import (
+	"bufio"
+	"context"
+	"encoding/json"
+	"errors"
+	"flag"
+	"fmt"
+	"os"
+	"os/signal"
+	"strings"
+	"syscall"
+
+	"github.com/AdamWentworth/haven/internal/agent"
+	"github.com/AdamWentworth/haven/internal/collector"
+)
+
+func main() {
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	command := "collect"
+	arguments := os.Args[1:]
+	if len(arguments) > 0 {
+		command = arguments[0]
+		arguments = arguments[1:]
+	}
+	if err := run(ctx, command, arguments); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
+}
+
+func run(ctx context.Context, command string, arguments []string) error {
+	directory, err := agent.DefaultDirectory()
+	if err != nil {
+		return err
+	}
+	switch command {
+	case "collect":
+		return writeJSON(collector.NewForCurrentPlatform().Collect(ctx))
+
+	case "enroll":
+		flags := flag.NewFlagSet("enroll", flag.ContinueOnError)
+		hubURL := flags.String("hub", "https://localhost:5443", "HAVEN agent endpoint")
+		caPath := flags.String("ca", "", "trusted hub CA certificate")
+		name := flags.String("name", "", "friendly device name")
+		if err := flags.Parse(arguments); err != nil {
+			return err
+		}
+		if *caPath == "" || *name == "" {
+			return errors.New("usage: haven-agent enroll --hub https://localhost:5443 --ca <ca.crt> --name <device name>")
+		}
+		fmt.Fprint(os.Stderr, "Paste the one-time enrollment token, then press Enter: ")
+		token, err := bufio.NewReader(os.Stdin).ReadString('\n')
+		fmt.Fprintln(os.Stderr)
+		if err != nil && strings.TrimSpace(token) == "" {
+			return fmt.Errorf("read enrollment token: %w", err)
+		}
+		config, err := agent.Enroll(ctx, directory, *hubURL, *name, strings.TrimSpace(token), *caPath)
+		if err != nil {
+			return err
+		}
+		fmt.Printf("Enrolled %s as %s.\n", config.DisplayName, config.DeviceID)
+		return nil
+
+	case "report":
+		client, err := agent.Load(directory)
+		if err != nil {
+			return err
+		}
+		receipt, err := client.Report(ctx, collector.NewForCurrentPlatform().Collect(ctx))
+		if err != nil {
+			return err
+		}
+		fmt.Printf("Observation %s accepted at %s.\n", receipt.ObservationID, receipt.AcceptedAt.Local().Format("2006-01-02 15:04:05 MST"))
+		return nil
+
+	case "status":
+		client, err := agent.Load(directory)
+		if err != nil {
+			return err
+		}
+		return writeJSON(client.Config())
+	default:
+		return errors.New("usage: haven-agent [collect | enroll | report | status]")
+	}
+}
+
+func writeJSON(value any) error {
+	encoder := json.NewEncoder(os.Stdout)
+	encoder.SetIndent("", "  ")
+	return encoder.Encode(value)
+}

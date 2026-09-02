@@ -1,14 +1,20 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { collectSnapshot, getDevice, getLatestSnapshot, getRuntimeStatus, listDevices, listEvents } from "./api";
+import { collectSnapshot, getAuthStatus, getDevice, getLatestSnapshot, getRuntimeStatus, listAuditEvents, listDevices, listEvents, listFindingReviews, listSecurityActions, loginWithPasskey, logout, registerPasskey, requestSecurityAction, saveFindingReview } from "./api";
 import { ActivityIcon, AlertIcon, BellIcon, CheckIcon, ChipIcon, DefenderIcon, DevicesIcon, FirewallIcon, HavenIcon, HelpIcon, LaptopIcon, LockIcon, MonitorIcon, NetworkIcon, RefreshIcon, RemoteAccessIcon, ServerIcon, UpdateIcon, UsersIcon } from "./icons";
 import type {
   BaselineCheck,
+  AuditEvent,
+  AuthStatus,
   DefenderStatus,
   DeviceRecord,
+  FindingReview,
+  FindingReviewState,
   FirewallProfileStatus,
   NetworkConnection,
   RuntimeStatus,
   SecurityEvent,
+  SecurityAction,
+  SecurityActionKind,
   SecuritySnapshot,
   SecurityFinding,
 } from "./types";
@@ -19,6 +25,45 @@ type Accent = "green" | "blue" | "amber" | "cyan";
 interface ChipProps {
   label: string;
   tone: Tone;
+}
+
+function AuthenticationGate({ status, authenticate }: { status: AuthStatus; authenticate: (bootstrapCode?: string) => Promise<void> }) {
+  const [bootstrapCode, setBootstrapCode] = useState("");
+  const [working, setWorking] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const passkeysSupported = typeof window !== "undefined" && !!window.PublicKeyCredential && !!navigator.credentials;
+
+  const proceed = async () => {
+    setWorking(true);
+    setError(null);
+    try {
+      await authenticate(status.configured ? undefined : bootstrapCode.trim());
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Windows Hello could not complete the passkey request.");
+    } finally {
+      setWorking(false);
+    }
+  };
+
+  if (status.useLocalhost) {
+    return <main className="auth-shell"><section className="auth-card"><span className="brand-mark"><HavenIcon /></span><p className="eyebrow">SECURE LOCAL ORIGIN</p><h1>Open HAVEN as localhost</h1><p>Windows Hello passkeys require HAVEN's exact trusted origin. Your data stays on this machine; only the browser address changes.</p><a className="primary-action" href={status.origin}>Continue to {status.origin}</a></section></main>;
+  }
+
+  return (
+    <main className="auth-shell">
+      <section className="auth-card" aria-labelledby="auth-title">
+        <span className="brand-mark"><HavenIcon /></span>
+        <p className="eyebrow">HAVEN ACTION CENTER</p>
+        <h1 id="auth-title">{status.configured ? "Unlock with your passkey" : "Create the owner passkey"}</h1>
+        <p>{status.configured ? "Use Windows Hello to open security observations, review decisions, and allowlisted controls." : "In a terminal, run the command below. Paste its one-time code here, then let Windows Hello create your passkey."}</p>
+        {!status.configured && <><code className="bootstrap-command">go run .\cmd\haven-hub auth bootstrap</code><label className="auth-field"><span>One-time bootstrap code</span><input value={bootstrapCode} onChange={(event) => setBootstrapCode(event.target.value)} autoComplete="one-time-code" spellCheck={false} /></label></>}
+        {error && <p className="inline-error" role="alert">{error}</p>}
+        {!passkeysSupported && <p className="inline-error" role="alert">This browser does not expose the passkey APIs HAVEN needs.</p>}
+        <button className="primary-action" type="button" onClick={() => void proceed()} disabled={working || !passkeysSupported || (!status.configured && bootstrapCode.trim() === "")}>{working ? "Waiting for Windows Hello…" : status.configured ? "Sign in with Windows Hello" : "Create HAVEN passkey"}</button>
+        <p className="auth-footnote">No HAVEN password is stored. Sessions expire after 12 hours, and control requests also require same-origin anti-forgery verification.</p>
+      </section>
+    </main>
+  );
 }
 
 function DeviceInventory({ devices, selectedId, select, demoMode }: { devices: DeviceRecord[]; selectedId: string; select: (id: string) => void; demoMode: boolean }) {
@@ -268,7 +313,7 @@ function baselineIcon(id: string) {
   return <HelpIcon />;
 }
 
-function FindingsPanel({ findings, checks }: { findings: SecurityFinding[]; checks: BaselineCheck[] }) {
+function FindingsPanel({ findings, checks, reviews, review }: { findings: SecurityFinding[]; checks: BaselineCheck[]; reviews: FindingReview[]; review: (finding: SecurityFinding, state: FindingReviewState) => void }) {
   const ordered = [...findings].sort((left, right) => ({ high: 0, medium: 1, low: 2 }[left.severity] - { high: 0, medium: 1, low: 2 }[right.severity]));
   const unknown = checks.filter((check) => check.status === "unknown").length;
   return (
@@ -280,15 +325,37 @@ function FindingsPanel({ findings, checks }: { findings: SecurityFinding[]; chec
         <p className="findings-clear-copy">HAVEN did not derive an action from the signals it could verify. This is a baseline review, not a guarantee that the device is malware-free.</p>
       ) : (
         <div className="findings-list">
-          {ordered.map((finding) => (
-            <article className={`finding-card severity-${finding.severity}`} key={finding.id}>
+          {ordered.map((finding) => {
+            const currentReview = reviews.find((item) => item.findingId === finding.id && (item.state !== "snoozed" || !item.snoozedUntil || new Date(item.snoozedUntil) > new Date()));
+            return <article className={`finding-card severity-${finding.severity}`} key={finding.id}>
               <div className="finding-heading"><span className="finding-icon">{finding.severity === "low" ? <HelpIcon /> : <AlertIcon />}</span><div><p className="finding-category">{finding.category}</p><h3>{finding.title}</h3></div><span className="severity-label">{finding.severity}</span></div>
               <p>{finding.summary}</p>
               <div className="next-step"><strong>Suggested next step</strong><span>{finding.recommendation}</span></div>
-            </article>
-          ))}
+              {currentReview && <div className="review-summary"><StatusChip label={currentReview.state.replaceAll("-", " ")} tone="configured" /><span>{currentReview.note || (currentReview.snoozedUntil ? `Snoozed until ${formatDate(currentReview.snoozedUntil)}` : `Reviewed ${formatDate(currentReview.reviewedAt)}`)}</span></div>}
+              <div className="review-actions">{currentReview && currentReview.state !== "new" && <button type="button" onClick={() => review(finding, "new")}>Mark new</button>}<button type="button" onClick={() => review(finding, "acknowledged")}>Acknowledge…</button><button type="button" onClick={() => review(finding, "snoozed")}>Snooze 24h</button><button type="button" onClick={() => review(finding, "accepted-risk")}>Accept risk…</button></div>
+            </article>;
+          })}
         </div>
       )}
+    </section>
+  );
+}
+
+function ActionCenter({ actions, audit, run, busy, available }: { actions: SecurityAction[]; audit: AuditEvent[]; run: (kind: SecurityActionKind) => void; busy: boolean; available: boolean }) {
+  const latest = actions.slice(0, 5);
+  const scanActive = actions.some((item) => item.kind === "defender-quick-scan" && (item.status === "queued" || item.status === "running"));
+  const updateActive = actions.some((item) => item.kind === "defender-signature-update" && (item.status === "queued" || item.status === "running"));
+  return (
+    <section className="panel action-center" aria-labelledby="action-center-title">
+      <PanelHeading eyebrow="AUTHENTICATED CONTROLS" title="Action center" id="action-center-title" icon={<DefenderIcon />} accent="blue">Fixed Windows Security actions only—no arbitrary commands</PanelHeading>
+      <div className="action-grid">
+        <article className="action-card"><DefenderIcon /><div><h3>Defender quick scan</h3><p>Ask Microsoft Defender to scan common malware locations now.</p></div><button type="button" disabled={busy || !available || scanActive} onClick={() => run("defender-quick-scan")}>{!available ? "Local Windows hub only" : scanActive ? "Scan in progress" : "Run quick scan"}</button></article>
+        <article className="action-card"><UpdateIcon /><div><h3>Update threat intelligence</h3><p>Ask Defender to retrieve the latest available security intelligence.</p></div><button type="button" disabled={busy || !available || updateActive} onClick={() => run("defender-signature-update")}>{!available ? "Local Windows hub only" : updateActive ? "Update in progress" : "Update Defender"}</button></article>
+      </div>
+      <div className="action-history-grid">
+        <div><h3>Recent control requests</h3>{latest.length === 0 ? <p className="muted-copy">No control actions requested yet.</p> : <ol className="compact-history">{latest.map((item) => <li key={item.id}><span><strong>{item.kind === "defender-quick-scan" ? "Defender quick scan" : "Defender intelligence update"}</strong><small>{formatDate(item.requestedAt)}</small></span><StatusChip label={item.status} tone={item.status === "succeeded" ? "healthy" : item.status === "failed" ? "danger" : "attention"} /></li>)}</ol>}</div>
+        <div><h3>Audit trail</h3>{audit.length === 0 ? <p className="muted-copy">No owner decisions recorded yet.</p> : <ol className="compact-history">{audit.slice(0, 6).map((item) => <li key={item.id}><span><strong>{item.action.replaceAll(".", " ")}</strong><small>{item.detail} · {formatDate(item.occurredAt)}</small></span><StatusChip label={item.outcome} tone={item.outcome === "failed" ? "danger" : "configured"} /></li>)}</ol>}</div>
+      </div>
     </section>
   );
 }
@@ -351,7 +418,7 @@ function BaselinePanel({ checks, collectedAt }: { checks: BaselineCheck[]; colle
   );
 }
 
-function Application({ snapshot, devices, events, runtime, selectedDevice, selectDevice, refresh, refreshing, error, demoMode, alertsEnabled, alertsSupported, enableAlerts }: { snapshot: SecuritySnapshot; devices: DeviceRecord[]; events: SecurityEvent[]; runtime: RuntimeStatus | null; selectedDevice: DeviceRecord | null; selectDevice: (id: string) => void; refresh: () => void; refreshing: boolean; error: string | null; demoMode: boolean; alertsEnabled: boolean; alertsSupported: boolean; enableAlerts: () => void }) {
+function Application({ snapshot, devices, events, runtime, selectedDevice, selectDevice, refresh, refreshing, error, demoMode, alertsEnabled, alertsSupported, enableAlerts, reviews, audit, actions, reviewFinding, runAction, actionBusy, signOut }: { snapshot: SecuritySnapshot; devices: DeviceRecord[]; events: SecurityEvent[]; runtime: RuntimeStatus | null; selectedDevice: DeviceRecord | null; selectDevice: (id: string) => void; refresh: () => void; refreshing: boolean; error: string | null; demoMode: boolean; alertsEnabled: boolean; alertsSupported: boolean; enableAlerts: () => void; reviews: FindingReview[]; audit: AuditEvent[]; actions: SecurityAction[]; reviewFinding: (finding: SecurityFinding, state: FindingReviewState) => void; runAction: (kind: SecurityActionKind) => void; actionBusy: boolean; signOut: () => void }) {
   const defenderHealthy = snapshot.defender?.antivirusEnabled === true
     && snapshot.defender.realTimeProtectionEnabled === true
     && snapshot.defender.tamperProtected !== false;
@@ -368,6 +435,7 @@ function Application({ snapshot, devices, events, runtime, selectedDevice, selec
           <span className={`local-pill ${demoMode ? "demo-pill" : ""}`}><span className="local-dot" />{demoMode ? "Synthetic demo" : runtime?.monitor.enabled ? "Monitoring" : "Read-only"}</span>
           {!demoMode && alertsSupported && <button className={`desktop-alert-button ${alertsEnabled ? "enabled" : ""}`} type="button" onClick={enableAlerts} disabled={alertsEnabled} aria-label={alertsEnabled ? "Desktop alerts enabled" : "Enable desktop alerts"}><BellIcon size={15} /><span>{alertsEnabled ? "Alerts on" : "Enable alerts"}</span></button>}
           {selectedDevice?.trustState === "local" && <button className="refresh-button" type="button" onClick={refresh} disabled={refreshing}>{refreshing ? "Collecting…" : <><RefreshIcon size={15} />Refresh now</>}</button>}
+          {!demoMode && <button className="signout-button" type="button" onClick={signOut}>Lock</button>}
         </div>
       </header>
       <main>
@@ -385,30 +453,43 @@ function Application({ snapshot, devices, events, runtime, selectedDevice, selec
           <SummaryCard icon={<NetworkIcon />} accent="cyan" title="Network" label={`${established} connected`} tone="healthy">{established} established and {listening} listening TCP endpoints observed right now. These are not threat counts.</SummaryCard>
           <SummaryCard icon={<ActivityIcon />} accent="green" title="Monitor" label={runtime?.monitor.enabled ? `Every ${formatInterval(runtime.monitor.intervalSeconds)}` : "Manual"} tone={runtime?.monitor.lastCollectionError ? "attention" : runtime?.monitor.enabled ? "healthy" : "unknown"}>{runtime?.monitor.lastCollectionError || (runtime?.monitor.lastSuccessfulAt ? `Last automatic observation succeeded ${formatDate(runtime.monitor.lastSuccessfulAt)}.` : "Automatic monitoring is starting.")}</SummaryCard>
         </section>
+        {!demoMode && <ActionCenter actions={actions} audit={audit} run={runAction} busy={actionBusy} available={runtime?.actionsAvailable === true} />}
         <ActivityPanel events={events} />
-        {(snapshot.baselineChecks || []).length > 0 && <><FindingsPanel findings={snapshot.findings || []} checks={snapshot.baselineChecks || []} /><BaselinePanel checks={snapshot.baselineChecks || []} collectedAt={snapshot.collectedAt} /></>}
+        {(snapshot.baselineChecks || []).length > 0 && <><FindingsPanel findings={snapshot.findings || []} checks={snapshot.baselineChecks || []} reviews={reviews} review={reviewFinding} /><BaselinePanel checks={snapshot.baselineChecks || []} collectedAt={snapshot.collectedAt} /></>}
         {snapshot.notices.length > 0 && <section className="panel notices-panel" aria-labelledby="notices-title"><PanelHeading eyebrow="COLLECTION NOTES" title="Some signals could not be verified" id="notices-title" icon={<AlertIcon />} accent="amber">A collection limitation is not automatically a security problem</PanelHeading><ul className="notices-list">{snapshot.notices.map((notice, index) => <li className="notice" key={`${notice.source}-${index}`}><strong>{notice.source}: </strong>{notice.message}</li>)}</ul></section>}
         <DefenderPanel defender={snapshot.defender} />
         <FirewallPanel profiles={snapshot.firewallProfiles} />
         <ConnectionsPanel connections={snapshot.connections} />
       </main>
-      <footer><span>HAVEN milestone 0.5 · Monitor &amp; Respond</span><span>Observe continuously. Alert deliberately.</span></footer>
+      <footer><span>HAVEN milestone 0.6 · Authenticated Action Center</span><span>Observe continuously. Act deliberately.</span></footer>
     </>
   );
 }
 
 export function App() {
+  const [authentication, setAuthentication] = useState<AuthStatus | null>(null);
   const [snapshot, setSnapshot] = useState<SecuritySnapshot | null>(null);
   const [devices, setDevices] = useState<DeviceRecord[]>([]);
   const [events, setEvents] = useState<SecurityEvent[]>([]);
+  const [reviews, setReviews] = useState<FindingReview[]>([]);
+  const [audit, setAudit] = useState<AuditEvent[]>([]);
+  const [actions, setActions] = useState<SecurityAction[]>([]);
   const [runtime, setRuntime] = useState<RuntimeStatus | null>(null);
   const [selectedId, setSelectedId] = useState("");
   const [demoMode, setDemoMode] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
+  const [actionBusy, setActionBusy] = useState(false);
   const alertsSupported = typeof window !== "undefined" && "Notification" in window;
   const [alertsEnabled, setAlertsEnabled] = useState(() => alertsSupported && window.Notification.permission === "granted" && window.localStorage.getItem("haven.desktopAlerts") === "enabled");
   const lastNotifiedEvent = useRef<number>(typeof window === "undefined" ? -1 : Number(window.localStorage.getItem("haven.lastNotifiedEvent") ?? "-1"));
+
+  const authenticate = useCallback(async (bootstrapCode?: string) => {
+    if (bootstrapCode === undefined) await loginWithPasskey();
+    else await registerPasskey(bootstrapCode);
+    setAuthentication(await getAuthStatus());
+    setSnapshot(null);
+  }, []);
 
   const refresh = useCallback(async (signal?: AbortSignal) => {
     setRefreshing(true);
@@ -445,6 +526,65 @@ export function App() {
     }
   }, []);
 
+  const loadControls = useCallback(async (deviceId: string, signal?: AbortSignal) => {
+    const [findingReviews, recentAudit, recentActions] = await Promise.all([
+      deviceId ? listFindingReviews(deviceId, signal) : Promise.resolve([]),
+      listAuditEvents(signal),
+      listSecurityActions(signal),
+    ]);
+    setReviews(findingReviews);
+    setAudit(recentAudit);
+    setActions(recentActions);
+  }, []);
+
+  const reviewFinding = useCallback(async (finding: SecurityFinding, state: FindingReviewState) => {
+    if (!selectedId) return;
+    let note = "";
+    let snoozedUntil: string | null = null;
+    if (state === "accepted-risk" || state === "acknowledged") {
+      const entered = window.prompt(state === "accepted-risk" ? `Why are you accepting the risk for “${finding.title}”? This note stays in HAVEN's local database and is omitted from the audit summary.` : `Optional note for “${finding.title}”. It stays in HAVEN's local database and is omitted from the audit summary.`);
+      if (entered === null) return;
+      note = entered.trim();
+      if (state === "accepted-risk" && !note) { setError("Accepting risk requires a short reason."); return; }
+    }
+    if (state === "snoozed") snoozedUntil = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
+    try {
+      await saveFindingReview({ deviceId: selectedId, findingId: finding.id, state, note, snoozedUntil });
+      await loadControls(selectedId);
+      setError(null);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "The finding review could not be saved.");
+    }
+  }, [loadControls, selectedId]);
+
+  const runAction = useCallback(async (kind: SecurityActionKind) => {
+    const label = kind === "defender-quick-scan" ? "run a Microsoft Defender quick scan" : "update Microsoft Defender security intelligence";
+    if (!window.confirm(`Ask this Windows machine to ${label}?`)) return;
+    setActionBusy(true);
+    try {
+      await requestSecurityAction(kind);
+      const recent = await listSecurityActions();
+      setActions(recent);
+      setError(null);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "The security action could not be requested.");
+    } finally {
+      setActionBusy(false);
+    }
+  }, []);
+
+  const signOut = useCallback(async () => {
+    try { await logout(); } finally {
+      setAuthentication((current) => current ? { ...current, authenticated: false } : current);
+      setSnapshot(null);
+      setDevices([]);
+      setEvents([]);
+      setReviews([]);
+      setAudit([]);
+      setActions([]);
+    }
+  }, []);
+
   const enableAlerts = useCallback(async () => {
     if (!alertsSupported) {
       setError("This browser does not support desktop notifications.");
@@ -465,11 +605,44 @@ export function App() {
 
   useEffect(() => {
     const controller = new AbortController();
-    void refresh(controller.signal);
+    getAuthStatus(controller.signal).then(setAuthentication).catch((reason) => setError(reason instanceof Error ? reason.message : "HAVEN authentication status is unavailable."));
     return () => controller.abort();
-  }, [refresh]);
+  }, []);
 
   useEffect(() => {
+    if (!authentication?.authenticated) return;
+    const controller = new AbortController();
+    void refresh(controller.signal);
+    return () => controller.abort();
+  }, [authentication?.authenticated, refresh]);
+
+  useEffect(() => {
+    if (!authentication?.authenticated || demoMode || !selectedId) return;
+    const controller = new AbortController();
+    void loadControls(selectedId, controller.signal).catch((reason) => {
+      if (!(reason instanceof DOMException && reason.name === "AbortError")) setError(reason instanceof Error ? reason.message : "The action center could not be loaded.");
+    });
+    return () => controller.abort();
+  }, [authentication?.authenticated, demoMode, loadControls, selectedId]);
+
+  useEffect(() => {
+    if (!authentication?.authenticated || demoMode) return;
+    const controller = new AbortController();
+    const pollControls = async () => {
+      try {
+        const [recentActions, recentAudit] = await Promise.all([listSecurityActions(controller.signal), listAuditEvents(controller.signal)]);
+        setActions(recentActions);
+        setAudit(recentAudit);
+      } catch (reason) {
+        if (!(reason instanceof DOMException && reason.name === "AbortError")) setError(reason instanceof Error ? reason.message : "The action center could not refresh.");
+      }
+    };
+    const interval = window.setInterval(() => void pollControls(), 10_000);
+    return () => { controller.abort(); window.clearInterval(interval); };
+  }, [authentication?.authenticated, demoMode]);
+
+  useEffect(() => {
+    if (!authentication?.authenticated) return;
     const controller = new AbortController();
     const poll = async () => {
       try {
@@ -497,7 +670,7 @@ export function App() {
       controller.abort();
       window.clearInterval(interval);
     };
-  }, [selectedId]);
+  }, [authentication?.authenticated, selectedId]);
 
   useEffect(() => {
     if (!alertsEnabled || !alertsSupported || window.Notification.permission !== "granted" || events.length === 0) return;
@@ -526,11 +699,19 @@ export function App() {
     }
   }, [alertsEnabled, alertsSupported, events]);
 
+  if (!authentication) {
+    return <main className="loading-state"><div className="brand-mark"><HavenIcon /></div><p>{error || "Checking HAVEN's security boundary…"}</p></main>;
+  }
+
+  if (!authentication.authenticated) {
+    return <AuthenticationGate status={authentication} authenticate={authenticate} />;
+  }
+
   if (!snapshot) {
     return <main className="loading-state"><div className="brand-mark"><HavenIcon /></div><p>{error || "Collecting security posture…"}</p>{error && <button className="refresh-button" onClick={() => void refresh()}>Try again</button>}</main>;
   }
 
   const selectedDevice = devices.find((device) => device.id === selectedId) || null;
   const selectedEvents = selectedId ? events.filter((event) => event.deviceId === selectedId) : events;
-  return <Application snapshot={snapshot} devices={devices} events={selectedEvents} runtime={runtime} selectedDevice={selectedDevice} selectDevice={(id) => void selectDevice(id)} refresh={() => void refresh()} refreshing={refreshing} error={error} demoMode={demoMode} alertsEnabled={alertsEnabled} alertsSupported={alertsSupported} enableAlerts={() => void enableAlerts()} />;
+  return <Application snapshot={snapshot} devices={devices} events={selectedEvents} runtime={runtime} selectedDevice={selectedDevice} selectDevice={(id) => void selectDevice(id)} refresh={() => void refresh()} refreshing={refreshing} error={error} demoMode={demoMode} alertsEnabled={alertsEnabled} alertsSupported={alertsSupported} enableAlerts={() => void enableAlerts()} reviews={reviews} audit={audit} actions={actions} reviewFinding={(finding, state) => void reviewFinding(finding, state)} runAction={(kind) => void runAction(kind)} actionBusy={actionBusy} signOut={() => void signOut()} />;
 }

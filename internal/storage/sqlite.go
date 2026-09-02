@@ -152,6 +152,68 @@ var migrations = []migration{
 				ON security_events (occurred_at DESC, id DESC)`,
 		},
 	},
+	{
+		version: 5,
+		statements: []string{
+			`CREATE TABLE IF NOT EXISTS auth_users (
+				id TEXT PRIMARY KEY,
+				webauthn_user_id BLOB NOT NULL UNIQUE,
+				name TEXT NOT NULL,
+				display_name TEXT NOT NULL,
+				created_at TEXT NOT NULL
+			)`,
+			`CREATE TABLE IF NOT EXISTS auth_credentials (
+				credential_id BLOB PRIMARY KEY,
+				user_id TEXT NOT NULL REFERENCES auth_users(id) ON DELETE CASCADE,
+				encrypted_credential BLOB NOT NULL,
+				created_at TEXT NOT NULL,
+				last_used_at TEXT
+			)`,
+			`CREATE TABLE IF NOT EXISTS auth_bootstrap_tokens (
+				token_hash BLOB PRIMARY KEY,
+				expires_at TEXT NOT NULL,
+				created_at TEXT NOT NULL,
+				used_at TEXT
+			)`,
+			`CREATE TABLE IF NOT EXISTS auth_sessions (
+				session_hash BLOB PRIMARY KEY,
+				csrf_hash BLOB NOT NULL,
+				created_at TEXT NOT NULL,
+				expires_at TEXT NOT NULL,
+				last_seen_at TEXT NOT NULL
+			)`,
+			`CREATE INDEX IF NOT EXISTS auth_sessions_expires ON auth_sessions (expires_at)`,
+			`CREATE TABLE IF NOT EXISTS finding_reviews (
+				device_id TEXT NOT NULL REFERENCES devices(id) ON DELETE CASCADE,
+				finding_id TEXT NOT NULL,
+				state TEXT NOT NULL,
+				note TEXT NOT NULL DEFAULT '',
+				snoozed_until TEXT,
+				reviewed_at TEXT NOT NULL,
+				PRIMARY KEY (device_id, finding_id)
+			)`,
+			`CREATE TABLE IF NOT EXISTS audit_events (
+				id INTEGER PRIMARY KEY,
+				actor TEXT NOT NULL,
+				action TEXT NOT NULL,
+				target TEXT NOT NULL,
+				outcome TEXT NOT NULL,
+				detail TEXT NOT NULL DEFAULT '',
+				occurred_at TEXT NOT NULL
+			)`,
+			`CREATE INDEX IF NOT EXISTS audit_events_occurred ON audit_events (occurred_at DESC, id DESC)`,
+			`CREATE TABLE IF NOT EXISTS security_actions (
+				id TEXT PRIMARY KEY,
+				kind TEXT NOT NULL,
+				status TEXT NOT NULL,
+				requested_at TEXT NOT NULL,
+				started_at TEXT,
+				completed_at TEXT,
+				message TEXT NOT NULL DEFAULT ''
+			)`,
+			`CREATE INDEX IF NOT EXISTS security_actions_requested ON security_actions (requested_at DESC)`,
+		},
+	},
 }
 
 func Open(ctx context.Context, path string) (*Store, error) {

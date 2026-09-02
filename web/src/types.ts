@@ -121,6 +121,7 @@ export interface RuntimeStatus {
   service: string;
   agentIngestion: string;
   demoMode: boolean;
+  actionsAvailable: boolean;
   monitor: {
     enabled: boolean;
     intervalSeconds: number;
@@ -129,4 +130,44 @@ export interface RuntimeStatus {
     lastCollectionError?: string;
   };
   timestamp: string;
+}
+
+export interface AuthStatus {
+  configured: boolean;
+  authenticated: boolean;
+  origin: string;
+  useLocalhost: boolean;
+}
+
+export type FindingReviewState = "new" | "acknowledged" | "snoozed" | "accepted-risk";
+
+export interface FindingReview {
+  deviceId: string;
+  findingId: string;
+  state: FindingReviewState;
+  note: string;
+  snoozedUntil: string | null;
+  reviewedAt: string;
+}
+
+export interface AuditEvent {
+  id: number;
+  actor: string;
+  action: string;
+  target: string;
+  outcome: string;
+  detail: string;
+  occurredAt: string;
+}
+
+export type SecurityActionKind = "defender-quick-scan" | "defender-signature-update";
+
+export interface SecurityAction {
+  id: string;
+  kind: SecurityActionKind;
+  status: "queued" | "running" | "succeeded" | "failed";
+  requestedAt: string;
+  startedAt: string | null;
+  completedAt: string | null;
+  message: string;
 }

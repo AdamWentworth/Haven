@@ -53,7 +53,7 @@ The trusted inventory contains only the local collector and explicitly enrolled 
 
 Windows baseline collection stores configuration state and aggregate counts only. It excludes local administrator names, update titles, Defender threat names, detection resource paths, and BitLocker recovery material.
 
-Browser authentication, private network publication, automated certificate renewal, native service packaging, and CI/CD deployment are gates for the household pilot rather than assumptions hidden in local development.
+Private HTTPS publication, passkey recovery, automated certificate renewal, native service packaging, and CI/CD deployment are gates for the household pilot rather than assumptions hidden in local development. Browser passkey authentication is implemented for the local hub.
 
 ## Storage and retention
 
