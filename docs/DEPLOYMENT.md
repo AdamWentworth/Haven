@@ -18,6 +18,8 @@ The production profile uses three small services:
 
 The dashboard is published only on the configured LAN address and high HTTPS port. The agent endpoint is a separate TLS 1.3 listener with a certificate containing the configured private DNS name and address. Neither endpoint should be forwarded from the public internet. WireGuard clients can use the same hostname by selecting the private DNS resolver and routing the LAN subnet.
 
+The container must set `HAVEN_LOCAL_COLLECTION_ENABLED=false`. A container cannot truthfully observe its Linux host without weakening isolation, and its generated container hostname is not a household device identity. Only native agents appear in the production trusted inventory. If an earlier pre-release deployment created container-host records, back up the hub and run `haven-hub device prune-local --confirm`; the command removes only `local` collector devices and their observation history, preserving enrolled devices, authentication, audit history, and PKI.
+
 Passkeys are bound to the exact private HTTPS origin. Choose the permanent hostname and port before enrolling production passkeys.
 
 ## First installation

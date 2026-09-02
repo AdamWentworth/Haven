@@ -109,6 +109,44 @@ func TestLocalSnapshotsTreatHostnameCaseAsOneDevice(t *testing.T) {
 	}
 }
 
+func TestDeleteLocalDevicesPreservesEnrolledDevices(t *testing.T) {
+	store, err := Open(context.Background(), filepath.Join(t.TempDir(), "haven.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	ctx := context.Background()
+	now := time.Now().UTC()
+	snapshot := model.SecuritySnapshot{
+		CollectedAt:      now,
+		Device:           model.DeviceSummary{HostName: "container-host", OperatingSystem: "linux"},
+		FirewallProfiles: []model.FirewallProfileStatus{},
+		Connections:      []model.NetworkConnection{},
+		Notices:          []model.CollectorNotice{},
+	}
+	if err := store.SaveSnapshot(ctx, snapshot); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.database.ExecContext(ctx, `INSERT INTO devices (id, display_name, trust_state, enrolled_at) VALUES ('enrolled-test', 'Endpoint', 'enrolled', ?)`, now.Format(time.RFC3339Nano)); err != nil {
+		t.Fatal(err)
+	}
+
+	deleted, err := store.DeleteLocalDevices(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if deleted != 1 {
+		t.Fatalf("expected one local device deletion, got %d", deleted)
+	}
+	devices, err := store.ListDevices(ctx, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(devices) != 1 || devices[0].ID != "enrolled-test" {
+		t.Fatalf("expected enrolled device to remain, got %#v", devices)
+	}
+}
+
 func TestMigrationRemovesOlderCaseOnlyLocalDuplicate(t *testing.T) {
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "haven.db")

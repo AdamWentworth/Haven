@@ -29,6 +29,16 @@ interface ChipProps {
   tone: Tone;
 }
 
+async function latestEnrolledObservation(inventory: DeviceRecord[], preferredId: string, signal?: AbortSignal) {
+  const candidates = inventory.filter((device) => device.trustState !== "revoked" && device.lastCollectedAt);
+  const selected = candidates.find((device) => device.id === preferredId)
+    || candidates.find((device) => device.status === "current")
+    || candidates[0];
+  if (!selected) return null;
+  const detail = await getDevice(selected.id, signal);
+  return detail.snapshot ? { id: selected.id, snapshot: detail.snapshot } : null;
+}
+
 function AuthenticationGate({ status, authenticate }: { status: AuthStatus; authenticate: (bootstrapCode?: string, label?: string) => Promise<void> }) {
   const [bootstrapCode, setBootstrapCode] = useState("");
   const [label, setLabel] = useState("This device");
@@ -376,6 +386,27 @@ function ActionCenter({ actions, audit, capabilities, run, busy }: { actions: Se
   );
 }
 
+function AwaitingAgents({ devices, runtime, passkeys, actions, audit, error, selectDevice, addOwnerPasskey, removeOwnerPasskey, actionBusy, signOut }: { devices: DeviceRecord[]; runtime: RuntimeStatus | null; passkeys: PasskeyInfo[]; actions: SecurityAction[]; audit: AuditEvent[]; error: string | null; selectDevice: (id: string) => void; addOwnerPasskey: () => void; removeOwnerPasskey: (passkey: PasskeyInfo) => void; actionBusy: boolean; signOut: () => void }) {
+  const awaiting = devices.some((device) => device.status === "awaiting-first-report");
+  return <>
+    <header className="topbar">
+      <a className="brand" href="/" aria-label="HAVEN home"><span className="brand-mark"><HavenIcon /></span><span><strong>HAVEN</strong><small>Personal Security Observatory</small></span></a>
+      <div className="topbar-actions"><span className="local-pill"><span className="local-dot" />Hub ready</span><button className="signout-button" type="button" onClick={signOut}>Lock</button></div>
+    </header>
+    <main>
+      <DeviceInventory devices={devices} selectedId="" select={selectDevice} demoMode={false} />
+      {error && <p className="inline-error" role="alert">{error}</p>}
+      <section className="panel awaiting-panel">
+        <PanelHeading eyebrow="NATIVE AGENTS" title={awaiting ? "Waiting for the first observation" : "No endpoints are enrolled yet"} id="awaiting-title" icon={<DevicesIcon />} accent="cyan">The production hub stores and explains observations; native agents collect them from each operating system</PanelHeading>
+        <div className="activity-empty"><strong>{awaiting ? "An enrolled agent has not reported yet." : "The hub is healthy and ready for its first trusted endpoint."}</strong><span>Once ADAM-PC reports, its real Windows Defender, firewall, baseline, and connection signals will appear here. Container identities are never treated as household devices.</span></div>
+      </section>
+      <PasskeyPanel passkeys={passkeys} add={addOwnerPasskey} remove={removeOwnerPasskey} busy={actionBusy} />
+      <ActionCenter actions={actions} audit={audit} capabilities={runtime?.actionCapabilities || []} run={() => undefined} busy={actionBusy} />
+    </main>
+    <footer><span>HAVEN milestone 0.6 · Agent hub</span><span>Observe continuously. Act deliberately.</span></footer>
+  </>;
+}
+
 function ActivityPanel({ events }: { events: SecurityEvent[] }) {
   const recent = events.slice(0, 12);
   return (
@@ -448,7 +479,7 @@ function Application({ snapshot, devices, events, runtime, selectedDevice, selec
       <header className="topbar">
         <a className="brand" href="/" aria-label="HAVEN home"><span className="brand-mark"><HavenIcon /></span><span><strong>HAVEN</strong><small>Personal Security Observatory</small></span></a>
         <div className="topbar-actions">
-          <span className={`local-pill ${demoMode ? "demo-pill" : ""}`}><span className="local-dot" />{demoMode ? "Synthetic demo" : runtime?.monitor.enabled ? "Monitoring" : "Read-only"}</span>
+          <span className={`local-pill ${demoMode ? "demo-pill" : ""}`}><span className="local-dot" />{demoMode ? "Synthetic demo" : runtime?.localCollection ? "Local monitor" : "Agent hub"}</span>
           {!demoMode && alertsSupported && <button className={`desktop-alert-button ${alertsEnabled ? "enabled" : ""}`} type="button" onClick={enableAlerts} disabled={alertsEnabled} aria-label={alertsEnabled ? "Desktop alerts enabled" : "Enable desktop alerts"}><BellIcon size={15} /><span>{alertsEnabled ? "Alerts on" : "Enable alerts"}</span></button>}
           {selectedDevice?.trustState === "local" && <button className="refresh-button" type="button" onClick={refresh} disabled={refreshing}>{refreshing ? "Collecting…" : <><RefreshIcon size={15} />Refresh now</>}</button>}
           {!demoMode && <button className="signout-button" type="button" onClick={signOut}>Lock</button>}
@@ -457,7 +488,7 @@ function Application({ snapshot, devices, events, runtime, selectedDevice, selec
       <main>
         <DeviceInventory devices={devices} selectedId={selectedDevice?.id || snapshot.device.deviceId || ""} select={selectDevice} demoMode={demoMode} />
         {demoMode && <p className="demo-banner" role="status"><strong>Synthetic demo mode.</strong> Every device and observation on this page is invented. HAVEN is not showing or collecting data from this computer.</p>}
-        {!demoMode && <p className="context-banner"><strong>Continuous, read-only monitoring.</strong> HAVEN observes this computer every {runtime?.monitor.enabled ? formatInterval(runtime.monitor.intervalSeconds) : "configured interval"} and records only meaningful finding transitions. This inventory contains explicitly enrolled devices—not every device on the network—and an event does not by itself prove an attack.</p>}
+        {!demoMode && <p className="context-banner"><strong>Continuous, read-only monitoring.</strong> {runtime?.localCollection ? `HAVEN observes this computer every ${runtime.monitor.enabled ? formatInterval(runtime.monitor.intervalSeconds) : "configured interval"}.` : "A native agent reports this endpoint's security posture to the private HAVEN hub."} HAVEN records only meaningful finding transitions. This inventory contains explicitly enrolled devices—not every device on the network—and an event does not by itself prove an attack.</p>}
         {error && <p className="inline-error" role="alert">{error}</p>}
         <section className="hero" aria-labelledby="device-name">
           <div className="hero-identity"><span className="hero-device-icon">{snapshot.device.operatingSystem.toLowerCase().includes("server") ? <ServerIcon size={28} /> : selectedDevice?.displayName.toLowerCase().includes("laptop") ? <LaptopIcon size={28} /> : <MonitorIcon size={28} />}</span><div><p className="eyebrow">{selectedDevice?.trustState === "local" ? "THIS DEVICE" : "DEVICE OBSERVATION"}</p><h1 id="device-name">{selectedDevice?.displayName || snapshot.device.hostName}</h1><p className="device-detail">{snapshot.device.hostName} · {snapshot.device.operatingSystem} · {snapshot.device.architecture} · {formatDuration(snapshot.device.uptimeSeconds)}</p></div></div>
@@ -467,7 +498,7 @@ function Application({ snapshot, devices, events, runtime, selectedDevice, selec
           <SummaryCard icon={<DefenderIcon />} accent="blue" title="Protection" label={snapshot.defender ? (defenderHealthy ? "Protected" : "Attention") : "Unavailable"} tone={snapshot.defender ? (defenderHealthy ? "healthy" : "attention") : "unknown"}>{snapshot.defender ? (defenderHealthy ? "Antivirus and real-time monitoring are active." : "One or more protection signals are off or unavailable.") : "Defender status was not returned."}</SummaryCard>
           <SummaryCard icon={<FirewallIcon />} accent="amber" title="Firewall" label={firewallsKnown ? (firewallsEnabled ? "Enabled" : "Attention") : "Unavailable"} tone={firewallsKnown ? (firewallsEnabled ? "healthy" : "danger") : "unknown"}>{firewallsKnown ? (firewallsEnabled ? `All ${snapshot.firewallProfiles.length} firewall profiles are enabled.` : "At least one firewall profile is disabled.") : "Firewall profile data was not returned."}</SummaryCard>
           <SummaryCard icon={<NetworkIcon />} accent="cyan" title="Network" label={`${established} connected`} tone="healthy">{established} established and {listening} listening TCP endpoints observed right now. These are not threat counts.</SummaryCard>
-          <SummaryCard icon={<ActivityIcon />} accent="green" title="Monitor" label={runtime?.monitor.enabled ? `Every ${formatInterval(runtime.monitor.intervalSeconds)}` : "Manual"} tone={runtime?.monitor.lastCollectionError ? "attention" : runtime?.monitor.enabled ? "healthy" : "unknown"}>{runtime?.monitor.lastCollectionError || (runtime?.monitor.lastSuccessfulAt ? `Last automatic observation succeeded ${formatDate(runtime.monitor.lastSuccessfulAt)}.` : "Automatic monitoring is starting.")}</SummaryCard>
+          <SummaryCard icon={<ActivityIcon />} accent="green" title="Monitor" label={runtime?.localCollection && runtime.monitor.enabled ? `Every ${formatInterval(runtime.monitor.intervalSeconds)}` : "Agent reported"} tone={runtime?.monitor.lastCollectionError ? "attention" : "healthy"}>{runtime?.localCollection ? (runtime.monitor.lastCollectionError || (runtime.monitor.lastSuccessfulAt ? `Last automatic observation succeeded ${formatDate(runtime.monitor.lastSuccessfulAt)}.` : "Automatic monitoring is starting.")) : `Latest authenticated agent observation arrived ${formatDate(snapshot.collectedAt)}.`}</SummaryCard>
         </section>
         {!demoMode && <><PasskeyPanel passkeys={passkeys} add={addOwnerPasskey} remove={removeOwnerPasskey} busy={actionBusy} /><ActionCenter actions={actions} audit={audit} capabilities={runtime?.actionCapabilities || []} run={runAction} busy={actionBusy} /></>}
         <ActivityPanel events={events} />
@@ -497,6 +528,8 @@ export function App() {
   const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [actionBusy, setActionBusy] = useState(false);
+  const [inventoryLoaded, setInventoryLoaded] = useState(false);
+  const selectedIdRef = useRef("");
   const alertsSupported = typeof window !== "undefined" && "Notification" in window;
   const [alertsEnabled, setAlertsEnabled] = useState(() => alertsSupported && window.Notification.permission === "granted" && window.localStorage.getItem("haven.desktopAlerts") === "enabled");
   const lastNotifiedEvent = useRef<number>(typeof window === "undefined" ? -1 : Number(window.localStorage.getItem("haven.lastNotifiedEvent") ?? "-1"));
@@ -511,14 +544,25 @@ export function App() {
   const refresh = useCallback(async (signal?: AbortSignal) => {
     setRefreshing(true);
     try {
-      const collected = await collectSnapshot(signal);
-      const [inventory, runtimeStatus, activity] = await Promise.all([listDevices(signal), getRuntimeStatus(signal), listEvents(undefined, signal)]);
-      setSnapshot(collected);
+      const [initialInventory, runtimeStatus, activity] = await Promise.all([listDevices(signal), getRuntimeStatus(signal), listEvents(undefined, signal)]);
+      let inventory = initialInventory;
+      let observed: { id: string; snapshot: SecuritySnapshot } | null;
+      if (runtimeStatus.demoMode || runtimeStatus.localCollection) {
+        const collected = await collectSnapshot(signal);
+        inventory = await listDevices(signal);
+        observed = { id: collected.device.deviceId || inventory.find((device) => device.trustState === "local")?.id || "", snapshot: collected };
+      } else {
+        observed = await latestEnrolledObservation(inventory, selectedIdRef.current, signal);
+      }
+      setSnapshot(observed?.snapshot || null);
       setDevices(inventory);
       setEvents(activity);
       setRuntime(runtimeStatus);
       setDemoMode(runtimeStatus.demoMode);
-      setSelectedId(collected.device.deviceId || inventory.find((device) => device.trustState === "local")?.id || "");
+      const nextId = observed?.id || inventory.find((device) => device.status === "awaiting-first-report")?.id || "";
+      selectedIdRef.current = nextId;
+      setSelectedId(nextId);
+      setInventoryLoaded(true);
       setError(null);
     } catch (reason) {
       if (reason instanceof DOMException && reason.name === "AbortError") return;
@@ -534,6 +578,7 @@ export function App() {
       const detail = await getDevice(deviceId);
       if (!detail.snapshot) throw new Error("This device has not submitted its first observation yet.");
       setSnapshot(detail.snapshot);
+      selectedIdRef.current = deviceId;
       setSelectedId(deviceId);
       setError(null);
     } catch (reason) {
@@ -632,6 +677,7 @@ export function App() {
       setAudit([]);
       setActions([]);
       setPasskeys([]);
+      setInventoryLoaded(false);
     }
   }, []);
 
@@ -667,7 +713,7 @@ export function App() {
   }, [authentication?.authenticated, refresh]);
 
   useEffect(() => {
-    if (!authentication?.authenticated || demoMode || !selectedId) return;
+    if (!authentication?.authenticated || demoMode) return;
     const controller = new AbortController();
     void loadControls(selectedId, controller.signal).catch((reason) => {
       if (!(reason instanceof DOMException && reason.name === "AbortError")) setError(reason instanceof Error ? reason.message : "The action center could not be loaded.");
@@ -696,19 +742,23 @@ export function App() {
     const controller = new AbortController();
     const poll = async () => {
       try {
-        const [latest, inventory, runtimeStatus, activity] = await Promise.all([
-          getLatestSnapshot(controller.signal),
-          listDevices(controller.signal),
-          getRuntimeStatus(controller.signal),
-          listEvents(undefined, controller.signal),
-        ]);
+        const [inventory, runtimeStatus, activity] = await Promise.all([listDevices(controller.signal), getRuntimeStatus(controller.signal), listEvents(undefined, controller.signal)]);
+        let observed: { id: string; snapshot: SecuritySnapshot } | null;
+        if (runtimeStatus.demoMode || runtimeStatus.localCollection) {
+          const latest = await getLatestSnapshot(controller.signal);
+          observed = { id: latest.device.deviceId || inventory.find((device) => device.trustState === "local")?.id || "", snapshot: latest };
+        } else {
+          observed = await latestEnrolledObservation(inventory, selectedIdRef.current, controller.signal);
+        }
         setDevices(inventory);
         setEvents(activity);
         setRuntime(runtimeStatus);
-        if (selectedId === "" || selectedId === latest.device.deviceId || inventory.find((device) => device.id === selectedId)?.trustState === "local") {
-          setSnapshot(latest);
-          setSelectedId(latest.device.deviceId || inventory.find((device) => device.trustState === "local")?.id || selectedId);
-        }
+        setDemoMode(runtimeStatus.demoMode);
+        setSnapshot(observed?.snapshot || null);
+        const nextId = observed?.id || inventory.find((device) => device.status === "awaiting-first-report")?.id || "";
+        selectedIdRef.current = nextId;
+        setSelectedId(nextId);
+        setInventoryLoaded(true);
         setError(null);
       } catch (reason) {
         if (reason instanceof DOMException && reason.name === "AbortError") return;
@@ -720,7 +770,7 @@ export function App() {
       controller.abort();
       window.clearInterval(interval);
     };
-  }, [authentication?.authenticated, selectedId]);
+  }, [authentication?.authenticated]);
 
   useEffect(() => {
     if (!alertsEnabled || !alertsSupported || window.Notification.permission !== "granted" || events.length === 0) return;
@@ -757,8 +807,12 @@ export function App() {
     return <AuthenticationGate status={authentication} authenticate={authenticate} />;
   }
 
-  if (!snapshot) {
+  if (!snapshot && !inventoryLoaded) {
     return <main className="loading-state"><div className="brand-mark"><HavenIcon /></div><p>{error || "Collecting security posture…"}</p>{error && <button className="refresh-button" onClick={() => void refresh()}>Try again</button>}</main>;
+  }
+
+  if (!snapshot) {
+    return <AwaitingAgents devices={devices} runtime={runtime} passkeys={passkeys} actions={actions} audit={audit} error={error} selectDevice={(id) => void selectDevice(id)} addOwnerPasskey={() => void addOwnerPasskey()} removeOwnerPasskey={(passkey) => void removeOwnerPasskey(passkey)} actionBusy={actionBusy} signOut={() => void signOut()} />;
   }
 
   const selectedDevice = devices.find((device) => device.id === selectedId) || null;

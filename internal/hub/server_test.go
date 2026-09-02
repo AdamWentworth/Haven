@@ -133,6 +133,24 @@ func TestAuthenticatedBoundaryAndAntiforgery(t *testing.T) {
 	}
 }
 
+func TestHubOnlyModeRejectsLocalCollection(t *testing.T) {
+	server, store := testServer(t)
+	defer store.Close()
+	server.localCollection = false
+
+	response := httptest.NewRecorder()
+	server.Handler().ServeHTTP(response, httptest.NewRequest(http.MethodPost, "/api/security/snapshot", nil))
+	if response.Code != http.StatusConflict || !strings.Contains(response.Body.String(), "enrolled native agents") {
+		t.Fatalf("expected hub-only collection rejection, got HTTP %d: %s", response.Code, response.Body.String())
+	}
+
+	response = httptest.NewRecorder()
+	server.Handler().ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/api/runtime", nil))
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"localCollection":false`) {
+		t.Fatalf("expected runtime to disclose hub-only mode, got HTTP %d: %s", response.Code, response.Body.String())
+	}
+}
+
 func TestAuthenticationStatusAcceptsConfiguredPrivateOrigin(t *testing.T) {
 	server, store := testServer(t)
 	defer store.Close()

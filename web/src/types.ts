@@ -121,6 +121,7 @@ export interface RuntimeStatus {
   service: string;
   agentIngestion: string;
   demoMode: boolean;
+  localCollection: boolean;
   actionCapabilities: ActionCapability[];
   monitor: {
     enabled: boolean;

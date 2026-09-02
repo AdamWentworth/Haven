@@ -34,7 +34,7 @@ The current implementation provides:
 - A private HomeOps deployment boundary for a resource-bounded Ubuntu hub with private HTTPS, local DNS, and consistent backups
 - Visible collector failures instead of silently treating unavailable information as healthy
 
-The dashboard and agent endpoint both bind to loopback during development. No Docker runtime or deployment is needed for local iteration. Production uses separate, explicitly private listeners. Desktop alerts require explicit browser permission and currently operate while the HAVEN page is open; they do not install a tray process or background browser extension.
+The dashboard and agent endpoint both bind to loopback during development. No Docker runtime or deployment is needed for local iteration. A native development hub can collect from its own host; every containerized hub runs in hub-only mode and accepts observations only from explicitly enrolled native agents. Production uses separate, explicitly private listeners. Desktop alerts require explicit browser permission and currently operate while the HAVEN page is open; they do not install a tray process or background browser extension.
 
 Because HAVEN is pre-release and observation schema 2 is still evolving, hubs and agents should run the same repository revision.
 
@@ -126,7 +126,7 @@ pwsh -NoProfile -File .\scripts\Test-PublicRepository.ps1
 
 GitHub-hosted CI builds and publishes an immutable `ghcr.io/adamwentworth/haven-hub:sha-<commit>` image only after all verification passes. A separate private HomeOps repository owns the production runner and fixed deployment controls. It validates the requested `main` revision and image label, recreates only HAVEN's constrained containers, health-checks private HTTPS, and rolls back on failure.
 
-The production profile uses `haven.home.arpa` as a private DNS name, a private certificate authority for the browser endpoint, a LAN/VPN resolver, and a distinct mutually authenticated agent endpoint. Real addresses, deployment authority, trust roots, private keys, databases, and server configuration do not belong in this public repository. See [the deployment guide](docs/DEPLOYMENT.md) for the trust boundary. Endpoint agents run natively, not as privileged containers.
+The production profile uses `haven.home.arpa` as a private DNS name, a private certificate authority for the browser endpoint, a LAN/VPN resolver, and a distinct mutually authenticated agent endpoint. The production container sets `HAVEN_LOCAL_COLLECTION_ENABLED=false`; its ephemeral container hostname is never a trusted device. Real addresses, deployment authority, trust roots, private keys, databases, and server configuration do not belong in this public repository. See [the deployment guide](docs/DEPLOYMENT.md) for the trust boundary. Endpoint agents run natively, not as privileged containers.
 
 ## Repository layout
 

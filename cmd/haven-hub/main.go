@@ -89,7 +89,11 @@ func runCommand(command string, arguments []string) (bool, error) {
 		if configured {
 			purpose = "local passkey recovery"
 		}
-		fmt.Fprintf(os.Stderr, "One-time HAVEN %s code expires in %s. Open http://localhost:5080 to use it.\n", purpose, validFor.String())
+		origin, originErr := configuredPublicOrigin(configuredAddress("HAVEN_LISTEN_ADDRESS", "127.0.0.1:5080"))
+		if originErr != nil {
+			return true, originErr
+		}
+		fmt.Fprintf(os.Stderr, "One-time HAVEN %s code expires in %s. Open %s to use it.\n", purpose, validFor.String(), origin)
 		return true, nil
 
 	case "enrollment":
@@ -123,8 +127,32 @@ func runCommand(command string, arguments []string) (bool, error) {
 		return true, nil
 
 	case "device":
-		if len(arguments) == 0 || arguments[0] != "revoke" {
-			return true, errors.New("usage: haven-hub device revoke --id <device id>")
+		if len(arguments) == 0 {
+			return true, errors.New("usage: haven-hub device [revoke --id <device id> | prune-local --confirm]")
+		}
+		if arguments[0] == "prune-local" {
+			flags := flag.NewFlagSet("device prune-local", flag.ContinueOnError)
+			confirm := flags.Bool("confirm", false, "confirm removal of local collector history")
+			if err := flags.Parse(arguments[1:]); err != nil {
+				return true, err
+			}
+			if !*confirm {
+				return true, errors.New("usage: haven-hub device prune-local --confirm")
+			}
+			store, err := openStore(ctx)
+			if err != nil {
+				return true, err
+			}
+			defer store.Close()
+			deleted, err := store.DeleteLocalDevices(ctx)
+			if err != nil {
+				return true, err
+			}
+			fmt.Printf("Removed %d local collector device record(s).\n", deleted)
+			return true, nil
+		}
+		if arguments[0] != "revoke" {
+			return true, errors.New("usage: haven-hub device [revoke --id <device id> | prune-local --confirm]")
 		}
 		flags := flag.NewFlagSet("device revoke", flag.ContinueOnError)
 		deviceID := flags.String("id", "", "device identity")
@@ -241,10 +269,14 @@ func run(logger *slog.Logger) error {
 	if err != nil {
 		return err
 	}
+	localCollection, err := configuredBooleanWithDefault("HAVEN_LOCAL_COLLECTION_ENABLED", true)
+	if err != nil {
+		return err
+	}
 
 	uiAddress := configuredAddress("HAVEN_LISTEN_ADDRESS", "127.0.0.1:5080")
 	agentAddress := configuredAddress("HAVEN_AGENT_LISTEN_ADDRESS", "127.0.0.1:5443")
-	serverOptions := []hub.ServerOption{}
+	serverOptions := []hub.ServerOption{hub.WithLocalCollection(localCollection)}
 	if demoMode {
 		serverOptions = append(serverOptions, hub.WithDemoMode())
 		logger.Info("synthetic demo mode enabled")
@@ -281,9 +313,11 @@ func run(logger *slog.Logger) error {
 
 	runtimeContext, stopRuntime := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stopRuntime()
-	if !demoMode {
+	if !demoMode && localCollection {
 		go dashboard.RunMonitor(runtimeContext, collectionInterval)
 		logger.Info("continuous local monitoring enabled", "interval", collectionInterval.String())
+	} else if !demoMode {
+		logger.Info("hub-only mode enabled; observations must come from enrolled native agents")
 	}
 
 	serverErrors := make(chan error, 2)
@@ -331,6 +365,13 @@ func configuredBoolean(environmentName string) (bool, error) {
 		return true, nil
 	}
 	return false, fmt.Errorf("%s must be true, false, 1, or 0", environmentName)
+}
+
+func configuredBooleanWithDefault(environmentName string, fallback bool) (bool, error) {
+	if os.Getenv(environmentName) == "" {
+		return fallback, nil
+	}
+	return configuredBoolean(environmentName)
 }
 
 func configuredRetentionDays() (int, error) {

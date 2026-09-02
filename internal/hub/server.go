@@ -23,14 +23,15 @@ import (
 )
 
 type Server struct {
-	collector  collector.Collector
-	store      *storage.Store
-	logger     *slog.Logger
-	fileSystem fs.FS
-	fileServer http.Handler
-	demoMode   bool
-	auth       *authn.Service
-	actions    *action.Service
+	collector       collector.Collector
+	store           *storage.Store
+	logger          *slog.Logger
+	fileSystem      fs.FS
+	fileServer      http.Handler
+	demoMode        bool
+	localCollection bool
+	auth            *authn.Service
+	actions         *action.Service
 
 	collectionMutex sync.Mutex
 	latestMutex     sync.RWMutex
@@ -43,6 +44,10 @@ type ServerOption func(*Server)
 
 func WithDemoMode() ServerOption {
 	return func(server *Server) { server.demoMode = true }
+}
+
+func WithLocalCollection(enabled bool) ServerOption {
+	return func(server *Server) { server.localCollection = enabled }
 }
 
 func WithAuthentication(service *authn.Service) ServerOption {
@@ -61,11 +66,12 @@ func NewServer(
 	options ...ServerOption,
 ) *Server {
 	server := &Server{
-		collector:  securityCollector,
-		store:      store,
-		logger:     logger,
-		fileSystem: webFiles,
-		fileServer: http.FileServerFS(webFiles),
+		collector:       securityCollector,
+		store:           store,
+		logger:          logger,
+		fileSystem:      webFiles,
+		fileServer:      http.FileServerFS(webFiles),
+		localCollection: true,
 	}
 	for _, option := range options {
 		option(server)
@@ -112,6 +118,7 @@ func (server *Server) runtimeStatus(writer http.ResponseWriter, _ *http.Request)
 		"service":            "HAVEN",
 		"agentIngestion":     "mutual-tls",
 		"demoMode":           server.demoMode,
+		"localCollection":    server.localCollection,
 		"authentication":     server.auth != nil,
 		"actionCapabilities": capabilities,
 		"monitor":            server.monitorStatus(),
@@ -208,6 +215,10 @@ func (server *Server) securitySnapshot(writer http.ResponseWriter, request *http
 		server.writeJSON(writer, http.StatusOK, evaluated)
 		return
 	}
+	if !server.localCollection {
+		server.writeJSON(writer, http.StatusConflict, map[string]string{"error": "Local collection is disabled on this hub; observations come from enrolled native agents."})
+		return
+	}
 	snapshot, _ := server.collectSnapshot(request.Context())
 	server.writeJSON(writer, http.StatusOK, snapshot)
 }
@@ -216,6 +227,10 @@ func (server *Server) latestSecuritySnapshot(writer http.ResponseWriter, request
 	writer.Header().Set("Cache-Control", "no-store")
 	if server.demoMode {
 		server.securitySnapshot(writer, request)
+		return
+	}
+	if !server.localCollection {
+		server.writeJSON(writer, http.StatusConflict, map[string]string{"error": "Local collection is disabled on this hub; select an enrolled device observation."})
 		return
 	}
 	server.latestMutex.RLock()
@@ -252,7 +267,7 @@ func (server *Server) collectSnapshot(ctx context.Context) (model.SecuritySnapsh
 // same lock as manual refreshes so an expensive native collector never runs
 // twice at once.
 func (server *Server) RunMonitor(ctx context.Context, interval time.Duration) {
-	if server.demoMode || interval <= 0 {
+	if server.demoMode || !server.localCollection || interval <= 0 {
 		return
 	}
 	server.monitorMutex.Lock()

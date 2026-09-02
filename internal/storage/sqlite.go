@@ -581,6 +581,21 @@ func (store *Store) ListDevices(ctx context.Context, now time.Time) ([]model.Dev
 	return devices, nil
 }
 
+// DeleteLocalDevices removes development-mode collector records and their
+// cascading observations. Enrolled devices, authentication, audit history,
+// and hub identity material are not affected.
+func (store *Store) DeleteLocalDevices(ctx context.Context) (int64, error) {
+	result, err := store.database.ExecContext(ctx, `DELETE FROM devices WHERE trust_state = 'local'`)
+	if err != nil {
+		return 0, fmt.Errorf("delete local collector devices: %w", err)
+	}
+	deleted, err := result.RowsAffected()
+	if err != nil {
+		return 0, fmt.Errorf("count deleted local collector devices: %w", err)
+	}
+	return deleted, nil
+}
+
 func (store *Store) ListSecurityEvents(ctx context.Context, deviceID string, limit int, demoMode bool) ([]model.SecurityEvent, error) {
 	if limit < 1 || limit > 100 {
 		return nil, errors.New("security event limit must be from 1 through 100")

@@ -36,7 +36,7 @@ PostgreSQL becomes appropriate if HAVEN needs multiple hub writers, multiple hub
 
 Milestone 0.5 turns the explainable Windows baseline into a continuous local monitor while remaining local-only by default:
 
-- `haven-hub` serves a loopback dashboard, performs local collection, owns SQLite, and exposes a separate loopback TLS 1.3 agent listener.
+- `haven-hub` serves a loopback dashboard, owns SQLite, and exposes a separate loopback TLS 1.3 agent listener. Native development may enable local collection; a containerized production hub disables it and never treats its ephemeral container hostname as a device.
 - Enrollment uses a short-lived, one-time 256-bit token plus an ECDSA P-256 certificate request. The trusted CA certificate is transferred out of band.
 - Every agent receives a unique 90-day client certificate whose URI identity must match its observation envelope and database record.
 - Reports have a version, random identity, strictly increasing per-device sequence, and bounded timestamp. Replays, revoked devices, oversized bodies, unsupported versions, and excessive request rates are rejected.
@@ -44,7 +44,7 @@ Milestone 0.5 turns the explainable Windows baseline into a continuous local mon
 - Development listeners remain loopback-only. The production profile publishes explicit private dashboard and agent listeners on the configured LAN address, never on an unconstrained wildcard.
 - Observation schema version 2 adds privacy-bounded Windows posture. The hub derives checks and findings from raw signals so severity logic stays reviewable and consistent.
 - Findings use explicit evidence and recommendations rather than a combined score. Unavailable data remains unknown, never healthy.
-- The local hub collects immediately at startup and on a bounded interval. Manual and scheduled collections are serialized so the fixed native collector cannot run concurrently with itself.
+- When native local collection is enabled, the hub collects immediately at startup and on a bounded interval. Manual and scheduled collections are serialized so the fixed native collector cannot run concurrently with itself. Hub-only deployments select the latest authenticated enrolled-agent observation instead.
 - SQLite stores an append-only transition event only when an evaluated finding opens or resolves. Unchanged observations do not create activity noise.
 - The browser can request desktop-notification permission and alerts only on newly opened high- or medium-severity findings while the page is open. Notification state stays in browser-local storage.
 - A configured state distinguishes intentionally enabled services with verified compensating controls from both healthy defaults and actionable findings. The Windows collector can verify TPM readiness without elevation and summarizes RDP firewall scope without retaining rule names or network addresses.

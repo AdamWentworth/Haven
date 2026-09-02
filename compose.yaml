@@ -16,6 +16,7 @@ services:
     environment:
       HAVEN_RETENTION_DAYS: "${HAVEN_RETENTION_DAYS:-90}"
       HAVEN_PUBLIC_ORIGIN: "${HAVEN_PUBLIC_ORIGIN:-http://localhost:5080}"
+      HAVEN_LOCAL_COLLECTION_ENABLED: "false"
     ports:
       - "127.0.0.1:${HAVEN_PORT:-5080}:8080"
     volumes:
