@@ -280,6 +280,85 @@ func TestFindingEventsRecordOnlyOpenedAndResolvedTransitions(t *testing.T) {
 	}
 }
 
+func TestServiceInventoryGroupsListenersAndTracksExpectations(t *testing.T) {
+	ctx := context.Background()
+	store, err := Open(ctx, filepath.Join(t.TempDir(), "haven.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+
+	startedAt := time.Date(2026, time.September, 2, 12, 0, 0, 0, time.UTC)
+	snapshot := model.SecuritySnapshot{
+		CollectedAt: startedAt,
+		Device:      model.DeviceSummary{DeviceID: "service-test", HostName: "service-test", OperatingSystem: "Ubuntu"},
+		Connections: []model.NetworkConnection{
+			{Protocol: "TCP", LocalAddress: "0.0.0.0", LocalPort: 443, State: "Listen"},
+			{Protocol: "TCP", LocalAddress: "::", LocalPort: 443, State: "Listen"},
+			{Protocol: "UDP", LocalAddress: "fc00::77", LocalPort: 51822, State: "Bound"},
+			{Protocol: "TCP", LocalAddress: "192.0.2.77", LocalPort: 22, State: "Established"},
+		},
+		FirewallProfiles: []model.FirewallProfileStatus{},
+		Notices:          []model.CollectorNotice{},
+	}
+	if err := store.SaveSnapshot(ctx, snapshot); err != nil {
+		t.Fatal(err)
+	}
+	listeners, err := store.ListObservedListeners(ctx, snapshot.Device.DeviceID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(listeners) != 2 || listeners[0].Port != 443 || listeners[0].BindScope != BindScopeWildcard || listeners[1].Port != 51822 || listeners[1].BindScope != BindScopePrivate {
+		t.Fatalf("expected dual-stack sockets to form two privacy-bounded listeners, got %#v", listeners)
+	}
+
+	expected, err := store.UpsertExpectedService(ctx, ExpectedService{DeviceID: snapshot.Device.DeviceID, Label: "HTTPS proxy", Protocol: "tcp", Port: 443, BindScope: BindScopeWildcard, UpdatedAt: startedAt})
+	if err != nil {
+		t.Fatal(err)
+	}
+	updated, err := store.UpsertExpectedService(ctx, ExpectedService{DeviceID: snapshot.Device.DeviceID, Label: "Web proxy", Protocol: "TCP", Port: 443, BindScope: BindScopeWildcard, UpdatedAt: startedAt.Add(time.Minute)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.ID != expected.ID || updated.Label != "Web proxy" {
+		t.Fatalf("expected the same endpoint classification to update in place, got %#v", updated)
+	}
+
+	snapshot.CollectedAt = startedAt.Add(15 * time.Minute)
+	snapshot.Connections = []model.NetworkConnection{}
+	if err := store.SaveSnapshot(ctx, snapshot); err != nil {
+		t.Fatal(err)
+	}
+	listeners, err = store.ListObservedListeners(ctx, snapshot.Device.DeviceID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if listeners[0].Present || listeners[1].Present {
+		t.Fatalf("listeners missing from the latest report must not remain present: %#v", listeners)
+	}
+
+	snapshot.CollectedAt = startedAt.Add(30 * time.Minute)
+	snapshot.Connections = []model.NetworkConnection{{Protocol: "TCP", LocalAddress: "::", LocalPort: 443, State: "Listen"}}
+	if err := store.SaveSnapshot(ctx, snapshot); err != nil {
+		t.Fatal(err)
+	}
+	listeners, err = store.ListObservedListeners(ctx, snapshot.Device.DeviceID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !listeners[0].Present || !listeners[0].FirstSeen.Equal(startedAt) || !listeners[0].AppearedAt.Equal(snapshot.CollectedAt) {
+		t.Fatalf("expected a reappearing listener to retain first seen and reset appearance time, got %#v", listeners[0])
+	}
+
+	if err := store.RemoveExpectedService(ctx, snapshot.Device.DeviceID, expected.ID); err != nil {
+		t.Fatal(err)
+	}
+	services, err := store.ListExpectedServices(ctx, snapshot.Device.DeviceID)
+	if err != nil || len(services) != 0 {
+		t.Fatalf("expected the service classification to be removed, got %#v, %v", services, err)
+	}
+}
+
 func TestEnrollmentReplayRevocationAndBackup(t *testing.T) {
 	ctx := context.Background()
 	directory := t.TempDir()

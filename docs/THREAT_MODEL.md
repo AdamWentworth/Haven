@@ -14,7 +14,7 @@ HAVEN must not store passwords, session cookies, authenticator seeds, recovery-c
 
 ## Current boundary
 
-Milestone 0.6 performs continuous collection, explainable baseline evaluation, privacy-bounded finding-transition logging, authenticated device reporting, and an authenticated local action boundary. On Windows, the collector launches one fixed, internally defined PowerShell script with no user-controlled commands or parameters. The two available controls also select fixed internal PowerShell commands for a Defender quick scan or security-intelligence update; browser text is never interpolated into them.
+Milestone 0.7.1 performs continuous collection, explainable baseline evaluation, privacy-bounded finding and listener transition tracking, authenticated device reporting, expected-service classification, and an authenticated local action boundary. On Windows, the collector launches one fixed, internally defined PowerShell script with no user-controlled commands or parameters. The two available controls also select fixed internal PowerShell commands for a Defender quick scan or security-intelligence update; browser text is never interpolated into them.
 
 The owner registers one or more discoverable passkeys through the cross-platform WebAuthn standard. Windows Hello, platform biometric providers, synchronized phone passkeys, and hardware security keys are authenticator choices rather than HAVEN dependencies. The first passkey requires a one-time local CLI code; the same short-lived mechanism provides local recovery. A signed-in owner can add or remove passkeys, but cannot remove the final credential without a replacement.
 
@@ -26,7 +26,7 @@ SQLite and private keys are stored outside the source tree. Historical records e
 
 Baseline history contains only bounded posture and counts. HAVEN does not retain administrator names, Windows update titles, Defender threat names, detected file or resource paths, BitLocker recovery keys, or other recovery material. A finding is a local rule evaluation, not proof of compromise or a substitute for native security guidance.
 
-The activity ledger records only finding-opened and finding-resolved transitions using the already bounded finding text. Browser desktop alerts are opt-in, contain no secrets, and operate only while the page is open. HAVEN does not register a privileged tray process or notification service in this milestone.
+The activity ledger records only finding-opened and finding-resolved transitions using the already bounded finding text. Listener history is a separate bounded baseline containing protocol, port, bind scope, and timestamps; raw addresses, remote endpoints, process history, and payloads are not persisted. Browser desktop alerts are opt-in, contain no secrets, and operate only while the page is open. HAVEN does not register a privileged tray process or notification service in this milestone.
 
 ## Principal threats
 

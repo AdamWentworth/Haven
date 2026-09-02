@@ -407,7 +407,7 @@ func parseSSLine(line, protocol string) (model.NetworkConnection, bool) {
 		LocalPort:     localPort,
 		RemoteAddress: remoteAddress,
 		RemotePort:    remotePort,
-		State:         map[string]string{"listen": "Listen", "estab": "Established", "established": "Established", "unconn": "Open"}[state],
+		State:         map[string]string{"listen": "Listen", "estab": "Established", "established": "Established", "unconn": "Bound"}[state],
 	}
 	processFields := strings.Join(fields[5:], " ")
 	if start := strings.Index(processFields, `(("`); start >= 0 {
@@ -447,21 +447,30 @@ func sanitizeSystemdUnitName(value string) string {
 
 func parseLinuxEndpoint(value string) (string, int, bool) {
 	if strings.HasSuffix(value, ":*") {
-		host := strings.Trim(strings.TrimSuffix(value, ":*"), "[]")
+		host := normalizeLinuxAddress(strings.Trim(strings.TrimSuffix(value, ":*"), "[]"))
 		return host, 0, true
 	}
 	if host, port, err := net.SplitHostPort(value); err == nil {
 		number, parseErr := strconv.Atoi(port)
-		return strings.TrimSuffix(host, "%lo"), number, parseErr == nil
+		return normalizeLinuxAddress(host), number, parseErr == nil
 	}
 	separator := strings.LastIndex(value, ":")
 	if separator < 0 {
 		return "", 0, false
 	}
-	host := strings.Trim(value[:separator], "[]")
-	host = strings.TrimSuffix(host, "%lo")
+	host := normalizeLinuxAddress(strings.Trim(value[:separator], "[]"))
 	port, err := strconv.Atoi(value[separator+1:])
 	return host, port, err == nil
+}
+
+func normalizeLinuxAddress(value string) string {
+	if separator := strings.LastIndex(value, "%"); separator >= 0 {
+		value = value[:separator]
+	}
+	if parsed := net.ParseIP(strings.TrimPrefix(value, "::ffff:")); strings.HasPrefix(value, "::ffff:") && parsed != nil {
+		return parsed.String()
+	}
+	return value
 }
 
 func parseYesNo(value string) (bool, bool) {

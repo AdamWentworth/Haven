@@ -64,7 +64,7 @@ func TestLinuxCollectorBuildsPrivacyBoundedHostSnapshot(t *testing.T) {
 	if snapshot.LinuxBaseline.SSH.PasswordAuthentication != "no" || snapshot.LinuxBaseline.SSH.PermitRootLogin != "prohibit-password" {
 		t.Fatalf("SSH posture was not collected: %#v", snapshot.LinuxBaseline.SSH)
 	}
-	if len(snapshot.Connections) != 3 || snapshot.Connections[0].ProcessName != "caddy" || snapshot.Connections[1].State != "Established" || snapshot.Connections[2].Protocol != "UDP" || snapshot.Connections[2].State != "Open" {
+	if len(snapshot.Connections) != 3 || snapshot.Connections[0].ProcessName != "caddy" || snapshot.Connections[1].State != "Established" || snapshot.Connections[2].Protocol != "UDP" || snapshot.Connections[2].State != "Bound" {
 		t.Fatalf("network endpoints were not mapped: %#v", snapshot.Connections)
 	}
 	if snapshot.LinuxBaseline.Services == nil || len(snapshot.LinuxBaseline.Services.FailedUnits) != 1 || snapshot.LinuxBaseline.Services.FailedUnits[0] != "certbot.service" {
@@ -111,5 +111,13 @@ func TestParseLinuxIPv6Endpoint(t *testing.T) {
 	address, port, ok = parseLinuxEndpoint("[::]:*")
 	if !ok || address != "::" || port != 0 {
 		t.Fatalf("unexpected wildcard endpoint parse: %q %d %t", address, port, ok)
+	}
+	address, port, ok = parseLinuxEndpoint("[::ffff:192.0.2.77]:8443")
+	if !ok || address != "192.0.2.77" || port != 8443 {
+		t.Fatalf("unexpected IPv4-mapped endpoint parse: %q %d %t", address, port, ok)
+	}
+	address, port, ok = parseLinuxEndpoint("[fe80::1%enp2s0]:5353")
+	if !ok || address != "fe80::1" || port != 5353 {
+		t.Fatalf("unexpected zoned endpoint parse: %q %d %t", address, port, ok)
 	}
 }

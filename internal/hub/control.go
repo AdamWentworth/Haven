@@ -4,6 +4,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net"
 	"net/http"
 	"net/url"
@@ -352,6 +353,87 @@ func (server *Server) reviewFinding(writer http.ResponseWriter, request *http.Re
 	}
 	_ = server.store.AppendAudit(request.Context(), storage.AuditEvent{Actor: "owner", Action: "finding.review", Target: body.DeviceID + "/" + body.FindingID, Outcome: "succeeded", Detail: "Review state changed to " + body.State + ". Note content is intentionally omitted from audit history.", OccurredAt: now})
 	server.writeJSON(writer, http.StatusOK, review)
+}
+
+func (server *Server) expectedServices(writer http.ResponseWriter, request *http.Request) {
+	deviceID := request.URL.Query().Get("deviceId")
+	if !validIdentifier(deviceID) {
+		http.Error(writer, "invalid device identity", http.StatusBadRequest)
+		return
+	}
+	services, err := server.store.ListExpectedServices(request.Context(), deviceID)
+	if err != nil {
+		http.Error(writer, "could not list expected services", http.StatusInternalServerError)
+		return
+	}
+	server.writeJSON(writer, http.StatusOK, services)
+}
+
+func (server *Server) saveExpectedService(writer http.ResponseWriter, request *http.Request) {
+	var body struct {
+		DeviceID  string `json:"deviceId"`
+		Label     string `json:"label"`
+		Protocol  string `json:"protocol"`
+		Port      int    `json:"port"`
+		BindScope string `json:"bindScope"`
+	}
+	if !decodeControlJSON(writer, request, &body, 4096) {
+		return
+	}
+	body.Label = strings.TrimSpace(body.Label)
+	body.Protocol = strings.ToUpper(strings.TrimSpace(body.Protocol))
+	body.BindScope = strings.ToLower(strings.TrimSpace(body.BindScope))
+	allowedScope := body.BindScope == storage.BindScopeAny || body.BindScope == storage.BindScopeLocal || body.BindScope == storage.BindScopePrivate || body.BindScope == storage.BindScopeWildcard || body.BindScope == storage.BindScopeSpecific
+	if !validIdentifier(body.DeviceID) || body.Label == "" || len(body.Label) > 80 || strings.ContainsAny(body.Label, "\r\n\t") || (body.Protocol != "TCP" && body.Protocol != "UDP") || body.Port < 1 || body.Port > 65535 || !allowedScope {
+		http.Error(writer, "invalid expected service", http.StatusBadRequest)
+		return
+	}
+	now := time.Now().UTC()
+	service, err := server.store.UpsertExpectedService(request.Context(), storage.ExpectedService{DeviceID: body.DeviceID, Label: body.Label, Protocol: body.Protocol, Port: body.Port, BindScope: body.BindScope, UpdatedAt: now})
+	if err != nil {
+		http.Error(writer, "could not save expected service", http.StatusInternalServerError)
+		return
+	}
+	_ = server.store.AppendAudit(request.Context(), storage.AuditEvent{Actor: "owner", Action: "service.expectation.save", Target: body.DeviceID + "/" + body.Protocol + "/" + fmt.Sprint(body.Port), Outcome: "succeeded", Detail: "An endpoint was classified as an expected service. The friendly label is intentionally omitted from audit history.", OccurredAt: now})
+	server.writeJSON(writer, http.StatusOK, service)
+}
+
+func (server *Server) removeExpectedService(writer http.ResponseWriter, request *http.Request) {
+	serviceID := request.PathValue("serviceID")
+	var body struct {
+		DeviceID string `json:"deviceId"`
+	}
+	if !decodeControlJSON(writer, request, &body, 2048) {
+		return
+	}
+	if !validIdentifier(serviceID) || !validIdentifier(body.DeviceID) {
+		http.Error(writer, "invalid expected service identity", http.StatusBadRequest)
+		return
+	}
+	if err := server.store.RemoveExpectedService(request.Context(), body.DeviceID, serviceID); errors.Is(err, sql.ErrNoRows) {
+		http.NotFound(writer, request)
+		return
+	} else if err != nil {
+		http.Error(writer, "could not remove expected service", http.StatusInternalServerError)
+		return
+	}
+	now := time.Now().UTC()
+	_ = server.store.AppendAudit(request.Context(), storage.AuditEvent{Actor: "owner", Action: "service.expectation.remove", Target: body.DeviceID + "/" + serviceID, Outcome: "succeeded", Detail: "An endpoint classification was removed.", OccurredAt: now})
+	writer.WriteHeader(http.StatusNoContent)
+}
+
+func (server *Server) listenerObservations(writer http.ResponseWriter, request *http.Request) {
+	deviceID := request.URL.Query().Get("deviceId")
+	if !validIdentifier(deviceID) {
+		http.Error(writer, "invalid device identity", http.StatusBadRequest)
+		return
+	}
+	listeners, err := server.store.ListObservedListeners(request.Context(), deviceID)
+	if err != nil {
+		http.Error(writer, "could not list listener observations", http.StatusInternalServerError)
+		return
+	}
+	server.writeJSON(writer, http.StatusOK, listeners)
 }
 
 func (server *Server) auditEvents(writer http.ResponseWriter, request *http.Request) {

@@ -102,6 +102,30 @@ export interface NetworkConnection {
   processName: string;
 }
 
+export type BindScope = "any" | "local" | "private" | "wildcard" | "specific";
+
+export interface ExpectedService {
+  id: string;
+  deviceId: string;
+  label: string;
+  protocol: "TCP" | "UDP";
+  port: number;
+  bindScope: BindScope;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ObservedListener {
+  deviceId: string;
+  protocol: "TCP" | "UDP";
+  port: number;
+  bindScope: Exclude<BindScope, "any">;
+  firstSeenAt: string;
+  appearedAt: string;
+  lastSeenAt: string;
+  present: boolean;
+}
+
 export interface CollectorNotice {
   source: string;
   severity: string;

@@ -256,6 +256,52 @@ func TestSecurityEventEndpointReturnsFindingTransitions(t *testing.T) {
 	}
 }
 
+func TestExpectedServiceAndListenerEndpoints(t *testing.T) {
+	server, store := testServer(t)
+	defer store.Close()
+	snapshot := server.collector.Collect(context.Background())
+	snapshot.Connections = []model.NetworkConnection{
+		{Protocol: "TCP", LocalAddress: "0.0.0.0", LocalPort: 8443, State: "Listen"},
+		{Protocol: "TCP", LocalAddress: "::", LocalPort: 8443, State: "Listen"},
+	}
+	server.collector = staticCollector{snapshot: snapshot}
+
+	collect := httptest.NewRecorder()
+	server.Handler().ServeHTTP(collect, httptest.NewRequest(http.MethodPost, "/api/security/snapshot", nil))
+	if collect.Code != http.StatusOK {
+		t.Fatalf("could not seed service observation: %d %s", collect.Code, collect.Body.String())
+	}
+
+	create := httptest.NewRecorder()
+	createBody := strings.NewReader(`{"deviceId":"test-device","label":"HAVEN UI","protocol":"TCP","port":8443,"bindScope":"wildcard"}`)
+	server.Handler().ServeHTTP(create, httptest.NewRequest(http.MethodPost, "/api/expected-services", createBody))
+	if create.Code != http.StatusOK || !strings.Contains(create.Body.String(), `"label":"HAVEN UI"`) {
+		t.Fatalf("unexpected expected-service create response: %d %s", create.Code, create.Body.String())
+	}
+	var expected storage.ExpectedService
+	if err := json.NewDecoder(create.Body).Decode(&expected); err != nil {
+		t.Fatal(err)
+	}
+
+	list := httptest.NewRecorder()
+	server.Handler().ServeHTTP(list, httptest.NewRequest(http.MethodGet, "/api/expected-services?deviceId=test-device", nil))
+	if list.Code != http.StatusOK || !strings.Contains(list.Body.String(), `"port":8443`) {
+		t.Fatalf("unexpected expected-service list: %d %s", list.Code, list.Body.String())
+	}
+	listeners := httptest.NewRecorder()
+	server.Handler().ServeHTTP(listeners, httptest.NewRequest(http.MethodGet, "/api/listener-observations?deviceId=test-device", nil))
+	if listeners.Code != http.StatusOK || strings.Count(listeners.Body.String(), `"port":8443`) != 1 || !strings.Contains(listeners.Body.String(), `"bindScope":"wildcard"`) {
+		t.Fatalf("expected one grouped listener observation: %d %s", listeners.Code, listeners.Body.String())
+	}
+
+	remove := httptest.NewRecorder()
+	removeBody := strings.NewReader(`{"deviceId":"test-device"}`)
+	server.Handler().ServeHTTP(remove, httptest.NewRequest(http.MethodPost, "/api/expected-services/"+expected.ID+"/remove", removeBody))
+	if remove.Code != http.StatusNoContent {
+		t.Fatalf("unexpected expected-service removal: %d %s", remove.Code, remove.Body.String())
+	}
+}
+
 func TestContinuousMonitorCollectsImmediatelyAndOnInterval(t *testing.T) {
 	server, store := testServer(t)
 	defer store.Close()

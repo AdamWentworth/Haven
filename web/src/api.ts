@@ -1,4 +1,4 @@
-import type { AuditEvent, AuthStatus, DeviceDetail, DeviceRecord, FindingReview, FindingReviewState, PasskeyInfo, RuntimeStatus, SecurityAction, SecurityActionKind, SecurityEvent, SecuritySnapshot } from "./types";
+import type { AuditEvent, AuthStatus, BindScope, DeviceDetail, DeviceRecord, ExpectedService, FindingReview, FindingReviewState, ObservedListener, PasskeyInfo, RuntimeStatus, SecurityAction, SecurityActionKind, SecurityEvent, SecuritySnapshot } from "./types";
 
 async function getJSON<T>(path: string, signal?: AbortSignal): Promise<T> {
   const response = await fetch(path, {
@@ -163,6 +163,14 @@ export const logout = () => postJSON<void>("/api/auth/logout");
 export const listFindingReviews = (deviceId: string, signal?: AbortSignal) => getJSON<FindingReview[]>(`/api/finding-reviews?deviceId=${encodeURIComponent(deviceId)}`, signal);
 
 export const saveFindingReview = (review: { deviceId: string; findingId: string; state: FindingReviewState; note: string; snoozedUntil: string | null }) => postJSON<FindingReview>("/api/finding-reviews", review);
+
+export const listExpectedServices = (deviceId: string, signal?: AbortSignal) => getJSON<ExpectedService[]>(`/api/expected-services?deviceId=${encodeURIComponent(deviceId)}`, signal);
+
+export const saveExpectedService = (service: { deviceId: string; label: string; protocol: "TCP" | "UDP"; port: number; bindScope: BindScope }) => postJSON<ExpectedService>("/api/expected-services", service);
+
+export const removeExpectedService = (service: ExpectedService) => postJSON<void>(`/api/expected-services/${encodeURIComponent(service.id)}/remove`, { deviceId: service.deviceId });
+
+export const listObservedListeners = (deviceId: string, signal?: AbortSignal) => getJSON<ObservedListener[]>(`/api/listener-observations?deviceId=${encodeURIComponent(deviceId)}`, signal);
 
 export const listAuditEvents = (signal?: AbortSignal) => getJSON<AuditEvent[]>("/api/audit", signal);
 

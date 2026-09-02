@@ -1,18 +1,21 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { addPasskey, collectSnapshot, getAuthStatus, getDevice, getLatestSnapshot, getRuntimeStatus, listAuditEvents, listDevices, listEvents, listFindingReviews, listPasskeys, listSecurityActions, loginWithPasskey, logout, registerPasskey, removePasskey, requestSecurityAction, saveFindingReview } from "./api";
+import { addPasskey, collectSnapshot, getAuthStatus, getDevice, getLatestSnapshot, getRuntimeStatus, listAuditEvents, listDevices, listEvents, listExpectedServices, listFindingReviews, listObservedListeners, listPasskeys, listSecurityActions, loginWithPasskey, logout, registerPasskey, removeExpectedService, removePasskey, requestSecurityAction, saveExpectedService, saveFindingReview } from "./api";
 import { ActivityIcon, AlertIcon, BellIcon, CheckIcon, ChipIcon, DefenderIcon, DevicesIcon, FirewallIcon, HavenIcon, HelpIcon, LaptopIcon, LockIcon, MonitorIcon, NetworkIcon, RefreshIcon, RemoteAccessIcon, ServerIcon, UpdateIcon, UsersIcon } from "./icons";
 import type {
   BaselineCheck,
   AuditEvent,
   ActionCapability,
   AuthStatus,
+  BindScope,
   DefenderStatus,
   DeviceRecord,
+  ExpectedService,
   FindingReview,
   FindingReviewState,
   FirewallProfileStatus,
   LinuxBaseline,
   NetworkConnection,
+  ObservedListener,
   PasskeyInfo,
   RuntimeStatus,
   SecurityEvent,
@@ -144,21 +147,65 @@ function booleanValue(value: boolean | null) {
 }
 
 function endpoint(address: string, port: number) {
-  const host = address.includes(":") ? `[${address}]` : address || "—";
+	const normalized = normalizeAddress(address);
+	if (!normalized || port === 0) return "—";
+  const host = normalized.includes(":") ? `[${normalized}]` : normalized;
   return `${host}:${port}`;
+}
+
+function normalizeAddress(value: string) {
+	let address = value.trim().replace(/^\[|\]$/g, "");
+	const zone = address.lastIndexOf("%");
+	if (zone >= 0) address = address.slice(0, zone);
+	if (address.toLowerCase().startsWith("::ffff:") && /^\d+\.\d+\.\d+\.\d+$/.test(address.slice(7))) address = address.slice(7);
+	return address.toLowerCase();
+}
+
+function endpointBindScope(connection: NetworkConnection): Exclude<BindScope, "any"> {
+  const address = normalizeAddress(connection.localAddress);
+  if (address === "127.0.0.1" || address === "::1" || address.startsWith("127.")) return "local";
+  if (address === "0.0.0.0" || address === "::" || address === "*" || address === "") return "wildcard";
+  if (address.startsWith("10.") || address.startsWith("192.168.")) return "private";
+  const octets = address.split(".").map(Number);
+  if (octets.length === 4 && octets[0] === 172 && octets[1] >= 16 && octets[1] <= 31) return "private";
+  if (address.startsWith("169.254.") || address.startsWith("fe80:") || address.startsWith("fc") || address.startsWith("fd")) return "private";
+  return "specific";
+}
+
+function bindScopeLabel(scope: BindScope) {
+	return ({ any: "Any bind", local: "This host only", private: "Private address", wildcard: "All interfaces", specific: "Specific address" } satisfies Record<BindScope, string>)[scope];
 }
 
 function endpointScope(connection: NetworkConnection) {
   if (connection.state.toLowerCase() === "established") return "Active connection";
-  const address = connection.localAddress.toLowerCase();
-  if (address === "127.0.0.1" || address === "::1" || address.startsWith("127.")) return "This host only";
-  if (address === "0.0.0.0" || address === "*") return "All IPv4 interfaces";
-  if (address === "::") return "All IPv6 interfaces";
-  if (address.startsWith("10.") || address.startsWith("192.168.")) return "Private network address";
-  const octets = address.split(".").map(Number);
-  if (octets.length === 4 && octets[0] === 172 && octets[1] >= 16 && octets[1] <= 31) return "Private network address";
-  if (address.startsWith("169.254.") || address.startsWith("fe80:")) return "Link-local address";
-  return "Specific interface address";
+  return bindScopeLabel(endpointBindScope(connection));
+}
+
+interface LogicalListener {
+	key: string;
+	protocol: "TCP" | "UDP";
+	port: number;
+	bindScope: Exclude<BindScope, "any">;
+	addresses: string[];
+	processes: string[];
+	rawCount: number;
+	state: "Listening" | "Bound";
+}
+
+function logicalListeners(connections: NetworkConnection[]) {
+	const grouped = new Map<string, LogicalListener>();
+	connections.filter((connection) => ["listen", "open", "bound"].includes(connection.state.toLowerCase())).forEach((connection) => {
+		const protocol = connection.protocol.toUpperCase() === "UDP" ? "UDP" : "TCP";
+		const bindScope = endpointBindScope(connection);
+		const key = `${protocol}:${connection.localPort}:${bindScope}`;
+		const current = grouped.get(key) || { key, protocol, port: connection.localPort, bindScope, addresses: [], processes: [], rawCount: 0, state: protocol === "UDP" ? "Bound" : "Listening" };
+		const address = normalizeAddress(connection.localAddress);
+		if (address && !current.addresses.includes(address)) current.addresses.push(address);
+		if (connection.processName && !current.processes.includes(connection.processName)) current.processes.push(connection.processName);
+		current.rawCount += 1;
+		grouped.set(key, current);
+	});
+	return [...grouped.values()].sort((left, right) => left.protocol.localeCompare(right.protocol) || left.port - right.port || left.bindScope.localeCompare(right.bindScope));
 }
 
 function policyValue(value?: string) {
@@ -294,7 +341,7 @@ function PanelHeading({
   );
 }
 
-function FirewallPanel({ profiles }: { profiles: FirewallProfileStatus[] }) {
+function FirewallPanel({ profiles, isLinux }: { profiles: FirewallProfileStatus[]; isLinux: boolean }) {
   return (
     <section className="panel" aria-labelledby="firewall-title">
       <PanelHeading eyebrow="NETWORK BOUNDARY" title="Host firewall" id="firewall-title" icon={<FirewallIcon />} accent="amber">
@@ -313,8 +360,8 @@ function FirewallPanel({ profiles }: { profiles: FirewallProfileStatus[] }) {
               />
             </header>
             <dl>
-              <div><dt>Inbound default</dt><dd>{policyValue(profile.defaultInboundAction)}</dd></div>
-              <div><dt>Outbound default</dt><dd>{policyValue(profile.defaultOutboundAction)}</dd></div>
+			  <div><dt>{isLinux && profile.enabled === false ? "Configured inbound default (inactive)" : "Inbound default"}</dt><dd>{policyValue(profile.defaultInboundAction)}</dd></div>
+			  <div><dt>{isLinux && profile.enabled === false ? "Configured outbound default (inactive)" : "Outbound default"}</dt><dd>{policyValue(profile.defaultOutboundAction)}</dd></div>
             </dl>
           </article>
         ))}
@@ -323,8 +370,20 @@ function FirewallPanel({ profiles }: { profiles: FirewallProfileStatus[] }) {
   );
 }
 
-function ConnectionsPanel({ connections }: { connections: NetworkConnection[] }) {
+function ConnectionsPanel({ deviceId, connections, expectedServices, observations, saveExpectation, removeExpectation, busy }: { deviceId: string; connections: NetworkConnection[]; expectedServices: ExpectedService[]; observations: ObservedListener[]; saveExpectation: (service: { deviceId: string; label: string; protocol: "TCP" | "UDP"; port: number; bindScope: BindScope }) => void; removeExpectation: (service: ExpectedService) => void; busy: boolean }) {
   const [filter, setFilter] = useState("");
+	const [view, setView] = useState<"review" | "expected" | "local" | "active">("review");
+	const [manualLabel, setManualLabel] = useState("");
+	const [manualProtocol, setManualProtocol] = useState<"TCP" | "UDP">("TCP");
+	const [manualPort, setManualPort] = useState("");
+	const [manualScope, setManualScope] = useState<BindScope>("any");
+	const listeners = useMemo(() => logicalListeners(connections), [connections]);
+	const active = useMemo(() => connections.filter((connection) => connection.state.toLowerCase() === "established"), [connections]);
+	const expectedFor = useCallback((listener: LogicalListener) => expectedServices.find((service) => service.protocol === listener.protocol && service.port === listener.port && (service.bindScope === "any" || service.bindScope === listener.bindScope)), [expectedServices]);
+	const reviewListeners = listeners.filter((listener) => listener.bindScope !== "local" && !expectedFor(listener));
+	const expectedListeners = listeners.filter((listener) => !!expectedFor(listener));
+	const localListeners = listeners.filter((listener) => listener.bindScope === "local" && !expectedFor(listener));
+	const shownListeners = view === "review" ? reviewListeners : view === "expected" ? expectedListeners : view === "local" ? localListeners : [];
   const filtered = useMemo(() => {
     const query = filter.trim().toLowerCase();
     if (!query) return connections;
@@ -333,42 +392,81 @@ function ConnectionsPanel({ connections }: { connections: NetworkConnection[] })
       || endpointScope(connection).toLowerCase().includes(query),
     );
   }, [connections, filter]);
+	const processAttributionAvailable = connections.some((connection) => connection.processName || connection.processId > 0);
+	const markExpected = (listener: LogicalListener) => {
+		const entered = window.prompt(`Friendly name for ${listener.protocol} port ${listener.port} (for example, SSH or WireGuard).`, `${listener.protocol} ${listener.port}`);
+		if (entered === null || entered.trim() === "") return;
+		saveExpectation({ deviceId, label: entered.trim(), protocol: listener.protocol, port: listener.port, bindScope: listener.bindScope });
+	};
+	const addManual = (event: React.FormEvent) => {
+		event.preventDefault();
+		const port = Number(manualPort);
+		if (!manualLabel.trim() || !Number.isInteger(port) || port < 1 || port > 65535) return;
+		saveExpectation({ deviceId, label: manualLabel.trim(), protocol: manualProtocol, port, bindScope: manualScope });
+		setManualLabel("");
+		setManualPort("");
+	};
+	const observationFor = (listener: LogicalListener) => observations.find((item) => item.present && item.protocol === listener.protocol && item.port === listener.port && item.bindScope === listener.bindScope);
 
   return (
     <section className="panel connections-panel" aria-labelledby="connections-title">
       <div className="section-heading connections-heading">
-        <div className="heading-identity"><span className="section-icon cyan"><NetworkIcon /></span><div><p className="eyebrow">LIVE OBSERVATION · NOT A THREAT LIST</p><h2 id="connections-title">Network endpoints</h2></div></div>
-        <label className="search-field">
-          <span className="sr-only">Filter connections</span>
-          <input
-            type="search"
-            placeholder="Filter process, address, or state"
-            autoComplete="off"
-            value={filter}
-            onChange={(event) => setFilter(event.target.value)}
-          />
-        </label>
+		<div className="heading-identity"><span className="section-icon cyan"><NetworkIcon /></span><div><p className="eyebrow">SERVICE EXPOSURE · NOT A THREAT LIST</p><h2 id="connections-title">Listener review</h2></div></div>
+		<p>{listeners.length} logical service endpoint{listeners.length === 1 ? "" : "s"} from {connections.filter((item) => ["listen", "open", "bound"].includes(item.state.toLowerCase())).length} raw sockets</p>
       </div>
-      <div className="table-wrap">
+	  <p className="service-explainer">HAVEN groups IPv4/IPv6 duplicates and asks you to classify intended services. “Unreviewed” means no expectation has been saved yet—it does not mean malicious or Internet-accessible.</p>
+	  <div className="endpoint-tabs" role="tablist" aria-label="Endpoint categories">
+		<button className={view === "review" ? "selected" : ""} type="button" onClick={() => setView("review")}>Needs review <span>{reviewListeners.length}</span></button>
+		<button className={view === "expected" ? "selected" : ""} type="button" onClick={() => setView("expected")}>Expected <span>{expectedListeners.length}</span></button>
+		<button className={view === "local" ? "selected" : ""} type="button" onClick={() => setView("local")}>Local only <span>{localListeners.length}</span></button>
+		<button className={view === "active" ? "selected" : ""} type="button" onClick={() => setView("active")}>Active connections <span>{active.length}</span></button>
+	  </div>
+	  {view !== "active" && <div className="service-grid">
+		{shownListeners.length === 0 ? <p className="activity-empty"><strong>{view === "review" ? "No unreviewed non-local listeners." : `No ${view === "expected" ? "expected" : "unclassified local-only"} listeners are active.`}</strong><span>{view === "review" ? "New non-local services will appear here for classification." : "Choose another category or inspect the raw technical details below."}</span></p> : shownListeners.map((listener) => {
+		  const expectation = expectedFor(listener);
+		  const observation = observationFor(listener);
+		  const recentlyAppeared = !!observation && Date.now() - new Date(observation.appearedAt).valueOf() < 24 * 60 * 60 * 1000;
+		  return <article className={`service-card ${expectation ? "expected" : listener.bindScope === "local" ? "local" : "review"}`} key={listener.key}>
+			<div className="service-card-heading"><div><span className="protocol">{listener.protocol}</span><strong>Port {listener.port}</strong></div><StatusChip label={expectation ? "expected" : recentlyAppeared ? "new · unreviewed" : listener.bindScope === "local" ? "local only" : "unreviewed"} tone={expectation ? "healthy" : listener.bindScope === "local" ? "configured" : "attention"} /></div>
+			<h3>{expectation?.label || `${listener.protocol} service on port ${listener.port}`}</h3>
+			<dl><div><dt>Bind scope</dt><dd>{bindScopeLabel(listener.bindScope)}</dd></div><div><dt>State</dt><dd>{listener.state}</dd></div><div><dt>Addresses</dt><dd className="endpoint">{listener.addresses.join(", ") || "Not reported"}</dd></div>{listener.processes.length > 0 && <div><dt>Process</dt><dd>{listener.processes.join(", ")}</dd></div>}</dl>
+			<p>{observation ? `First observed ${formatDate(observation.firstSeenAt)} · latest appearance ${formatDate(observation.appearedAt)}` : "Appearance history will begin with the next agent report."}{listener.rawCount > 1 ? ` · ${listener.rawCount} raw sockets grouped` : ""}</p>
+			{expectation ? <button className="secondary-action" type="button" disabled={busy} onClick={() => removeExpectation(expectation)}>Remove expectation</button> : <button className="secondary-action" type="button" disabled={busy} onClick={() => markExpected(listener)}>Mark expected…</button>}
+		  </article>;
+		})}
+	  </div>}
+	  {view === "active" && <div className="table-wrap compact-table"><table><thead><tr><th>Protocol</th><th>Local endpoint</th><th>Remote endpoint</th><th>Process</th><th>State</th></tr></thead><tbody>{active.length === 0 ? <tr><td colSpan={5} className="empty-state">No established TCP connections were returned.</td></tr> : active.map((connection) => <tr key={`${connection.protocol}-${connection.processId}-${connection.localAddress}-${connection.localPort}-${connection.remoteAddress}-${connection.remotePort}`}><td className="protocol">{connection.protocol}</td><td className="endpoint">{endpoint(connection.localAddress, connection.localPort)}</td><td className="endpoint">{endpoint(connection.remoteAddress, connection.remotePort)}</td><td>{connection.processName || "Not attributed"}{connection.processId > 0 ? ` · PID ${connection.processId}` : ""}</td><td className="state">{connection.state}</td></tr>)}</tbody></table></div>}
+	  <details className="expectation-registry">
+		<summary>Manage expected-service registry ({expectedServices.length})</summary>
+		<p>Expectations are local HAVEN metadata. They do not open ports or change firewall rules.</p>
+		<form className="expectation-form" onSubmit={addManual}><label><span>Friendly label</span><input maxLength={80} value={manualLabel} onChange={(event) => setManualLabel(event.target.value)} placeholder="SSH" /></label><label><span>Protocol</span><select value={manualProtocol} onChange={(event) => setManualProtocol(event.target.value as "TCP" | "UDP")}><option>TCP</option><option>UDP</option></select></label><label><span>Port</span><input type="number" min={1} max={65535} value={manualPort} onChange={(event) => setManualPort(event.target.value)} placeholder="22" /></label><label><span>Expected bind</span><select value={manualScope} onChange={(event) => setManualScope(event.target.value as BindScope)}><option value="any">Any bind</option><option value="local">This host only</option><option value="private">Private address</option><option value="wildcard">All interfaces</option><option value="specific">Specific address</option></select></label><button type="submit" disabled={busy || !manualLabel.trim() || !manualPort}>Add expectation</button></form>
+		{expectedServices.length > 0 && <ul className="registry-list">{expectedServices.map((service) => <li key={service.id}><span><strong>{service.label}</strong><small>{service.protocol} {service.port} · {bindScopeLabel(service.bindScope)}</small></span><button type="button" disabled={busy} onClick={() => removeExpectation(service)}>Remove</button></li>)}</ul>}
+	  </details>
+	  <details className="raw-endpoints">
+		<summary>Raw technical details ({connections.length})</summary>
+		<label className="search-field"><span className="sr-only">Filter raw endpoints</span><input type="search" placeholder="Filter protocol, scope, address, or state" autoComplete="off" value={filter} onChange={(event) => setFilter(event.target.value)} /></label>
+		{!processAttributionAvailable && connections.length > 0 && <p className="footnote">Process attribution is unavailable to this least-privilege agent, so HAVEN omits the repetitive empty owner column.</p>}
+		<div className="table-wrap">
         <table>
-          <thead><tr><th>Protocol</th><th>Process</th><th>Local endpoint</th><th>Remote endpoint</th><th>Scope</th><th>State</th></tr></thead>
+		  <thead><tr><th>Protocol</th>{processAttributionAvailable && <th>Process</th>}<th>Local endpoint</th><th>Remote endpoint</th><th>Bind scope</th><th>State</th></tr></thead>
           <tbody>
             {filtered.length === 0 ? (
-              <tr><td colSpan={6} className="empty-state">{connections.length ? "No endpoints match this filter." : "No network endpoints were returned."}</td></tr>
+			  <tr><td colSpan={processAttributionAvailable ? 6 : 5} className="empty-state">{connections.length ? "No endpoints match this filter." : "No network endpoints were returned."}</td></tr>
             ) : filtered.map((connection) => (
               <tr key={`${connection.protocol}-${connection.processId}-${connection.localAddress}-${connection.localPort}-${connection.remoteAddress}-${connection.remotePort}-${connection.state}`}>
                 <td className="protocol">{connection.protocol}</td>
-                <td><div className="process-name">{connection.processName || "Owner unavailable"}</div><div className="process-id">{connection.processId > 0 ? `PID ${connection.processId}` : "Process hidden from this agent"}</div></td>
+				{processAttributionAvailable && <td><div className="process-name">{connection.processName || "Not attributed"}</div>{connection.processId > 0 && <div className="process-id">PID {connection.processId}</div>}</td>}
                 <td className="endpoint">{endpoint(connection.localAddress, connection.localPort)}</td>
-                <td className="endpoint">{endpoint(connection.remoteAddress, connection.remotePort)}</td>
+				<td className="endpoint">{["listen", "open", "bound"].includes(connection.state.toLowerCase()) ? "—" : endpoint(connection.remoteAddress, connection.remotePort)}</td>
                 <td className="scope">{endpointScope(connection)}</td>
                 <td className="state">{connection.state}</td>
               </tr>
             ))}
           </tbody>
         </table>
-      </div>
-      <p className="footnote">Showing {filtered.length} of {connections.length} live TCP and UDP endpoints. “All interfaces” describes the local bind—not proven Internet reachability. Payload contents are never captured or stored.</p>
+		</div>
+		<p className="footnote">Showing {filtered.length} of {connections.length} raw live endpoints. Bind scope describes the local address—not proven LAN or Internet reachability. Payload contents and remote connection history are never captured or stored.</p>
+	  </details>
     </section>
   );
 }
@@ -430,7 +528,7 @@ function ActionCenter({ actions, audit, capabilities, run, busy }: { actions: Se
     <section className="panel action-center" aria-labelledby="action-center-title">
       <PanelHeading eyebrow="CAPABILITY-BASED CONTROLS" title="Action center" id="action-center-title" icon={<ChipIcon />} accent="blue">Each hub or enrolled agent advertises only the fixed actions its platform supports</PanelHeading>
       <div className="action-grid">
-        {capabilities.length === 0 ? <p className="muted-copy">The selected hub has not advertised any control capabilities.</p> : capabilities.map((capability) => {
+		{capabilities.length === 0 ? <p className="muted-copy">No controls are advertised for the selected device. Observation remains read-only.</p> : capabilities.map((capability) => {
           const active = actions.some((item) => item.kind === capability.id && (item.status === "queued" || item.status === "running"));
           return <article className="action-card" key={capability.id}>{capability.provider.includes("Defender") ? <DefenderIcon /> : <ChipIcon />}<div><p className="finding-category">{capability.provider} · {capability.platform}</p><h3>{capability.label}</h3><p>{capability.description}</p></div><button type="button" disabled={busy || active} onClick={() => run(capability.id)}>{active ? "Action in progress" : capability.requiresReauthorization ? "Confirm and run" : "Run"}</button></article>;
         })}
@@ -469,7 +567,7 @@ function ActivityPanel({ events }: { events: SecurityEvent[] }) {
   return (
     <section className="panel activity-panel" aria-labelledby="activity-title">
       <PanelHeading eyebrow="WHAT CHANGED" title="Security activity" id="activity-title" icon={<ActivityIcon />} accent="cyan">
-        New findings and automatic resolutions from continuous observations
+		Historical finding transitions; wording reflects what HAVEN knew when each event was recorded
       </PanelHeading>
       {recent.length === 0 ? (
         <p className="activity-empty"><strong>No posture changes recorded yet.</strong><span>HAVEN will add an event when a finding appears or resolves; routine unchanged observations stay quiet.</span></p>
@@ -499,12 +597,14 @@ function BaselinePanel({ checks, collectedAt, platform }: { checks: BaselineChec
   if (checks.length === 0) return null;
   const passing = checks.filter((check) => check.status === "pass").length;
   const configured = checks.filter((check) => check.status === "configured").length;
+	const attention = checks.filter((check) => check.status === "attention").length;
+	const unknown = checks.filter((check) => check.status === "unknown").length;
   const statusLabel = (status: BaselineCheck["status"]) => status === "pass" ? "healthy" : status === "configured" ? "configured" : status === "attention" ? "review" : "not verified";
   const statusTone = (status: BaselineCheck["status"]): Tone => status === "pass" ? "healthy" : status === "configured" ? "configured" : status === "attention" ? "attention" : "unknown";
   return (
     <section className="panel baseline-panel" aria-labelledby="baseline-title">
       <PanelHeading eyebrow={`${platform.toUpperCase()} SECURITY BASELINE`} title="Posture checks" id="baseline-title" icon={<ChipIcon />} accent="blue">
-        {passing} healthy{configured > 0 ? `, ${configured} intentionally configured` : ""}; unverified is never counted as safe
+		{passing} healthy{configured > 0 ? ` · ${configured} configured` : ""}{attention > 0 ? ` · ${attention} to review` : ""}{unknown > 0 ? ` · ${unknown} not verified` : ""}
       </PanelHeading>
       <div className="baseline-grid">
         {checks.map((check) => (
@@ -522,19 +622,19 @@ function BaselinePanel({ checks, collectedAt, platform }: { checks: BaselineChec
   );
 }
 
-function Application({ snapshot, devices, events, runtime, selectedDevice, selectDevice, refresh, refreshing, error, demoMode, alertsEnabled, alertsSupported, enableAlerts, reviews, audit, actions, passkeys, reviewFinding, runAction, addOwnerPasskey, removeOwnerPasskey, actionBusy, signOut }: { snapshot: SecuritySnapshot; devices: DeviceRecord[]; events: SecurityEvent[]; runtime: RuntimeStatus | null; selectedDevice: DeviceRecord | null; selectDevice: (id: string) => void; refresh: () => void; refreshing: boolean; error: string | null; demoMode: boolean; alertsEnabled: boolean; alertsSupported: boolean; enableAlerts: () => void; reviews: FindingReview[]; audit: AuditEvent[]; actions: SecurityAction[]; passkeys: PasskeyInfo[]; reviewFinding: (finding: SecurityFinding, state: FindingReviewState) => void; runAction: (kind: SecurityActionKind) => void; addOwnerPasskey: () => void; removeOwnerPasskey: (passkey: PasskeyInfo) => void; actionBusy: boolean; signOut: () => void }) {
+function Application({ snapshot, devices, events, runtime, selectedDevice, selectDevice, refresh, refreshing, error, demoMode, alertsEnabled, alertsSupported, enableAlerts, reviews, expectedServices, listenerObservations, audit, actions, passkeys, reviewFinding, saveServiceExpectation, removeServiceExpectation, runAction, addOwnerPasskey, removeOwnerPasskey, actionBusy, signOut }: { snapshot: SecuritySnapshot; devices: DeviceRecord[]; events: SecurityEvent[]; runtime: RuntimeStatus | null; selectedDevice: DeviceRecord | null; selectDevice: (id: string) => void; refresh: () => void; refreshing: boolean; error: string | null; demoMode: boolean; alertsEnabled: boolean; alertsSupported: boolean; enableAlerts: () => void; reviews: FindingReview[]; expectedServices: ExpectedService[]; listenerObservations: ObservedListener[]; audit: AuditEvent[]; actions: SecurityAction[]; passkeys: PasskeyInfo[]; reviewFinding: (finding: SecurityFinding, state: FindingReviewState) => void; saveServiceExpectation: (service: { deviceId: string; label: string; protocol: "TCP" | "UDP"; port: number; bindScope: BindScope }) => void; removeServiceExpectation: (service: ExpectedService) => void; runAction: (kind: SecurityActionKind) => void; addOwnerPasskey: () => void; removeOwnerPasskey: (passkey: PasskeyInfo) => void; actionBusy: boolean; signOut: () => void }) {
   const isLinux = snapshot.linuxBaseline !== null || /linux|ubuntu/i.test(snapshot.device.operatingSystem);
   const defenderHealthy = snapshot.defender?.antivirusEnabled === true
     && snapshot.defender.realTimeProtectionEnabled === true
     && snapshot.defender.tamperProtected !== false;
   const firewallsKnown = snapshot.firewallProfiles.length > 0;
   const firewallsEnabled = firewallsKnown && snapshot.firewallProfiles.every((profile) => profile.enabled === true);
-  const linuxHardeningKnown = snapshot.linuxBaseline?.appArmor?.enabled !== null && snapshot.linuxBaseline?.appArmor?.enabled !== undefined
-    && snapshot.linuxBaseline?.automaticUpdates?.enabled !== null && snapshot.linuxBaseline?.automaticUpdates?.enabled !== undefined;
-  const linuxHardeningHealthy = snapshot.linuxBaseline?.appArmor?.enabled === true && snapshot.linuxBaseline?.automaticUpdates?.enabled === true;
   const established = snapshot.connections.filter((item) => item.state.toLowerCase() === "established").length;
-  const listening = snapshot.connections.filter((item) => ["listen", "open"].includes(item.state.toLowerCase())).length;
-  const broadListeners = snapshot.connections.filter((item) => ["All IPv4 interfaces", "All IPv6 interfaces"].includes(endpointScope(item))).length;
+	const listeners = logicalListeners(snapshot.connections);
+	const broadListeners = listeners.filter((item) => item.bindScope === "wildcard").length;
+	const unreviewedListeners = listeners.filter((listener) => listener.bindScope !== "local" && !expectedServices.some((service) => service.protocol === listener.protocol && service.port === listener.port && (service.bindScope === "any" || service.bindScope === listener.bindScope))).length;
+	const findingCount = (snapshot.findings || []).length;
+	const unknownChecks = (snapshot.baselineChecks || []).filter((check) => check.status === "unknown").length;
 
   return (
     <>
@@ -557,9 +657,9 @@ function Application({ snapshot, devices, events, runtime, selectedDevice, selec
           <div className="collection-time"><span>Last observation</span><strong>{formatDate(snapshot.collectedAt)}</strong></div>
         </section>
         <section className="summary-grid" aria-label="Security summary">
-          <SummaryCard icon={isLinux ? <ChipIcon /> : <DefenderIcon />} accent="blue" title={isLinux ? "Host hardening" : "Protection"} label={isLinux ? (linuxHardeningKnown ? (linuxHardeningHealthy ? "Active" : "Attention") : "Unavailable") : snapshot.defender ? (defenderHealthy ? "Protected" : "Attention") : "Unavailable"} tone={isLinux ? (linuxHardeningKnown ? (linuxHardeningHealthy ? "healthy" : "attention") : "unknown") : snapshot.defender ? (defenderHealthy ? "healthy" : "attention") : "unknown"}>{isLinux ? (linuxHardeningKnown ? (linuxHardeningHealthy ? "AppArmor and automatic update protections are enabled." : "One or more Linux hardening signals need review.") : "Linux hardening status was not fully returned.") : snapshot.defender ? (defenderHealthy ? "Antivirus and real-time monitoring are active." : "One or more protection signals are off or unavailable.") : "Defender status was not returned."}</SummaryCard>
+		  <SummaryCard icon={isLinux ? <ChipIcon /> : <DefenderIcon />} accent="blue" title={isLinux ? "Host posture" : "Protection"} label={isLinux ? (findingCount > 0 ? `${findingCount} to review` : unknownChecks > 0 ? `${unknownChecks} unverified` : "No findings") : snapshot.defender ? (defenderHealthy ? "Protected" : "Attention") : "Unavailable"} tone={isLinux ? (findingCount > 0 ? "attention" : unknownChecks > 0 ? "unknown" : "healthy") : snapshot.defender ? (defenderHealthy ? "healthy" : "attention") : "unknown"}>{isLinux ? (findingCount > 0 ? `AppArmor and automatic updates are platform protections, but ${findingCount} current finding${findingCount === 1 ? " still needs" : "s still need"} review.` : unknownChecks > 0 ? "No action is derived from the verified signals, but some checks remain unknown." : "No actionable finding was derived from the latest verified Linux signals.") : snapshot.defender ? (defenderHealthy ? "Antivirus and real-time monitoring are active." : "One or more protection signals are off or unavailable.") : "Defender status was not returned."}</SummaryCard>
           <SummaryCard icon={<FirewallIcon />} accent="amber" title="Firewall" label={firewallsKnown ? (firewallsEnabled ? "Enabled" : "Attention") : "Unavailable"} tone={firewallsKnown ? (firewallsEnabled ? "healthy" : "danger") : "unknown"}>{firewallsKnown ? (isLinux ? `${snapshot.firewallProfiles[0].name} is ${firewallsEnabled ? "enabled" : "disabled"} as the host firewall provider.` : firewallsEnabled ? `All ${snapshot.firewallProfiles.length} Windows Firewall profiles are enabled.` : "At least one Windows Firewall profile is disabled.") : "Firewall status was not returned."}</SummaryCard>
-          <SummaryCard icon={<NetworkIcon />} accent="cyan" title="Network" label={`${broadListeners} broad bind${broadListeners === 1 ? "" : "s"}`} tone={broadListeners > 0 ? "configured" : "healthy"}>{established} established connection{established === 1 ? "" : "s"}, {listening} listening/open endpoint{listening === 1 ? "" : "s"}, and {broadListeners} bound to all IPv4 or IPv6 interfaces. These are exposure clues, not threat counts.</SummaryCard>
+		  <SummaryCard icon={<NetworkIcon />} accent="cyan" title="Network" label={unreviewedListeners > 0 ? `${unreviewedListeners} unreviewed` : `${listeners.length} classified/local`} tone={unreviewedListeners > 0 ? "attention" : "healthy"}>{listeners.length} logical listener{listeners.length === 1 ? "" : "s"} ({broadListeners} on all interfaces) and {established} active connection{established === 1 ? "" : "s"}. Bind scope is not proof of Internet reachability.</SummaryCard>
           <SummaryCard icon={<ActivityIcon />} accent="green" title="Monitor" label={runtime?.localCollection && runtime.monitor.enabled ? `Every ${formatInterval(runtime.monitor.intervalSeconds)}` : "Agent reported"} tone={runtime?.monitor.lastCollectionError ? "attention" : "healthy"}>{runtime?.localCollection ? (runtime.monitor.lastCollectionError || (runtime.monitor.lastSuccessfulAt ? `Last automatic observation succeeded ${formatDate(runtime.monitor.lastSuccessfulAt)}.` : "Automatic monitoring is starting.")) : `Latest authenticated agent observation arrived ${formatDate(snapshot.collectedAt)}.`}</SummaryCard>
         </section>
         {!demoMode && <><PasskeyPanel passkeys={passkeys} add={addOwnerPasskey} remove={removeOwnerPasskey} busy={actionBusy} /><ActionCenter actions={actions} audit={audit} capabilities={runtime?.actionCapabilities || []} run={runAction} busy={actionBusy} /></>}
@@ -567,10 +667,10 @@ function Application({ snapshot, devices, events, runtime, selectedDevice, selec
         {(snapshot.baselineChecks || []).length > 0 && <><FindingsPanel findings={snapshot.findings || []} checks={snapshot.baselineChecks || []} reviews={reviews} review={reviewFinding} /><BaselinePanel checks={snapshot.baselineChecks || []} collectedAt={snapshot.collectedAt} platform={isLinux ? "Linux" : "Windows"} /></>}
         {snapshot.notices.length > 0 && <section className="panel notices-panel" aria-labelledby="notices-title"><PanelHeading eyebrow="COLLECTION NOTES" title="Some signals could not be verified" id="notices-title" icon={<AlertIcon />} accent="amber">A collection limitation is not automatically a security problem</PanelHeading><ul className="notices-list">{snapshot.notices.map((notice, index) => <li className="notice" key={`${notice.source}-${index}`}><strong>{notice.source}: </strong>{notice.message}</li>)}</ul></section>}
         {isLinux && snapshot.linuxBaseline ? <LinuxPanel baseline={snapshot.linuxBaseline} /> : <DefenderPanel defender={snapshot.defender} />}
-        <FirewallPanel profiles={snapshot.firewallProfiles} />
-        <ConnectionsPanel connections={snapshot.connections} />
+		<FirewallPanel profiles={snapshot.firewallProfiles} isLinux={isLinux} />
+		<ConnectionsPanel deviceId={selectedDevice?.id || snapshot.device.deviceId || ""} connections={snapshot.connections} expectedServices={expectedServices} observations={listenerObservations} saveExpectation={saveServiceExpectation} removeExpectation={removeServiceExpectation} busy={actionBusy} />
       </main>
-      <footer><span>HAVEN milestone 0.7 · Native Linux monitoring</span><span>Observe continuously. Act deliberately.</span></footer>
+	  <footer><span>HAVEN milestone 0.7.1 · Service exposure review</span><span>Observe continuously. Act deliberately.</span></footer>
     </>
   );
 }
@@ -581,6 +681,8 @@ export function App() {
   const [devices, setDevices] = useState<DeviceRecord[]>([]);
   const [events, setEvents] = useState<SecurityEvent[]>([]);
   const [reviews, setReviews] = useState<FindingReview[]>([]);
+	const [expectedServices, setExpectedServices] = useState<ExpectedService[]>([]);
+	const [listenerObservations, setListenerObservations] = useState<ObservedListener[]>([]);
   const [audit, setAudit] = useState<AuditEvent[]>([]);
   const [actions, setActions] = useState<SecurityAction[]>([]);
   const [passkeys, setPasskeys] = useState<PasskeyInfo[]>([]);
@@ -622,6 +724,7 @@ export function App() {
       setRuntime(runtimeStatus);
       setDemoMode(runtimeStatus.demoMode);
       const nextId = observed?.id || inventory.find((device) => device.status === "awaiting-first-report")?.id || "";
+	  if (!runtimeStatus.demoMode && nextId) setListenerObservations(await listObservedListeners(nextId, signal));
       selectedIdRef.current = nextId;
       setSelectedId(nextId);
       setInventoryLoaded(true);
@@ -651,13 +754,17 @@ export function App() {
   }, []);
 
   const loadControls = useCallback(async (deviceId: string, signal?: AbortSignal) => {
-    const [findingReviews, recentAudit, recentActions, ownerPasskeys] = await Promise.all([
+	const [findingReviews, serviceExpectations, observedListeners, recentAudit, recentActions, ownerPasskeys] = await Promise.all([
       deviceId ? listFindingReviews(deviceId, signal) : Promise.resolve([]),
+	  deviceId ? listExpectedServices(deviceId, signal) : Promise.resolve([]),
+	  deviceId ? listObservedListeners(deviceId, signal) : Promise.resolve([]),
       listAuditEvents(signal),
       listSecurityActions(signal),
       listPasskeys(signal),
     ]);
     setReviews(findingReviews);
+	setExpectedServices(serviceExpectations);
+	setListenerObservations(observedListeners);
     setAudit(recentAudit);
     setActions(recentActions);
     setPasskeys(ownerPasskeys);
@@ -682,6 +789,35 @@ export function App() {
       setError(reason instanceof Error ? reason.message : "The finding review could not be saved.");
     }
   }, [loadControls, selectedId]);
+
+	const saveServiceExpectation = useCallback(async (service: { deviceId: string; label: string; protocol: "TCP" | "UDP"; port: number; bindScope: BindScope }) => {
+		setActionBusy(true);
+		try {
+			await saveExpectedService(service);
+			setExpectedServices(await listExpectedServices(service.deviceId));
+			setAudit(await listAuditEvents());
+			setError(null);
+		} catch (reason) {
+			setError(reason instanceof Error ? reason.message : "The service expectation could not be saved.");
+		} finally {
+			setActionBusy(false);
+		}
+	}, []);
+
+	const removeServiceExpectation = useCallback(async (service: ExpectedService) => {
+		if (!window.confirm(`Remove the expected-service classification “${service.label}”? This changes HAVEN's interpretation only; it does not stop the service.`)) return;
+		setActionBusy(true);
+		try {
+			await removeExpectedService(service);
+			setExpectedServices(await listExpectedServices(service.deviceId));
+			setAudit(await listAuditEvents());
+			setError(null);
+		} catch (reason) {
+			setError(reason instanceof Error ? reason.message : "The service expectation could not be removed.");
+		} finally {
+			setActionBusy(false);
+		}
+	}, []);
 
   const runAction = useCallback(async (kind: SecurityActionKind) => {
     const capability = runtime?.actionCapabilities.find((item) => item.id === kind);
@@ -736,6 +872,8 @@ export function App() {
       setDevices([]);
       setEvents([]);
       setReviews([]);
+	  setExpectedServices([]);
+	  setListenerObservations([]);
       setAudit([]);
       setActions([]);
       setPasskeys([]);
@@ -818,6 +956,7 @@ export function App() {
         setDemoMode(runtimeStatus.demoMode);
         setSnapshot(observed?.snapshot || null);
         const nextId = observed?.id || inventory.find((device) => device.status === "awaiting-first-report")?.id || "";
+		if (!runtimeStatus.demoMode && nextId) setListenerObservations(await listObservedListeners(nextId, controller.signal));
         selectedIdRef.current = nextId;
         setSelectedId(nextId);
         setInventoryLoaded(true);
@@ -879,5 +1018,5 @@ export function App() {
 
   const selectedDevice = devices.find((device) => device.id === selectedId) || null;
   const selectedEvents = selectedId ? events.filter((event) => event.deviceId === selectedId) : events;
-  return <Application snapshot={snapshot} devices={devices} events={selectedEvents} runtime={runtime} selectedDevice={selectedDevice} selectDevice={(id) => void selectDevice(id)} refresh={() => void refresh()} refreshing={refreshing} error={error} demoMode={demoMode} alertsEnabled={alertsEnabled} alertsSupported={alertsSupported} enableAlerts={() => void enableAlerts()} reviews={reviews} audit={audit} actions={actions} passkeys={passkeys} reviewFinding={(finding, state) => void reviewFinding(finding, state)} runAction={(kind) => void runAction(kind)} addOwnerPasskey={() => void addOwnerPasskey()} removeOwnerPasskey={(passkey) => void removeOwnerPasskey(passkey)} actionBusy={actionBusy} signOut={() => void signOut()} />;
+	return <Application snapshot={snapshot} devices={devices} events={selectedEvents} runtime={runtime} selectedDevice={selectedDevice} selectDevice={(id) => void selectDevice(id)} refresh={() => void refresh()} refreshing={refreshing} error={error} demoMode={demoMode} alertsEnabled={alertsEnabled} alertsSupported={alertsSupported} enableAlerts={() => void enableAlerts()} reviews={reviews} expectedServices={expectedServices} listenerObservations={listenerObservations} audit={audit} actions={actions} passkeys={passkeys} reviewFinding={(finding, state) => void reviewFinding(finding, state)} saveServiceExpectation={(service) => void saveServiceExpectation(service)} removeServiceExpectation={(service) => void removeServiceExpectation(service)} runAction={(kind) => void runAction(kind)} addOwnerPasskey={() => void addOwnerPasskey()} removeOwnerPasskey={(passkey) => void removeOwnerPasskey(passkey)} actionBusy={actionBusy} signOut={() => void signOut()} />;
 }

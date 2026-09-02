@@ -34,13 +34,13 @@ PostgreSQL becomes appropriate if HAVEN needs multiple hub writers, multiple hub
 
 ## Current milestone boundary
 
-Milestone 0.5 turns the explainable Windows baseline into a continuous local monitor while remaining local-only by default:
+Milestone 0.7.1 extends the authenticated native-agent hub with privacy-bounded service exposure review:
 
 - `haven-hub` serves a loopback dashboard, owns SQLite, and exposes a separate loopback TLS 1.3 agent listener. Native development may enable local collection; a containerized production hub disables it and never treats its ephemeral container hostname as a device.
 - Enrollment uses a short-lived, one-time 256-bit token plus an ECDSA P-256 certificate request. The trusted CA certificate is transferred out of band.
 - Every agent receives a unique 90-day client certificate whose URI identity must match its observation envelope and database record.
 - Reports have a version, random identity, strictly increasing per-device sequence, and bounded timestamp. Replays, revoked devices, oversized bodies, unsupported versions, and excessive request rates are rejected.
-- The hub stores posture but removes connection metadata before persistence. There is no remote-control endpoint.
+- The hub removes raw connection metadata before persistence. It retains only a bounded listener baseline—protocol, port, bind scope, and appearance timestamps—so it can identify newly appearing or reappearing services without retaining remote endpoints, payloads, or process history. There is no remote-control endpoint.
 - Development listeners remain loopback-only. The production profile publishes explicit private dashboard and agent listeners on the configured LAN address, never on an unconstrained wildcard.
 - Observation schema version 2 adds privacy-bounded Windows posture. The hub derives checks and findings from raw signals so severity logic stays reviewable and consistent.
 - Findings use explicit evidence and recommendations rather than a combined score. Unavailable data remains unknown, never healthy.
@@ -64,6 +64,7 @@ Agents will send high-level observations to the hub, never SQL. The SQLite file 
 - Posture observations expire after 90 days by default; deployment configuration can shorten that period.
 - Live TCP connection details are returned to the dashboard but removed before a snapshot is stored.
 - Finding-transition events retain the privacy-bounded category, title, severity, and summary already present in posture history; they never copy connection details or excluded identifiers.
+- Expected-service records are per-device owner metadata containing a friendly label, protocol, port, and bind expectation. Changing one is audited but does not start a service or alter a firewall.
 - Packet payloads, browser content, keystrokes, screenshots, and document contents are never collected.
 - Future high-volume network summaries receive shorter retention than posture changes.
 - Account-security records contain status metadata, never passwords, recovery codes, authenticator seeds, cookies, or refresh tokens unless a separately reviewed integration makes a token unavoidable.
@@ -81,6 +82,7 @@ The public baseline Compose file publishes to host loopback. The private HomeOps
 2. **Trust foundation:** define versioned messages, enrollment, device certificates, mutual TLS, revocation, and replay resistance.
 3. **Household pilot:** deploy the Dockerized hub through private authenticated access and enroll one native Windows agent.
 4. **Native Linux monitoring:** enroll the Ubuntu application host through a boot-persistent, unprivileged service. Collect platform-specific update, firewall, SSH, AppArmor, time, service, storage, and TCP posture without granting the agent Docker control.
-5. **Multi-platform:** add macOS and additional Linux agents with informed owner consent, preserving platform-specific security meaning.
-6. **Network explainability:** keep observed network assets separate from enrolled devices, then combine host listeners, firewall scope, router exposure, and privacy-bounded flow metadata.
-5. **Narrow controls:** add separately privileged allowlisted actions only after the read-only system is trustworthy.
+5. **Host network explainability:** group listeners, track bounded appearance metadata, and let the owner classify expected services without changing host configuration.
+6. **Multi-platform:** add macOS and additional Linux agents with informed owner consent, preserving platform-specific security meaning.
+7. **Network-wide explainability:** keep observed network assets separate from enrolled devices, then combine host listeners, firewall scope, router exposure, and privacy-bounded flow metadata.
+8. **Narrow controls:** add separately privileged allowlisted actions only after the read-only system is trustworthy.

@@ -4,9 +4,9 @@
 
 HAVEN is a personal security observatory for home devices and networks. It presents native operating-system protections in one understandable console without trying to replace Microsoft Defender, host firewalls, or other trusted security controls.
 
-HAVEN is pre-release software. The current milestone adds an authenticated action boundary and a constrained Ubuntu hub deployment; it is not a replacement for native protection.
+HAVEN is pre-release software. The current milestone adds explainable service exposure review to the authenticated, resource-constrained Ubuntu hub deployment; it is not a replacement for native protection.
 
-## Milestone 0.6 — Authenticated Action Center
+## Milestone 0.7.1 — Service Exposure Review
 
 The current implementation provides:
 
@@ -15,6 +15,9 @@ The current implementation provides:
 - SQLite posture history with migrations, consistent online backups, a 90-day default retention window, and no historical storage of connection details
 - A native Go agent with one-time enrollment, a unique ECDSA certificate, and TLS 1.3 mutual authentication
 - Native Ubuntu posture collection for updates, restart state, UFW policy, SSH, AppArmor, time synchronization, bounded failed-unit names, root-filesystem capacity, and live TCP/UDP endpoints
+- A logical listener inventory that groups duplicate IPv4/IPv6 sockets and separates non-local services needing review, expected services, host-only services, and active connections
+- Per-device expected-service labels for protocol, port, and bind scope, with an auditable owner decision and no firewall or service side effects
+- Privacy-bounded listener appearance history containing only protocol, port, bind scope, and timestamps—never payloads or historical remote connections
 - Strictly increasing report sequences, timestamp checks, payload limits, rate limits, device revocation, and versioned messages
 - A device inventory and detail view with explicitly synthetic demo fixtures for portfolio work
 - Explainable Windows baseline checks for servicing, BitLocker, Secure Boot, TPM, remote access, local administrator count, and Defender threat counts
@@ -159,8 +162,8 @@ Haven/
 6. **Collect proportionately.** Connection details are live-only by default; packet payloads and browsing content are outside HAVEN's scope.
 7. **Respect every household member.** Monitoring another person's device requires visible opt-in and transparent collection.
 
-## Next security milestone
+## Current and next security milestone
 
-Milestone 0.7 adds native Linux monitoring and boot-persistent endpoint-agent scheduling. The production Ubuntu agent runs outside the hub container with an explicit device identity; it is denied access to the Docker socket and treats root-only signals as unknown instead of elevating the whole collector. The next milestone is network explainability: classify listeners and connections by process, scope, ownership, and expected purpose without pretending that every open port is malicious. The Ubuntu hub does not execute Windows actions on another machine. GitHub Actions verifies the Go, frontend, dependency, image, and public-repository safety checks on each proposed change.
+Milestone 0.7 adds native Linux monitoring and boot-persistent endpoint-agent scheduling. Milestone 0.7.1 makes its network results explainable: duplicate sockets become logical listeners, bind scope is distinguished from proven reachability, and the owner can classify intended services without giving HAVEN Docker access. The production Ubuntu agent remains outside the hub container with an explicit device identity; it is denied access to the Docker socket and treats root-only signals as unknown instead of elevating the whole collector. The next milestone can add network-wide asset observation while keeping merely observed assets separate from explicitly enrolled devices. The Ubuntu hub does not execute Windows actions on another machine. GitHub Actions verifies the Go, frontend, dependency, image, and public-repository safety checks on each proposed change.
 
 Read the [architecture](docs/ARCHITECTURE.md), [threat model](docs/THREAT_MODEL.md), and [public repository policy](docs/PUBLIC_REPOSITORY.md) before expanding the trust boundary.

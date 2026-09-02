@@ -223,6 +223,37 @@ var migrations = []migration{
 			`ALTER TABLE auth_credentials ADD COLUMN label TEXT NOT NULL DEFAULT 'Passkey'`,
 		},
 	},
+	{
+		version: 7,
+		statements: []string{
+			`CREATE TABLE IF NOT EXISTS expected_services (
+				id TEXT PRIMARY KEY,
+				device_id TEXT NOT NULL REFERENCES devices(id) ON DELETE CASCADE,
+				label TEXT NOT NULL,
+				protocol TEXT NOT NULL,
+				port INTEGER NOT NULL,
+				bind_scope TEXT NOT NULL,
+				created_at TEXT NOT NULL,
+				updated_at TEXT NOT NULL,
+				UNIQUE (device_id, protocol, port, bind_scope)
+			)`,
+			`CREATE INDEX IF NOT EXISTS expected_services_device
+				ON expected_services (device_id, protocol, port)`,
+			`CREATE TABLE IF NOT EXISTS observed_listeners (
+				device_id TEXT NOT NULL REFERENCES devices(id) ON DELETE CASCADE,
+				protocol TEXT NOT NULL,
+				port INTEGER NOT NULL,
+				bind_scope TEXT NOT NULL,
+				first_seen_at TEXT NOT NULL,
+				appeared_at TEXT NOT NULL,
+				last_seen_at TEXT NOT NULL,
+				present INTEGER NOT NULL,
+				PRIMARY KEY (device_id, protocol, port, bind_scope)
+			)`,
+			`CREATE INDEX IF NOT EXISTS observed_listeners_device_present
+				ON observed_listeners (device_id, present, protocol, port)`,
+		},
+	},
 }
 
 func Open(ctx context.Context, path string) (*Store, error) {
@@ -364,6 +395,9 @@ func (store *Store) SaveSnapshot(ctx context.Context, snapshot model.SecuritySna
 		return err
 	}
 	if err := reconcileFindingEvents(ctx, transaction, deviceID, snapshot, collectedAt); err != nil {
+		return err
+	}
+	if err := reconcileListenerObservations(ctx, transaction, deviceID, snapshot.Connections, collectedAt); err != nil {
 		return err
 	}
 	if err := transaction.Commit(); err != nil {
@@ -532,6 +566,9 @@ func (store *Store) AcceptObservation(
 		return err
 	}
 	if err := reconcileFindingEvents(ctx, transaction, deviceID, envelope.Snapshot, envelope.Snapshot.CollectedAt.UTC()); err != nil {
+		return err
+	}
+	if err := reconcileListenerObservations(ctx, transaction, deviceID, envelope.Snapshot.Connections, envelope.Snapshot.CollectedAt.UTC()); err != nil {
 		return err
 	}
 	_, err = transaction.ExecContext(
@@ -880,6 +917,9 @@ func (store *Store) saveSyntheticSnapshot(
 		return err
 	}
 	if err := reconcileFindingEvents(ctx, transaction, snapshot.Device.DeviceID, snapshot, snapshot.CollectedAt.UTC()); err != nil {
+		return err
+	}
+	if err := reconcileListenerObservations(ctx, transaction, snapshot.Device.DeviceID, snapshot.Connections, snapshot.CollectedAt.UTC()); err != nil {
 		return err
 	}
 	return transaction.Commit()
