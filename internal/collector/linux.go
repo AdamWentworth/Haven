@@ -341,6 +341,7 @@ func (collector *LinuxCollector) storage(ctx context.Context, notices *[]model.C
 
 func (collector *LinuxCollector) connections(ctx context.Context, notices *[]model.CollectorNotice) []model.NetworkConnection {
 	connections := []model.NetworkConnection{}
+	userSocketOwners := collector.userSocketOwners(ctx)
 	queries := []struct {
 		protocol  string
 		arguments []string
@@ -361,6 +362,9 @@ func (collector *LinuxCollector) connections(ctx context.Context, notices *[]mod
 						connection.SystemdUnit = parseProcSystemdUnit(string(cgroup))
 					}
 				}
+				if connection.SystemdUnit == "" {
+					connection.SystemdUnit = userSocketOwners[systemdSocketKey(connection.Protocol, connection.LocalAddress, connection.LocalPort)]
+				}
 				connections = append(connections, connection)
 				if len(connections) == 250 {
 					return connections
@@ -369,6 +373,48 @@ func (collector *LinuxCollector) connections(ctx context.Context, notices *[]mod
 		}
 	}
 	return connections
+}
+
+func (collector *LinuxCollector) userSocketOwners(ctx context.Context) map[string]string {
+	output, err := collector.runner.Run(ctx, "systemctl", "--user", "list-sockets", "--no-legend", "--no-pager", "--plain", "--all", "--show-types")
+	if err != nil {
+		return map[string]string{}
+	}
+	return parseUserSocketOwners(output)
+}
+
+func parseUserSocketOwners(output []byte) map[string]string {
+	owners := map[string]string{}
+	for _, line := range strings.Split(string(output), "\n") {
+		fields := strings.Fields(line)
+		if len(fields) < 4 || (fields[1] != "Stream" && fields[1] != "Datagram") {
+			continue
+		}
+		address, port, ok := parseLinuxEndpoint(fields[0])
+		if !ok || port == 0 {
+			continue
+		}
+		unit := sanitizeSystemdUnitName(fields[3])
+		if unit == "" || (!strings.HasSuffix(unit, ".service") && !strings.HasSuffix(unit, ".socket")) {
+			unit = sanitizeSystemdUnitName(fields[2])
+		}
+		if unit == "" || (!strings.HasSuffix(unit, ".service") && !strings.HasSuffix(unit, ".socket")) {
+			continue
+		}
+		protocol := "TCP"
+		if fields[1] == "Datagram" {
+			protocol = "UDP"
+		}
+		owners[systemdSocketKey(protocol, address, port)] = unit
+		if len(owners) == 64 {
+			break
+		}
+	}
+	return owners
+}
+
+func systemdSocketKey(protocol, address string, port int) string {
+	return fmt.Sprintf("%s|%s|%d", strings.ToUpper(protocol), normalizeLinuxAddress(address), port)
 }
 
 func (collector *LinuxCollector) systemdState(ctx context.Context, unit string, accepted ...string) (string, bool) {

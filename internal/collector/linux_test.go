@@ -28,17 +28,18 @@ func TestLinuxCollectorBuildsPrivacyBoundedHostSnapshot(t *testing.T) {
 		return strings.Join(append([]string{name}, arguments...), "\x00")
 	}
 	runner := fakeCommandRunner{outputs: map[string][]byte{
-		command("/usr/lib/update-notifier/apt-check"):                                    []byte("13;0"),
-		command("systemctl", "is-active", "ssh.service"):                                 []byte("active\n"),
-		command("/usr/sbin/sshd", "-T", "-C", "user=root,host=localhost,addr=127.0.0.1"): []byte("passwordauthentication no\nkbdinteractiveauthentication no\npermitrootlogin prohibit-password\npubkeyauthentication yes\n"),
-		command("systemctl", "--failed", "--no-legend", "--plain"):                       []byte("certbot.service loaded failed failed Certbot\n"),
-		command("systemctl", "is-enabled", "unattended-upgrades.service"):                []byte("enabled\n"),
-		command("systemctl", "is-active", "unattended-upgrades.service"):                 []byte("active\n"),
-		command("aa-status", "--enabled"):                                                []byte{},
-		command("timedatectl", "show", "-p", "NTPSynchronized", "--value"):               []byte("yes\n"),
-		command("df", "-Pk", "/"):                                                        []byte("Filesystem 1024-blocks Used Available Capacity Mounted on\n/dev/sda3 100000 30000 70000 30% /\n"),
-		command("ss", "-H", "-tanpe"):                                                    []byte("LISTEN 0 4096 192.0.2.77:8443 0.0.0.0:* users:((\"caddy\",pid=42,fd=3)) cgroup:/user.slice/user-1000.slice/user@1000.service/init.scope\nESTAB 0 0 192.0.2.77:22 198.51.100.10:51000 users:((\"sshd\",pid=55,fd=4)) cgroup:/system.slice/ssh.service\n"),
-		command("ss", "-H", "-uanpe"):                                                    []byte("UNCONN 0 0 0.0.0.0:51822 0.0.0.0:*\n"),
+		command("/usr/lib/update-notifier/apt-check"):                                                                   []byte("13;0"),
+		command("systemctl", "is-active", "ssh.service"):                                                                []byte("active\n"),
+		command("/usr/sbin/sshd", "-T", "-C", "user=root,host=localhost,addr=127.0.0.1"):                                []byte("passwordauthentication no\nkbdinteractiveauthentication no\npermitrootlogin prohibit-password\npubkeyauthentication yes\n"),
+		command("systemctl", "--failed", "--no-legend", "--plain"):                                                      []byte("certbot.service loaded failed failed Certbot\n"),
+		command("systemctl", "is-enabled", "unattended-upgrades.service"):                                               []byte("enabled\n"),
+		command("systemctl", "is-active", "unattended-upgrades.service"):                                                []byte("active\n"),
+		command("systemctl", "--user", "list-sockets", "--no-legend", "--no-pager", "--plain", "--all", "--show-types"): []byte("127.0.0.1:8081 Stream binderledger-localhost-proxy@8081.socket binderledger-localhost-proxy@8081.service\n"),
+		command("aa-status", "--enabled"):                                                                               []byte{},
+		command("timedatectl", "show", "-p", "NTPSynchronized", "--value"):                                              []byte("yes\n"),
+		command("df", "-Pk", "/"):                                                                                       []byte("Filesystem 1024-blocks Used Available Capacity Mounted on\n/dev/sda3 100000 30000 70000 30% /\n"),
+		command("ss", "-H", "-tanpe"):                                                                                   []byte("LISTEN 0 4096 192.0.2.77:8443 0.0.0.0:* users:((\"caddy\",pid=42,fd=3)) cgroup:/user.slice/user-1000.slice/user@1000.service/init.scope\nESTAB 0 0 192.0.2.77:22 198.51.100.10:51000 users:((\"sshd\",pid=55,fd=4)) cgroup:/system.slice/ssh.service\nLISTEN 0 4096 127.0.0.1:8081 0.0.0.0:* cgroup:/user.slice/user-1000.slice/user@1000.service/init.scope\n"),
+		command("ss", "-H", "-uanpe"):                                                                                   []byte("UNCONN 0 0 0.0.0.0:51822 0.0.0.0:*\n"),
 	}, errors: map[string]error{}}
 	files := map[string][]byte{
 		"/etc/os-release":   []byte("PRETTY_NAME=\"Ubuntu 24.04.4 LTS\"\n"),
@@ -70,7 +71,7 @@ func TestLinuxCollectorBuildsPrivacyBoundedHostSnapshot(t *testing.T) {
 	if snapshot.LinuxBaseline.SSH.PasswordAuthentication != "no" || snapshot.LinuxBaseline.SSH.KeyboardInteractiveAuthentication != "no" || snapshot.LinuxBaseline.SSH.PermitRootLogin != "prohibit-password" {
 		t.Fatalf("SSH posture was not collected: %#v", snapshot.LinuxBaseline.SSH)
 	}
-	if len(snapshot.Connections) != 3 || snapshot.Connections[0].ProcessName != "caddy" || snapshot.Connections[0].SystemdUnit != "caddy.service" || snapshot.Connections[1].State != "Established" || snapshot.Connections[2].Protocol != "UDP" || snapshot.Connections[2].State != "Bound" {
+	if len(snapshot.Connections) != 4 || snapshot.Connections[0].ProcessName != "caddy" || snapshot.Connections[0].SystemdUnit != "caddy.service" || snapshot.Connections[1].State != "Established" || snapshot.Connections[2].SystemdUnit != "binderledger-localhost-proxy@8081.service" || snapshot.Connections[3].Protocol != "UDP" || snapshot.Connections[3].State != "Bound" {
 		t.Fatalf("network endpoints were not mapped: %#v", snapshot.Connections)
 	}
 	if snapshot.LinuxBaseline.Services == nil || len(snapshot.LinuxBaseline.Services.FailedUnits) != 1 || snapshot.LinuxBaseline.Services.FailedUnits[0] != "certbot.service" {
@@ -145,6 +146,19 @@ func TestParseSystemdUnitFromProcCgroup(t *testing.T) {
 	value := "0::/user.slice/user-1000.slice/user@1000.service/app.slice/binderledger-localhost-proxy@8081.service\n"
 	if got := parseProcSystemdUnit(value); got != "binderledger-localhost-proxy@8081.service" {
 		t.Fatalf("unexpected process cgroup unit: %q", got)
+	}
+}
+
+func TestParseUserSocketOwners(t *testing.T) {
+	owners := parseUserSocketOwners([]byte("127.0.0.1:8081 Stream example-proxy@8081.socket example-proxy@8081.service\n[::1]:5353 Datagram example-discovery.socket -\n/run/user/1000/bus Stream dbus.socket dbus.service\n"))
+	if owners[systemdSocketKey("TCP", "127.0.0.1", 8081)] != "example-proxy@8081.service" {
+		t.Fatalf("stream socket owner was not parsed: %#v", owners)
+	}
+	if owners[systemdSocketKey("UDP", "::1", 5353)] != "example-discovery.socket" {
+		t.Fatalf("datagram socket owner was not parsed: %#v", owners)
+	}
+	if len(owners) != 2 {
+		t.Fatalf("non-network sockets should be ignored: %#v", owners)
 	}
 }
 

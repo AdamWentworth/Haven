@@ -15,7 +15,7 @@ The current implementation provides:
 - SQLite posture history with migrations, consistent online backups, a 90-day default retention window, and no historical storage of connection or workload details
 - A native Go agent with one-time enrollment, a unique ECDSA certificate, and TLS 1.3 mutual authentication
 - Native Ubuntu posture collection for updates, restart state, UFW policy, SSH, AppArmor, time synchronization, bounded failed-unit names, root-filesystem capacity, and live TCP/UDP endpoints
-- Live Linux systemd service/socket attribution from bounded socket and process cgroup metadata, without retaining command lines or full cgroup paths
+- Live Linux systemd service/socket attribution from bounded socket, process-cgroup, and unprivileged user-socket metadata, without retaining command lines or full cgroup paths
 - A logical listener inventory that groups duplicate IPv4/IPv6 sockets and separates non-local services needing review, expected services, host-only services, and active connections
 - A short-lived, isolated Docker inventory exporter that supplies only running workload names, image references, Compose identity, health, and published/container-only port mappings to the normal socket-blocked Linux agent
 - Live Docker-to-listener attribution without collecting environment variables, commands, mounts, arbitrary labels, logs, container IDs, or container network addresses
