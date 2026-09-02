@@ -14,7 +14,7 @@ HAVEN must not store passwords, session cookies, authenticator seeds, recovery-c
 
 ## Current boundary
 
-Milestone 0.7.2 performs continuous collection, explainable baseline evaluation, privacy-bounded finding and listener transition tracking, authenticated device reporting, expected-service classification, explicit report freshness/lifecycle presentation, and an authenticated local action boundary. On Windows, the collector launches one fixed, internally defined PowerShell script with no user-controlled commands or parameters. The two available controls also select fixed internal PowerShell commands for a Defender quick scan or security-intelligence update; browser text is never interpolated into them.
+Milestone 0.7.3 performs continuous collection, explainable baseline evaluation, privacy-bounded finding and listener transition tracking, authenticated device reporting, expected-service classification, explicit report freshness/lifecycle presentation, live Docker workload attribution, and an authenticated local action boundary. On Windows, the collector launches one fixed, internally defined PowerShell script with no user-controlled commands or parameters. The two available controls also select fixed internal PowerShell commands for a Defender quick scan or security-intelligence update; browser text is never interpolated into them.
 
 The owner registers one or more discoverable passkeys through the cross-platform WebAuthn standard. Windows Hello, platform biometric providers, synchronized phone passkeys, and hardware security keys are authenticator choices rather than HAVEN dependencies. The first passkey requires a one-time local CLI code; the same short-lived mechanism provides local recovery. A signed-in owner can add or remove passkeys, but cannot remove the final credential without a replacement.
 
@@ -22,7 +22,7 @@ Passkey credential data is encrypted at rest with a random key outside the repos
 
 The agent endpoint uses TLS 1.3. Enrollment tokens are random, short-lived, one-time values; each accepted certificate has a distinct key and device identity. Observation identity, device identity, sequence, timestamp, schema, media type, body size, and request rate are validated. Revoked devices cannot submit reports.
 
-SQLite and private keys are stored outside the source tree. Historical records exclude live connection details and expire after a bounded period. Development Compose publishes only the dashboard to host loopback. The production profile binds exact private addresses for its dashboard, DNS, and agent listeners and does not expose them through public ingress.
+SQLite and private keys are stored outside the source tree. Historical records exclude live connection and workload details and expire after a bounded period. Development Compose publishes only the dashboard to host loopback. The production profile binds exact private addresses for its dashboard, DNS, and agent listeners and does not expose them through public ingress.
 
 Baseline history contains only bounded posture and counts. HAVEN does not retain administrator names, Windows update titles, Defender threat names, detected file or resource paths, BitLocker recovery keys, or other recovery material. A finding is a local rule evaluation, not proof of compromise or a substitute for native security guidance.
 
@@ -70,7 +70,9 @@ Current and planned mitigations:
 
 An agent running on a compromised endpoint cannot be assumed to report trustworthy state. HAVEN will distinguish endpoint-reported observations, hub-observed reachability and certificate state, and independent network-sensor observations. Conflicts remain visible instead of being silently reconciled.
 
-The native Ubuntu agent runs as the existing unprivileged deployment account because production automation cannot create a dedicated system identity without separate host authorization. Its user unit denies access to the Docker socket, exposes its home directory read-only except for the agent identity directory, enables `no-new-privileges`, and applies the filesystem, namespace, syscall, and kernel-tunable restrictions supported by an unprivileged systemd user manager. It never joins a privileged container and receives no command-execution channel from the hub. Root-only posture remains unknown until it can be supplied through a separately reviewed, fixed-output local probe.
+The native Ubuntu reporting service runs as the existing unprivileged deployment account because production automation cannot create a dedicated system identity without separate host authorization. Its user unit denies access to both Docker socket paths, exposes its home directory read-only except for the agent identity directory, enables `no-new-privileges`, and applies the filesystem, namespace, syscall, and kernel-tunable restrictions supported by an unprivileged systemd user manager. It never joins a privileged container and receives no command-execution channel from the hub.
+
+Docker socket access is effectively root-equivalent. A distinct one-shot inventory service receives that access, but only the local Unix address family; it has no IP-network access and exits before the reporter starts. Its fixed subcommand issues one container-list request and atomically writes a mode-0600 JSON file containing only allowlisted workload and port-attribution fields. The reporter validates that file as untrusted input. The exporter cannot receive browser parameters, send reports, invoke arbitrary Docker endpoints, or expose a control API. A compromised exporter could still control Docker while it runs, so this isolation reduces exposure but does not make socket access intrinsically safe.
 
 ### Collection invades household privacy
 
@@ -78,7 +80,7 @@ Mitigations and requirements:
 
 - Obtain explicit consent before installing an agent on another person's device.
 - Show exactly which fields each collector gathers.
-- Keep live connection details out of historical storage.
+- Keep live connection and workload details out of historical storage.
 - Do not collect packet payloads, browsing content, keystrokes, screenshots, or documents.
 - Allow a device owner to pause collection and revoke the device.
 - Apply retention limits and support deletion by device.

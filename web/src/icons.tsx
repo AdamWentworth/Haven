@@ -45,6 +45,10 @@ export function ServerIcon(props: IconProps) {
   return <SvgIcon {...props}><rect x="4" y="3" width="16" height="7" rx="1.5" /><rect x="4" y="14" width="16" height="7" rx="1.5" /><path d="M8 6.5h.01M8 17.5h.01M12 6.5h5M12 17.5h5" /></SvgIcon>;
 }
 
+export function WorkloadIcon(props: IconProps) {
+  return <SvgIcon {...props}><path d="m12 2.8 7 3.5-7 3.5-7-3.5 7-3.5Z" /><path d="m5 6.3v7l7 3.5 7-3.5v-7M12 9.8v7" /><path d="m8 14.8-3 1.5 7 3.5 7-3.5-3-1.5" /></SvgIcon>;
+}
+
 export function AlertIcon(props: IconProps) {
   return <SvgIcon {...props}><path d="M10.3 3.8 2.7 17a2 2 0 0 0 1.7 3h15.2a2 2 0 0 0 1.7-3L13.7 3.8a2 2 0 0 0-3.4 0Z" /><path d="M12 9v4M12 17h.01" /></SvgIcon>;
 }

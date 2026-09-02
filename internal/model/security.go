@@ -31,6 +31,7 @@ type LinuxBaseline struct {
 	AppArmor         *LinuxAppArmorStatus        `json:"appArmor"`
 	TimeSync         *LinuxTimeSyncStatus        `json:"timeSync"`
 	Storage          *LinuxStorageStatus         `json:"storage"`
+	Workloads        *WorkloadInventory          `json:"workloads"`
 }
 
 type LinuxUpdateStatus struct {
@@ -79,6 +80,35 @@ type LinuxStorageStatus struct {
 	CapacityBytes  *int64   `json:"capacityBytes"`
 	AvailableBytes *int64   `json:"availableBytes"`
 	UsedPercentage *float64 `json:"usedPercentage"`
+}
+
+// WorkloadInventory is a deliberately narrow, live-only view of a container
+// runtime. It excludes environment variables, commands, mounts, arbitrary
+// labels, logs, container IDs, container network addresses, remote endpoints,
+// and control capabilities. Host bind addresses are retained only so a
+// published port can be correlated with a host listener.
+type WorkloadInventory struct {
+	Runtime     string              `json:"runtime"`
+	CollectedAt time.Time           `json:"collectedAt"`
+	Workloads   []ContainerWorkload `json:"workloads"`
+}
+
+type ContainerWorkload struct {
+	Name    string                 `json:"name"`
+	Image   string                 `json:"image,omitempty"`
+	Project string                 `json:"project,omitempty"`
+	Service string                 `json:"service,omitempty"`
+	State   string                 `json:"state"`
+	Health  string                 `json:"health,omitempty"`
+	Ports   []ContainerPortBinding `json:"ports"`
+}
+
+type ContainerPortBinding struct {
+	Protocol      string `json:"protocol"`
+	ContainerPort int    `json:"containerPort"`
+	Published     bool   `json:"published"`
+	HostAddress   string `json:"hostAddress,omitempty"`
+	HostPort      int    `json:"hostPort,omitempty"`
 }
 
 // WindowsBaseline contains privacy-bounded host posture. It records counts and

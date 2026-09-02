@@ -1,12 +1,14 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { addPasskey, collectSnapshot, getAuthStatus, getDevice, getLatestSnapshot, getRuntimeStatus, listAuditEvents, listDevices, listEvents, listExpectedServices, listFindingReviews, listObservedListeners, listPasskeys, listSecurityActions, loginWithPasskey, logout, registerPasskey, removeExpectedService, removePasskey, requestSecurityAction, saveExpectedService, saveFindingReview } from "./api";
-import { ActivityIcon, AlertIcon, BellIcon, CheckIcon, ChipIcon, DefenderIcon, DevicesIcon, FirewallIcon, HavenIcon, HelpIcon, LaptopIcon, LockIcon, MonitorIcon, NetworkIcon, RefreshIcon, RemoteAccessIcon, ServerIcon, UpdateIcon, UsersIcon } from "./icons";
+import { ActivityIcon, AlertIcon, BellIcon, CheckIcon, ChipIcon, DefenderIcon, DevicesIcon, FirewallIcon, HavenIcon, HelpIcon, LaptopIcon, LockIcon, MonitorIcon, NetworkIcon, RefreshIcon, RemoteAccessIcon, ServerIcon, UpdateIcon, UsersIcon, WorkloadIcon } from "./icons";
 import type {
   BaselineCheck,
   AuditEvent,
   ActionCapability,
   AuthStatus,
   BindScope,
+  ContainerPortBinding,
+  ContainerWorkload,
   DefenderStatus,
   DeviceRecord,
   ExpectedService,
@@ -23,6 +25,7 @@ import type {
   SecurityActionKind,
   SecuritySnapshot,
   SecurityFinding,
+  WorkloadInventory,
 } from "./types";
 
 type Tone = "healthy" | "configured" | "attention" | "danger" | "unknown";
@@ -222,6 +225,25 @@ function logicalListeners(connections: NetworkConnection[]) {
 	return [...grouped.values()].sort((left, right) => left.protocol.localeCompare(right.protocol) || left.port - right.port || left.bindScope.localeCompare(right.bindScope));
 }
 
+function workloadAttribution(listener: LogicalListener, inventory: WorkloadInventory | null) {
+	if (!inventory) return [];
+	return inventory.workloads.flatMap((workload) => {
+		const bindings = workload.ports.filter((binding) => binding.published && binding.protocol === listener.protocol && binding.hostPort === listener.port && (() => {
+			const address = normalizeAddress(binding.hostAddress || "");
+			if (!address || address === "0.0.0.0" || address === "::") return listener.bindScope === "wildcard";
+			return listener.addresses.includes(address);
+		})());
+		return bindings.length > 0 ? [{ workload, bindings }] : [];
+	});
+}
+
+function formatPortBinding(binding: ContainerPortBinding) {
+	if (!binding.published) return `${binding.containerPort}/${binding.protocol.toLowerCase()} · container only`;
+	const address = normalizeAddress(binding.hostAddress || "") || "*";
+	const host = address.includes(":") ? `[${address}]` : address;
+	return `${host}:${binding.hostPort} → ${binding.containerPort}/${binding.protocol.toLowerCase()}`;
+}
+
 function policyValue(value?: string) {
   return !value || value === "NotConfigured" ? "System default" : value;
 }
@@ -317,6 +339,7 @@ function LinuxPanel({ baseline }: { baseline: LinuxBaseline }) {
     ["Failed systemd units", baseline.services?.failedUnitCount === null || baseline.services?.failedUnitCount === undefined ? "Not verified" : String(baseline.services.failedUnitCount)],
     ["Failed unit names", baseline.services?.failedUnits?.length ? baseline.services.failedUnits.join(", ") : "None reported"],
     ["Root filesystem", storage?.usedPercentage === null || storage?.usedPercentage === undefined ? "Not verified" : `${storage.usedPercentage.toFixed(0)}% used · ${formatBytes(storage.availableBytes)} available`],
+	...(baseline.workloads ? [["Docker workloads", `${baseline.workloads.workloads.length} running · observed ${formatRelativeTime(baseline.workloads.collectedAt)}`]] : []),
   ];
   return (
     <section className="panel" aria-labelledby="linux-title">
@@ -328,6 +351,45 @@ function LinuxPanel({ baseline }: { baseline: LinuxBaseline }) {
       </dl>
     </section>
   );
+}
+
+function workloadTone(workload: ContainerWorkload): Tone {
+	if (workload.health === "unhealthy") return "danger";
+	if (workload.health === "starting") return "attention";
+	if (workload.health === "healthy") return "healthy";
+	return "configured";
+}
+
+function WorkloadsPanel({ inventory }: { inventory: WorkloadInventory | null }) {
+	if (!inventory) return null;
+	const published = inventory.workloads.filter((workload) => workload.ports.some((port) => port.published));
+	const internal = inventory.workloads.flatMap((workload) => {
+		const ports = workload.ports.filter((port) => !port.published);
+		return ports.length > 0 ? [{ workload, ports }] : [];
+	});
+	const publishedPortCount = inventory.workloads.reduce((count, workload) => count + workload.ports.filter((port) => port.published).length, 0);
+	return (
+		<section className="panel workloads-panel" aria-labelledby="workloads-title">
+			<PanelHeading eyebrow="WORKLOAD INVENTORY" title="Docker port attribution" id="workloads-title" icon={<WorkloadIcon />} accent="cyan">
+				{inventory.workloads.length} running container{inventory.workloads.length === 1 ? "" : "s"} · {publishedPortCount} host mapping{publishedPortCount === 1 ? "" : "s"} · observed {formatRelativeTime(inventory.collectedAt)}
+			</PanelHeading>
+			<p className="service-explainer">Published mappings can receive traffic through a host address and port. Container-only ports stay inside Docker networks unless another workload forwards to them. This inventory is read-only, sanitized, and not retained in observation history.</p>
+			<div className="workload-grid">
+				{published.length === 0 ? <p className="activity-empty"><strong>No Docker ports are published on this host.</strong><span>Running containers may still communicate over private Docker networks.</span></p> : published.map((workload) => (
+					<article className="workload-card" key={workload.name}>
+						<div className="workload-card-heading"><div><span className="workload-mark"><WorkloadIcon size={17} /></span><div><h3>{workload.name}</h3><p>{workload.project && workload.service ? `${workload.project} · ${workload.service}` : workload.service || workload.project || "Standalone container"}</p></div></div><StatusChip label={workload.health === "not-configured" ? workload.state : workload.health || workload.state} tone={workloadTone(workload)} /></div>
+					{workload.image && <p className="workload-image">{workload.image}</p>}
+					<ul className="port-mappings">{workload.ports.filter((port) => port.published).map((port, index) => <li key={`${port.protocol}-${port.hostAddress}-${port.hostPort}-${port.containerPort}-${index}`}>{formatPortBinding(port)}</li>)}</ul>
+					</article>
+				))}
+			</div>
+			<details className="container-only-ports">
+				<summary>Container-only ports ({internal.reduce((count, item) => count + item.ports.length, 0)})</summary>
+				<p>These declarations are not bound to a host port. They are useful for understanding service-to-service traffic, but they are not additional host listeners.</p>
+				{internal.length === 0 ? <p className="footnote">No container-only ports were reported.</p> : <ul>{internal.map(({ workload, ports }) => <li key={workload.name}><strong>{workload.name}</strong><span>{ports.map(formatPortBinding).join(", ")}</span></li>)}</ul>}
+			</details>
+		</section>
+	);
 }
 
 function PanelHeading({
@@ -385,7 +447,7 @@ function FirewallPanel({ profiles, isLinux }: { profiles: FirewallProfileStatus[
   );
 }
 
-function ConnectionsPanel({ deviceId, connections, expectedServices, observations, saveExpectation, removeExpectation, busy }: { deviceId: string; connections: NetworkConnection[]; expectedServices: ExpectedService[]; observations: ObservedListener[]; saveExpectation: (service: { deviceId: string; label: string; protocol: "TCP" | "UDP"; port: number; bindScope: BindScope }) => void; removeExpectation: (service: ExpectedService) => void; busy: boolean }) {
+function ConnectionsPanel({ deviceId, connections, workloads, expectedServices, observations, saveExpectation, removeExpectation, busy }: { deviceId: string; connections: NetworkConnection[]; workloads: WorkloadInventory | null; expectedServices: ExpectedService[]; observations: ObservedListener[]; saveExpectation: (service: { deviceId: string; label: string; protocol: "TCP" | "UDP"; port: number; bindScope: BindScope }) => void; removeExpectation: (service: ExpectedService) => void; busy: boolean }) {
   const [filter, setFilter] = useState("");
 	const [view, setView] = useState<"review" | "expected" | "local" | "active">("review");
 	const [manualLabel, setManualLabel] = useState("");
@@ -440,11 +502,12 @@ function ConnectionsPanel({ deviceId, connections, expectedServices, observation
 		{shownListeners.length === 0 ? <p className="activity-empty"><strong>{view === "review" ? "No unreviewed non-local listeners." : `No ${view === "expected" ? "expected" : "unclassified local-only"} listeners are active.`}</strong><span>{view === "review" ? "New non-local services will appear here for classification." : "Choose another category or inspect the raw technical details below."}</span></p> : shownListeners.map((listener) => {
 		  const expectation = expectedFor(listener);
 		  const observation = observationFor(listener);
+		  const attributions = workloadAttribution(listener, workloads);
 		  const recentlyAppeared = !!observation && Date.now() - new Date(observation.appearedAt).valueOf() < 24 * 60 * 60 * 1000;
 		  return <article className={`service-card ${expectation ? "expected" : listener.bindScope === "local" ? "local" : "review"}`} key={listener.key}>
 			<div className="service-card-heading"><div><span className="protocol">{listener.protocol}</span><strong>Port {listener.port}</strong></div><StatusChip label={expectation ? "expected" : recentlyAppeared ? "new · unreviewed" : listener.bindScope === "local" ? "local only" : "unreviewed"} tone={expectation ? "healthy" : listener.bindScope === "local" ? "configured" : "attention"} /></div>
-			<h3>{expectation?.label || `${listener.protocol} service on port ${listener.port}`}</h3>
-			<dl><div><dt>Bind scope</dt><dd>{bindScopeLabel(listener.bindScope)}</dd></div><div><dt>State</dt><dd>{listener.state}</dd></div><div><dt>Addresses</dt><dd className="endpoint">{listener.addresses.join(", ") || "Not reported"}</dd></div>{listener.processes.length > 0 && <div><dt>Process</dt><dd>{listener.processes.join(", ")}</dd></div>}</dl>
+			<h3>{expectation?.label || (attributions.length === 1 ? attributions[0].workload.name : `${listener.protocol} service on port ${listener.port}`)}</h3>
+			<dl><div><dt>Bind scope</dt><dd>{bindScopeLabel(listener.bindScope)}</dd></div><div><dt>State</dt><dd>{listener.state}</dd></div><div><dt>Addresses</dt><dd className="endpoint">{listener.addresses.join(", ") || "Not reported"}</dd></div>{listener.processes.length > 0 && <div><dt>Host process</dt><dd>{listener.processes.join(", ")}</dd></div>}{attributions.length > 0 && <><div><dt>Runtime owner</dt><dd>{attributions.map(({ workload }) => workload.name).join(", ")}</dd></div><div><dt>Docker mapping</dt><dd className="endpoint">{attributions.flatMap(({ bindings }) => bindings).map(formatPortBinding).join(", ")}</dd></div></>}</dl>
 			<p>{observation ? `First observed ${formatDate(observation.firstSeenAt)} · continuously present since ${formatDate(observation.appearedAt)} · last confirmed ${formatRelativeTime(observation.lastSeenAt)}` : "Appearance history will begin with the next agent report."}{listener.rawCount > 1 ? ` · ${listener.rawCount} raw sockets grouped` : ""}</p>
 			{expectation ? <button className="secondary-action" type="button" disabled={busy} onClick={() => removeExpectation(expectation)}>Remove expectation</button> : <button className="secondary-action" type="button" disabled={busy} onClick={() => markExpected(listener)}>Mark expected…</button>}
 		  </article>;
@@ -703,10 +766,11 @@ function Application({ snapshot, devices, events, runtime, selectedDevice, selec
         {(snapshot.baselineChecks || []).length > 0 && <><FindingsPanel findings={snapshot.findings || []} checks={snapshot.baselineChecks || []} reviews={reviews} review={reviewFinding} /><BaselinePanel checks={snapshot.baselineChecks || []} collectedAt={snapshot.collectedAt} platform={isLinux ? "Linux" : "Windows"} /></>}
         {snapshot.notices.length > 0 && <section className="panel notices-panel" aria-labelledby="notices-title"><PanelHeading eyebrow="COLLECTION NOTES" title="Some signals could not be verified" id="notices-title" icon={<AlertIcon />} accent="amber">A collection limitation is not automatically a security problem</PanelHeading><ul className="notices-list">{snapshot.notices.map((notice, index) => <li className="notice" key={`${notice.source}-${index}`}><strong>{notice.source}: </strong>{notice.message}</li>)}</ul></section>}
         {isLinux && snapshot.linuxBaseline ? <LinuxPanel baseline={snapshot.linuxBaseline} /> : <DefenderPanel defender={snapshot.defender} />}
+		{isLinux && <WorkloadsPanel inventory={snapshot.linuxBaseline?.workloads ?? null} />}
 		<FirewallPanel profiles={snapshot.firewallProfiles} isLinux={isLinux} />
-		<ConnectionsPanel deviceId={selectedDevice?.id || snapshot.device.deviceId || ""} connections={snapshot.connections} expectedServices={expectedServices} observations={listenerObservations} saveExpectation={saveServiceExpectation} removeExpectation={removeServiceExpectation} busy={actionBusy} />
+		<ConnectionsPanel deviceId={selectedDevice?.id || snapshot.device.deviceId || ""} connections={snapshot.connections} workloads={snapshot.linuxBaseline?.workloads ?? null} expectedServices={expectedServices} observations={listenerObservations} saveExpectation={saveServiceExpectation} removeExpectation={removeServiceExpectation} busy={actionBusy} />
       </main>
-	  <footer><span>HAVEN milestone 0.7.2 · Freshness and lifecycle clarity</span><span>Observe continuously. Act deliberately.</span></footer>
+	  <footer><span>HAVEN milestone 0.7.3 · Workload attribution</span><span>Observe continuously. Act deliberately.</span></footer>
     </>
   );
 }

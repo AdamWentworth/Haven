@@ -20,6 +20,31 @@ export interface LinuxBaseline {
   appArmor: { enabled: boolean | null } | null;
   timeSync: { synchronized: boolean | null } | null;
   storage: { mountPoint: string; fileSystem?: string; capacityBytes: number | null; availableBytes: number | null; usedPercentage: number | null } | null;
+  workloads: WorkloadInventory | null;
+}
+
+export interface WorkloadInventory {
+  runtime: "docker";
+  collectedAt: string;
+  workloads: ContainerWorkload[];
+}
+
+export interface ContainerWorkload {
+  name: string;
+  image?: string;
+  project?: string;
+  service?: string;
+  state: string;
+  health?: "healthy" | "unhealthy" | "starting" | "not-configured";
+  ports: ContainerPortBinding[];
+}
+
+export interface ContainerPortBinding {
+  protocol: "TCP" | "UDP";
+  containerPort: number;
+  published: boolean;
+  hostAddress?: string;
+  hostPort?: number;
 }
 
 export interface WindowsBaseline {

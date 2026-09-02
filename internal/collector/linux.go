@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/AdamWentworth/haven/internal/model"
+	"github.com/AdamWentworth/haven/internal/workload"
 )
 
 type LinuxCollector struct {
@@ -51,6 +52,7 @@ func (collector *LinuxCollector) Collect(ctx context.Context) model.SecuritySnap
 	appArmor := collector.appArmor(ctx, &notices)
 	timeSync := collector.timeSync(ctx, &notices)
 	storage := collector.storage(ctx, &notices)
+	workloads := collector.workloads(&notices)
 	snapshot.LinuxBaseline = &model.LinuxBaseline{
 		Updates:          updates,
 		Firewall:         firewall,
@@ -60,6 +62,7 @@ func (collector *LinuxCollector) Collect(ctx context.Context) model.SecuritySnap
 		AppArmor:         appArmor,
 		TimeSync:         timeSync,
 		Storage:          storage,
+		Workloads:        workloads,
 	}
 	if firewall != nil {
 		snapshot.FirewallProfiles = []model.FirewallProfileStatus{{
@@ -72,6 +75,23 @@ func (collector *LinuxCollector) Collect(ctx context.Context) model.SecuritySnap
 	snapshot.Connections = collector.connections(ctx, &notices)
 	snapshot.Notices = notices
 	return snapshot
+}
+
+func (collector *LinuxCollector) workloads(notices *[]model.CollectorNotice) *model.WorkloadInventory {
+	path := strings.TrimSpace(os.Getenv("HAVEN_WORKLOAD_INVENTORY_PATH"))
+	if path == "" {
+		return nil
+	}
+	inventory, err := workload.ReadFile(path)
+	if err != nil {
+		addNotice(notices, "Workload attribution", "information", "The isolated Docker inventory exporter has not produced a readable report.")
+		return nil
+	}
+	age := time.Since(inventory.CollectedAt)
+	if age < -5*time.Minute || age > 5*time.Minute {
+		addNotice(notices, "Workload attribution", "information", "The Docker workload inventory was not refreshed with this agent report; the displayed attribution may be stale.")
+	}
+	return &inventory
 }
 
 func (collector *LinuxCollector) device() model.DeviceSummary {

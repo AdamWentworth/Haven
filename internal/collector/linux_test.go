@@ -7,8 +7,10 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/AdamWentworth/haven/internal/model"
+	"github.com/AdamWentworth/haven/internal/workload"
 )
 
 type fakeCommandRunner struct {
@@ -136,6 +138,29 @@ func TestLinuxCollectorKeepsUnavailableSignalsUnknown(t *testing.T) {
 	}
 	if len(snapshot.Notices) == 0 {
 		t.Fatal("collector limitations must remain visible")
+	}
+}
+
+func TestLinuxCollectorReadsSanitizedWorkloadInventory(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "docker-inventory.json")
+	inventory := model.WorkloadInventory{
+		Runtime: "docker", CollectedAt: time.Now().UTC(),
+		Workloads: []model.ContainerWorkload{{
+			Name: "haven_hub", Image: "ghcr.io/adamwentworth/haven-hub:sha-example", Project: "haven", Service: "hub", State: "running", Health: "healthy",
+			Ports: []model.ContainerPortBinding{{Protocol: "TCP", ContainerPort: 5443, Published: true, HostAddress: "192.0.2.77", HostPort: 5443}},
+		}},
+	}
+	if err := workload.WriteFile(path, inventory); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("HAVEN_WORKLOAD_INVENTORY_PATH", path)
+	notices := []model.CollectorNotice{}
+	got := NewLinuxCollector(fakeCommandRunner{}).workloads(&notices)
+	if got == nil || len(got.Workloads) != 1 || got.Workloads[0].Name != "haven_hub" {
+		t.Fatalf("workload inventory was not collected: %#v", got)
+	}
+	if len(notices) != 0 {
+		t.Fatalf("a fresh inventory should not create a notice: %#v", notices)
 	}
 }
 

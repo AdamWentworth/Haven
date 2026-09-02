@@ -4,18 +4,20 @@
 
 HAVEN is a personal security observatory for home devices and networks. It presents native operating-system protections in one understandable console without trying to replace Microsoft Defender, host firewalls, or other trusted security controls.
 
-HAVEN is pre-release software. The current milestone makes observation freshness and finding lifecycles explicit in the authenticated, resource-constrained Ubuntu hub deployment; it is not a replacement for native protection.
+HAVEN is pre-release software. The current milestone attributes Linux host listeners to sanitized Docker workload metadata in the authenticated, resource-constrained Ubuntu hub deployment; it is not a replacement for native protection.
 
-## Milestone 0.7.2 — Freshness and Lifecycle Clarity
+## Milestone 0.7.3 — Workload Attribution
 
 The current implementation provides:
 
 - A Go hub with a responsive React and TypeScript dashboard embedded in its executable
 - Read-only Windows collection for Microsoft Defender, Windows Firewall, device posture, and up to 250 established or listening TCP endpoints
-- SQLite posture history with migrations, consistent online backups, a 90-day default retention window, and no historical storage of connection details
+- SQLite posture history with migrations, consistent online backups, a 90-day default retention window, and no historical storage of connection or workload details
 - A native Go agent with one-time enrollment, a unique ECDSA certificate, and TLS 1.3 mutual authentication
 - Native Ubuntu posture collection for updates, restart state, UFW policy, SSH, AppArmor, time synchronization, bounded failed-unit names, root-filesystem capacity, and live TCP/UDP endpoints
 - A logical listener inventory that groups duplicate IPv4/IPv6 sockets and separates non-local services needing review, expected services, host-only services, and active connections
+- A short-lived, isolated Docker inventory exporter that supplies only running workload names, image references, Compose identity, health, and published/container-only port mappings to the normal socket-blocked Linux agent
+- Live Docker-to-listener attribution without collecting environment variables, commands, mounts, arbitrary labels, logs, container IDs, or container network addresses
 - Per-device expected-service labels for protocol, port, and bind scope, with an auditable owner decision and no firewall or service side effects
 - Privacy-bounded listener appearance history containing only protocol, port, bind scope, and timestamps—never payloads or historical remote connections
 - Strictly increasing report sequences, timestamp checks, payload limits, rate limits, device revocation, and versioned messages
@@ -145,6 +147,7 @@ Haven/
 │   ├── hub/             # Local dashboard and mutually authenticated agent APIs
 │   ├── model/           # Versionable observation model
 │   ├── storage/         # SQLite persistence and retention
+│   ├── workload/        # Sanitized, fixed-purpose runtime inventory
 │   └── webui/           # Embedded production assets
 ├── web/                 # React, TypeScript, and Vite source
 ├── docs/                # Architecture, threat model, and publishing policy
@@ -159,11 +162,11 @@ Haven/
 3. **Centralize understanding, not secrets.** Passwords, recovery codes, MFA seeds, cookies, and unrestricted device credentials do not belong in HAVEN.
 4. **Treat unavailable as unknown.** A failed collector is never shown as a healthy signal.
 5. **Keep actions narrow and reversible.** Platform providers advertise named, allowlisted operations with fresh confirmation and audit history—never a remote shell.
-6. **Collect proportionately.** Connection details are live-only by default; packet payloads and browsing content are outside HAVEN's scope.
+6. **Collect proportionately.** Connection and workload details are live-only by default; packet payloads and browsing content are outside HAVEN's scope.
 7. **Respect every household member.** Monitoring another person's device requires visible opt-in and transparent collection.
 
 ## Current and next security milestone
 
-Milestone 0.7 adds native Linux monitoring and boot-persistent endpoint-agent scheduling. Milestone 0.7.1 makes its network results explainable: duplicate sockets become logical listeners, bind scope is distinguished from proven reachability, and the owner can classify intended services without giving HAVEN Docker access. Milestone 0.7.2 makes the latest report age visible, separates current findings from resolved history, shows when listeners were last confirmed, tolerates normal agent scheduling jitter, and verifies explicit SSH hardening without claiming unavailable defaults. The production Ubuntu agent remains outside the hub container with an explicit device identity; it is denied access to the Docker socket and treats genuinely unavailable root-only signals as unknown instead of elevating the whole collector. The next milestone can add network-wide asset observation while keeping merely observed assets separate from explicitly enrolled devices. The Ubuntu hub does not execute Windows actions on another machine. GitHub Actions verifies the Go, frontend, dependency, image, and public-repository safety checks on each proposed change.
+Milestone 0.7 adds native Linux monitoring and boot-persistent endpoint-agent scheduling. Milestone 0.7.1 makes its network results explainable, and 0.7.2 makes report freshness and finding lifecycles explicit. Milestone 0.7.3 correlates host listeners with sanitized Docker port mappings. The production Ubuntu agent remains outside the hub container with an explicit device identity; its normal reporting service is denied Docker-socket access. A separate short-lived exporter receives socket access only long enough to write a fixed-schema inventory, has no IP-network access, and exits before the reporter reads that file. Workload details remain live-only and genuinely unavailable root-only signals remain unknown. The next milestone can add network-wide asset observation while keeping merely observed assets separate from explicitly enrolled devices. The Ubuntu hub does not execute Windows actions on another machine. GitHub Actions verifies the Go, frontend, dependency, image, and public-repository safety checks on each proposed change.
 
 Read the [architecture](docs/ARCHITECTURE.md), [threat model](docs/THREAT_MODEL.md), and [public repository policy](docs/PUBLIC_REPOSITORY.md) before expanding the trust boundary.

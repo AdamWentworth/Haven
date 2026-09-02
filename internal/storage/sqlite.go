@@ -1203,10 +1203,15 @@ func insertSecurityEvent(
 }
 
 func historicalPayload(snapshot model.SecuritySnapshot) ([]byte, error) {
-	// Connection metadata is intentionally live-only. Persisting it would
-	// create an unnecessary household activity trail.
+	// Connection and workload metadata are intentionally live-only. Persisting
+	// either would create an unnecessary household activity/deployment trail.
 	persisted := snapshot
 	persisted.Connections = []model.NetworkConnection{}
+	if persisted.LinuxBaseline != nil {
+		linux := *persisted.LinuxBaseline
+		linux.Workloads = nil
+		persisted.LinuxBaseline = &linux
+	}
 	payload, err := json.Marshal(persisted)
 	if err != nil {
 		return nil, fmt.Errorf("encode security observation: %w", err)

@@ -14,6 +14,7 @@ import (
 
 	"github.com/AdamWentworth/haven/internal/agent"
 	"github.com/AdamWentworth/haven/internal/collector"
+	"github.com/AdamWentworth/haven/internal/workload"
 )
 
 func main() {
@@ -32,15 +33,35 @@ func main() {
 }
 
 func run(ctx context.Context, command string, arguments []string) error {
-	directory, err := agent.DefaultDirectory()
-	if err != nil {
-		return err
-	}
 	switch command {
 	case "collect":
 		return writeJSON(collector.NewForCurrentPlatform().Collect(ctx))
 
+	case "export-docker-inventory":
+		flags := flag.NewFlagSet("export-docker-inventory", flag.ContinueOnError)
+		socketPath := flags.String("socket", "/var/run/docker.sock", "absolute Docker Engine socket path")
+		outputPath := flags.String("output", "", "absolute sanitized inventory output path")
+		if err := flags.Parse(arguments); err != nil {
+			return err
+		}
+		if *outputPath == "" {
+			return errors.New("usage: haven-agent export-docker-inventory --output <absolute path> [--socket /var/run/docker.sock]")
+		}
+		inventory, err := workload.CollectDocker(ctx, *socketPath)
+		if err != nil {
+			return err
+		}
+		if err := workload.WriteFile(*outputPath, inventory); err != nil {
+			return err
+		}
+		fmt.Printf("Recorded %d running Docker workload(s).\n", len(inventory.Workloads))
+		return nil
+
 	case "enroll":
+		directory, err := agent.DefaultDirectory()
+		if err != nil {
+			return err
+		}
 		flags := flag.NewFlagSet("enroll", flag.ContinueOnError)
 		hubURL := flags.String("hub", "https://localhost:5443", "HAVEN agent endpoint")
 		caPath := flags.String("ca", "", "trusted hub CA certificate")
@@ -65,6 +86,10 @@ func run(ctx context.Context, command string, arguments []string) error {
 		return nil
 
 	case "report":
+		directory, err := agent.DefaultDirectory()
+		if err != nil {
+			return err
+		}
 		client, err := agent.Load(directory)
 		if err != nil {
 			return err
@@ -77,13 +102,17 @@ func run(ctx context.Context, command string, arguments []string) error {
 		return nil
 
 	case "status":
+		directory, err := agent.DefaultDirectory()
+		if err != nil {
+			return err
+		}
 		client, err := agent.Load(directory)
 		if err != nil {
 			return err
 		}
 		return writeJSON(client.Config())
 	default:
-		return errors.New("usage: haven-agent [collect | enroll | report | status]")
+		return errors.New("usage: haven-agent [collect | enroll | export-docker-inventory | report | status]")
 	}
 }
 

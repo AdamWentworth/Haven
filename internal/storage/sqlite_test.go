@@ -30,6 +30,14 @@ func TestStoreSavesLoadsAndExpiresSnapshots(t *testing.T) {
 			Architecture:    "test-architecture",
 		},
 		FirewallProfiles: []model.FirewallProfileStatus{},
+		LinuxBaseline: &model.LinuxBaseline{Workloads: &model.WorkloadInventory{
+			Runtime:     "docker",
+			CollectedAt: collectedAt,
+			Workloads: []model.ContainerWorkload{{
+				Name: "example_api", State: "running", Health: "healthy",
+				Ports: []model.ContainerPortBinding{{Protocol: "TCP", ContainerPort: 4000, Published: true, HostAddress: "0.0.0.0", HostPort: 4000}},
+			}},
+		}},
 		Connections: []model.NetworkConnection{{
 			Protocol: "TCP",
 			State:    "Established",
@@ -50,6 +58,9 @@ func TestStoreSavesLoadsAndExpiresSnapshots(t *testing.T) {
 	if len(loaded.Connections) != 1 {
 		t.Fatal("the current in-memory observation should retain live connection metadata")
 	}
+	if loaded.LinuxBaseline == nil || loaded.LinuxBaseline.Workloads == nil || len(loaded.LinuxBaseline.Workloads.Workloads) != 1 {
+		t.Fatal("the current in-memory observation should retain live workload metadata")
+	}
 	var historicalPayloadJSON []byte
 	if err := store.database.QueryRowContext(ctx, `SELECT payload_json FROM device_observations WHERE device_id = ? ORDER BY collected_at DESC LIMIT 1`, "test-device-id").Scan(&historicalPayloadJSON); err != nil {
 		t.Fatal(err)
@@ -60,6 +71,9 @@ func TestStoreSavesLoadsAndExpiresSnapshots(t *testing.T) {
 	}
 	if len(historical.Connections) != 0 {
 		t.Fatal("connection metadata must never be persisted")
+	}
+	if historical.LinuxBaseline == nil || historical.LinuxBaseline.Workloads != nil {
+		t.Fatal("workload metadata must never be persisted")
 	}
 
 	deleted, err := store.DeleteBefore(ctx, collectedAt.Add(time.Second))
