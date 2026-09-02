@@ -1,12 +1,14 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
-import { collectSnapshot, getDevice, getRuntimeStatus, listDevices } from "./api";
-import { AlertIcon, CheckIcon, ChipIcon, DefenderIcon, DevicesIcon, FirewallIcon, HavenIcon, HelpIcon, LaptopIcon, LockIcon, MonitorIcon, NetworkIcon, RefreshIcon, RemoteAccessIcon, ServerIcon, UpdateIcon, UsersIcon } from "./icons";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { collectSnapshot, getDevice, getLatestSnapshot, getRuntimeStatus, listDevices, listEvents } from "./api";
+import { ActivityIcon, AlertIcon, BellIcon, CheckIcon, ChipIcon, DefenderIcon, DevicesIcon, FirewallIcon, HavenIcon, HelpIcon, LaptopIcon, LockIcon, MonitorIcon, NetworkIcon, RefreshIcon, RemoteAccessIcon, ServerIcon, UpdateIcon, UsersIcon } from "./icons";
 import type {
   BaselineCheck,
   DefenderStatus,
   DeviceRecord,
   FirewallProfileStatus,
   NetworkConnection,
+  RuntimeStatus,
+  SecurityEvent,
   SecuritySnapshot,
   SecurityFinding,
 } from "./types";
@@ -57,6 +59,12 @@ function formatDuration(value: number | null) {
   const days = Math.floor(totalHours / 24);
   const hours = totalHours % 24;
   return days > 0 ? `${days}d ${hours}h uptime` : `${hours}h uptime`;
+}
+
+function formatInterval(seconds: number) {
+  if (seconds < 60) return `${seconds}s`;
+  const minutes = Math.round(seconds / 60);
+  return minutes < 60 ? `${minutes} min` : `${Math.round(minutes / 60)} hr`;
 }
 
 function booleanValue(value: boolean | null) {
@@ -285,6 +293,37 @@ function FindingsPanel({ findings, checks }: { findings: SecurityFinding[]; chec
   );
 }
 
+function ActivityPanel({ events }: { events: SecurityEvent[] }) {
+  const recent = events.slice(0, 12);
+  return (
+    <section className="panel activity-panel" aria-labelledby="activity-title">
+      <PanelHeading eyebrow="WHAT CHANGED" title="Security activity" id="activity-title" icon={<ActivityIcon />} accent="cyan">
+        New findings and automatic resolutions from continuous observations
+      </PanelHeading>
+      {recent.length === 0 ? (
+        <p className="activity-empty"><strong>No posture changes recorded yet.</strong><span>HAVEN will add an event when a finding appears or resolves; routine unchanged observations stay quiet.</span></p>
+      ) : (
+        <ol className="activity-list">
+          {recent.map((event) => {
+            const resolved = event.kind === "resolved";
+            const tone: Tone = resolved ? "healthy" : event.severity === "high" ? "danger" : event.severity === "medium" ? "attention" : "configured";
+            return (
+              <li className={`activity-item ${resolved ? "resolved" : `severity-${event.severity}`}`} key={event.id}>
+                <span className="activity-marker">{resolved ? <CheckIcon size={17} /> : <AlertIcon size={17} />}</span>
+                <div className="activity-copy">
+                  <div className="activity-heading"><div><p>{event.category} · {event.deviceName}</p><h3>{event.title}</h3></div><StatusChip label={resolved ? "resolved" : event.severity} tone={tone} /></div>
+                  <p>{resolved ? "HAVEN no longer derives this finding from the latest observation." : event.summary}</p>
+                  <time dateTime={event.occurredAt}>{formatDate(event.occurredAt)}</time>
+                </div>
+              </li>
+            );
+          })}
+        </ol>
+      )}
+    </section>
+  );
+}
+
 function BaselinePanel({ checks, collectedAt }: { checks: BaselineCheck[]; collectedAt: string }) {
   if (checks.length === 0) return null;
   const passing = checks.filter((check) => check.status === "pass").length;
@@ -312,7 +351,7 @@ function BaselinePanel({ checks, collectedAt }: { checks: BaselineCheck[]; colle
   );
 }
 
-function Application({ snapshot, devices, selectedDevice, selectDevice, refresh, refreshing, error, demoMode }: { snapshot: SecuritySnapshot; devices: DeviceRecord[]; selectedDevice: DeviceRecord | null; selectDevice: (id: string) => void; refresh: () => void; refreshing: boolean; error: string | null; demoMode: boolean }) {
+function Application({ snapshot, devices, events, runtime, selectedDevice, selectDevice, refresh, refreshing, error, demoMode, alertsEnabled, alertsSupported, enableAlerts }: { snapshot: SecuritySnapshot; devices: DeviceRecord[]; events: SecurityEvent[]; runtime: RuntimeStatus | null; selectedDevice: DeviceRecord | null; selectDevice: (id: string) => void; refresh: () => void; refreshing: boolean; error: string | null; demoMode: boolean; alertsEnabled: boolean; alertsSupported: boolean; enableAlerts: () => void }) {
   const defenderHealthy = snapshot.defender?.antivirusEnabled === true
     && snapshot.defender.realTimeProtectionEnabled === true
     && snapshot.defender.tamperProtected !== false;
@@ -325,12 +364,16 @@ function Application({ snapshot, devices, selectedDevice, selectDevice, refresh,
     <>
       <header className="topbar">
         <a className="brand" href="/" aria-label="HAVEN home"><span className="brand-mark"><HavenIcon /></span><span><strong>HAVEN</strong><small>Personal Security Observatory</small></span></a>
-        <div className="topbar-actions"><span className={`local-pill ${demoMode ? "demo-pill" : ""}`}><span className="local-dot" />{demoMode ? "Synthetic demo" : "Read-only"}</span>{selectedDevice?.trustState === "local" && <button className="refresh-button" type="button" onClick={refresh} disabled={refreshing}>{refreshing ? "Collecting…" : <><RefreshIcon size={15} />Refresh local</>}</button>}</div>
+        <div className="topbar-actions">
+          <span className={`local-pill ${demoMode ? "demo-pill" : ""}`}><span className="local-dot" />{demoMode ? "Synthetic demo" : runtime?.monitor.enabled ? "Monitoring" : "Read-only"}</span>
+          {!demoMode && alertsSupported && <button className={`desktop-alert-button ${alertsEnabled ? "enabled" : ""}`} type="button" onClick={enableAlerts} disabled={alertsEnabled} aria-label={alertsEnabled ? "Desktop alerts enabled" : "Enable desktop alerts"}><BellIcon size={15} /><span>{alertsEnabled ? "Alerts on" : "Enable alerts"}</span></button>}
+          {selectedDevice?.trustState === "local" && <button className="refresh-button" type="button" onClick={refresh} disabled={refreshing}>{refreshing ? "Collecting…" : <><RefreshIcon size={15} />Refresh now</>}</button>}
+        </div>
       </header>
       <main>
         <DeviceInventory devices={devices} selectedId={selectedDevice?.id || snapshot.device.deviceId || ""} select={selectDevice} demoMode={demoMode} />
         {demoMode && <p className="demo-banner" role="status"><strong>Synthetic demo mode.</strong> Every device and observation on this page is invented. HAVEN is not showing or collecting data from this computer.</p>}
-        {!demoMode && <p className="context-banner"><strong>Local, read-only view.</strong> This inventory contains only this computer and agents you explicitly enroll—not every device on the network. The information below reports native security settings and current connections; it does not mean HAVEN found an attack.</p>}
+        {!demoMode && <p className="context-banner"><strong>Continuous, read-only monitoring.</strong> HAVEN observes this computer every {runtime?.monitor.enabled ? formatInterval(runtime.monitor.intervalSeconds) : "configured interval"} and records only meaningful finding transitions. This inventory contains explicitly enrolled devices—not every device on the network—and an event does not by itself prove an attack.</p>}
         {error && <p className="inline-error" role="alert">{error}</p>}
         <section className="hero" aria-labelledby="device-name">
           <div className="hero-identity"><span className="hero-device-icon">{snapshot.device.operatingSystem.toLowerCase().includes("server") ? <ServerIcon size={28} /> : selectedDevice?.displayName.toLowerCase().includes("laptop") ? <LaptopIcon size={28} /> : <MonitorIcon size={28} />}</span><div><p className="eyebrow">{selectedDevice?.trustState === "local" ? "THIS DEVICE" : "DEVICE OBSERVATION"}</p><h1 id="device-name">{selectedDevice?.displayName || snapshot.device.hostName}</h1><p className="device-detail">{snapshot.device.hostName} · {snapshot.device.operatingSystem} · {snapshot.device.architecture} · {formatDuration(snapshot.device.uptimeSeconds)}</p></div></div>
@@ -340,14 +383,16 @@ function Application({ snapshot, devices, selectedDevice, selectDevice, refresh,
           <SummaryCard icon={<DefenderIcon />} accent="blue" title="Protection" label={snapshot.defender ? (defenderHealthy ? "Protected" : "Attention") : "Unavailable"} tone={snapshot.defender ? (defenderHealthy ? "healthy" : "attention") : "unknown"}>{snapshot.defender ? (defenderHealthy ? "Antivirus and real-time monitoring are active." : "One or more protection signals are off or unavailable.") : "Defender status was not returned."}</SummaryCard>
           <SummaryCard icon={<FirewallIcon />} accent="amber" title="Firewall" label={firewallsKnown ? (firewallsEnabled ? "Enabled" : "Attention") : "Unavailable"} tone={firewallsKnown ? (firewallsEnabled ? "healthy" : "danger") : "unknown"}>{firewallsKnown ? (firewallsEnabled ? `All ${snapshot.firewallProfiles.length} firewall profiles are enabled.` : "At least one firewall profile is disabled.") : "Firewall profile data was not returned."}</SummaryCard>
           <SummaryCard icon={<NetworkIcon />} accent="cyan" title="Network" label={`${established} connected`} tone="healthy">{established} established and {listening} listening TCP endpoints observed right now. These are not threat counts.</SummaryCard>
+          <SummaryCard icon={<ActivityIcon />} accent="green" title="Monitor" label={runtime?.monitor.enabled ? `Every ${formatInterval(runtime.monitor.intervalSeconds)}` : "Manual"} tone={runtime?.monitor.lastCollectionError ? "attention" : runtime?.monitor.enabled ? "healthy" : "unknown"}>{runtime?.monitor.lastCollectionError || (runtime?.monitor.lastSuccessfulAt ? `Last automatic observation succeeded ${formatDate(runtime.monitor.lastSuccessfulAt)}.` : "Automatic monitoring is starting.")}</SummaryCard>
         </section>
+        <ActivityPanel events={events} />
         {(snapshot.baselineChecks || []).length > 0 && <><FindingsPanel findings={snapshot.findings || []} checks={snapshot.baselineChecks || []} /><BaselinePanel checks={snapshot.baselineChecks || []} collectedAt={snapshot.collectedAt} /></>}
         {snapshot.notices.length > 0 && <section className="panel notices-panel" aria-labelledby="notices-title"><PanelHeading eyebrow="COLLECTION NOTES" title="Some signals could not be verified" id="notices-title" icon={<AlertIcon />} accent="amber">A collection limitation is not automatically a security problem</PanelHeading><ul className="notices-list">{snapshot.notices.map((notice, index) => <li className="notice" key={`${notice.source}-${index}`}><strong>{notice.source}: </strong>{notice.message}</li>)}</ul></section>}
         <DefenderPanel defender={snapshot.defender} />
         <FirewallPanel profiles={snapshot.firewallProfiles} />
         <ConnectionsPanel connections={snapshot.connections} />
       </main>
-      <footer><span>HAVEN milestone 0.4</span><span>Observe first. Control deliberately.</span></footer>
+      <footer><span>HAVEN milestone 0.5 · Monitor &amp; Respond</span><span>Observe continuously. Alert deliberately.</span></footer>
     </>
   );
 }
@@ -355,18 +400,26 @@ function Application({ snapshot, devices, selectedDevice, selectDevice, refresh,
 export function App() {
   const [snapshot, setSnapshot] = useState<SecuritySnapshot | null>(null);
   const [devices, setDevices] = useState<DeviceRecord[]>([]);
+  const [events, setEvents] = useState<SecurityEvent[]>([]);
+  const [runtime, setRuntime] = useState<RuntimeStatus | null>(null);
   const [selectedId, setSelectedId] = useState("");
   const [demoMode, setDemoMode] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
+  const alertsSupported = typeof window !== "undefined" && "Notification" in window;
+  const [alertsEnabled, setAlertsEnabled] = useState(() => alertsSupported && window.Notification.permission === "granted" && window.localStorage.getItem("haven.desktopAlerts") === "enabled");
+  const lastNotifiedEvent = useRef<number>(typeof window === "undefined" ? -1 : Number(window.localStorage.getItem("haven.lastNotifiedEvent") ?? "-1"));
 
   const refresh = useCallback(async (signal?: AbortSignal) => {
     setRefreshing(true);
     try {
-      const [collected, inventory, runtime] = await Promise.all([collectSnapshot(signal), listDevices(signal), getRuntimeStatus(signal)]);
+      const collected = await collectSnapshot(signal);
+      const [inventory, runtimeStatus, activity] = await Promise.all([listDevices(signal), getRuntimeStatus(signal), listEvents(undefined, signal)]);
       setSnapshot(collected);
       setDevices(inventory);
-      setDemoMode(runtime.demoMode);
+      setEvents(activity);
+      setRuntime(runtimeStatus);
+      setDemoMode(runtimeStatus.demoMode);
       setSelectedId(collected.device.deviceId || inventory.find((device) => device.trustState === "local")?.id || "");
       setError(null);
     } catch (reason) {
@@ -392,16 +445,92 @@ export function App() {
     }
   }, []);
 
+  const enableAlerts = useCallback(async () => {
+    if (!alertsSupported) {
+      setError("This browser does not support desktop notifications.");
+      return;
+    }
+    const permission = await window.Notification.requestPermission();
+    if (permission !== "granted") {
+      setError("Desktop notifications remain blocked. You can change this site's notification permission in the browser.");
+      return;
+    }
+    const newestEvent = events.reduce((highest, event) => Math.max(highest, event.id), 0);
+    lastNotifiedEvent.current = newestEvent;
+    window.localStorage.setItem("haven.lastNotifiedEvent", String(newestEvent));
+    window.localStorage.setItem("haven.desktopAlerts", "enabled");
+    setAlertsEnabled(true);
+    setError(null);
+  }, [alertsSupported, events]);
+
   useEffect(() => {
     const controller = new AbortController();
     void refresh(controller.signal);
     return () => controller.abort();
   }, [refresh]);
 
+  useEffect(() => {
+    const controller = new AbortController();
+    const poll = async () => {
+      try {
+        const [latest, inventory, runtimeStatus, activity] = await Promise.all([
+          getLatestSnapshot(controller.signal),
+          listDevices(controller.signal),
+          getRuntimeStatus(controller.signal),
+          listEvents(undefined, controller.signal),
+        ]);
+        setDevices(inventory);
+        setEvents(activity);
+        setRuntime(runtimeStatus);
+        if (selectedId === "" || selectedId === latest.device.deviceId || inventory.find((device) => device.id === selectedId)?.trustState === "local") {
+          setSnapshot(latest);
+          setSelectedId(latest.device.deviceId || inventory.find((device) => device.trustState === "local")?.id || selectedId);
+        }
+        setError(null);
+      } catch (reason) {
+        if (reason instanceof DOMException && reason.name === "AbortError") return;
+        setError(reason instanceof Error ? reason.message : "HAVEN could not refresh its monitoring status.");
+      }
+    };
+    const interval = window.setInterval(() => void poll(), 60_000);
+    return () => {
+      controller.abort();
+      window.clearInterval(interval);
+    };
+  }, [selectedId]);
+
+  useEffect(() => {
+    if (!alertsEnabled || !alertsSupported || window.Notification.permission !== "granted" || events.length === 0) return;
+    const newestEvent = events.reduce((highest, event) => Math.max(highest, event.id), 0);
+    if (lastNotifiedEvent.current < 0) {
+      lastNotifiedEvent.current = newestEvent;
+      window.localStorage.setItem("haven.lastNotifiedEvent", String(newestEvent));
+      return;
+    }
+    events
+      .filter((event) => event.id > lastNotifiedEvent.current && event.kind === "opened" && (event.severity === "high" || event.severity === "medium"))
+      .sort((left, right) => left.id - right.id)
+      .forEach((event) => {
+        const notification = new window.Notification(`HAVEN · ${event.title}`, {
+          body: `${event.deviceName}: ${event.summary}`,
+          tag: `haven-event-${event.id}`,
+        });
+        notification.onclick = () => {
+          window.focus();
+          notification.close();
+        };
+      });
+    if (newestEvent > lastNotifiedEvent.current) {
+      lastNotifiedEvent.current = newestEvent;
+      window.localStorage.setItem("haven.lastNotifiedEvent", String(newestEvent));
+    }
+  }, [alertsEnabled, alertsSupported, events]);
+
   if (!snapshot) {
     return <main className="loading-state"><div className="brand-mark"><HavenIcon /></div><p>{error || "Collecting security posture…"}</p>{error && <button className="refresh-button" onClick={() => void refresh()}>Try again</button>}</main>;
   }
 
   const selectedDevice = devices.find((device) => device.id === selectedId) || null;
-  return <Application snapshot={snapshot} devices={devices} selectedDevice={selectedDevice} selectDevice={(id) => void selectDevice(id)} refresh={() => void refresh()} refreshing={refreshing} error={error} demoMode={demoMode} />;
+  const selectedEvents = selectedId ? events.filter((event) => event.deviceId === selectedId) : events;
+  return <Application snapshot={snapshot} devices={devices} events={selectedEvents} runtime={runtime} selectedDevice={selectedDevice} selectDevice={(id) => void selectDevice(id)} refresh={() => void refresh()} refreshing={refreshing} error={error} demoMode={demoMode} alertsEnabled={alertsEnabled} alertsSupported={alertsSupported} enableAlerts={() => void enableAlerts()} />;
 }

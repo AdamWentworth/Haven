@@ -25,6 +25,16 @@ func (collector staticCollector) Collect(context.Context) model.SecuritySnapshot
 	return collector.snapshot
 }
 
+type signalingCollector struct {
+	snapshot model.SecuritySnapshot
+	calls    chan struct{}
+}
+
+func (collector signalingCollector) Collect(context.Context) model.SecuritySnapshot {
+	collector.calls <- struct{}{}
+	return collector.snapshot
+}
+
 func testServer(t *testing.T) (*Server, *storage.Store) {
 	t.Helper()
 	store, err := storage.Open(context.Background(), filepath.Join(t.TempDir(), "haven.db"))
@@ -103,6 +113,60 @@ func TestSnapshotEndpointPersistsObservation(t *testing.T) {
 	}
 	if len(stored.BaselineChecks) == 0 {
 		t.Fatal("expected the hub to derive baseline checks before persistence")
+	}
+	latest := httptest.NewRecorder()
+	server.Handler().ServeHTTP(latest, httptest.NewRequest(http.MethodGet, "/api/security/latest", nil))
+	if latest.Code != http.StatusOK || !strings.Contains(latest.Body.String(), `"hostName":"Test device"`) {
+		t.Fatalf("unexpected latest observation: %d %s", latest.Code, latest.Body.String())
+	}
+}
+
+func TestSecurityEventEndpointReturnsFindingTransitions(t *testing.T) {
+	server, store := testServer(t)
+	defer store.Close()
+	disabled := false
+	snapshot := server.collector.Collect(context.Background())
+	snapshot.Defender = &model.DefenderStatus{
+		AntivirusEnabled:          &disabled,
+		RealTimeProtectionEnabled: &disabled,
+	}
+	server.collector = staticCollector{snapshot: snapshot}
+
+	collect := httptest.NewRecorder()
+	server.Handler().ServeHTTP(collect, httptest.NewRequest(http.MethodGet, "/api/security/snapshot", nil))
+	events := httptest.NewRecorder()
+	server.Handler().ServeHTTP(events, httptest.NewRequest(http.MethodGet, "/api/events?deviceId=test-device&limit=10", nil))
+
+	if events.Code != http.StatusOK || !strings.Contains(events.Body.String(), `"kind":"opened"`) || !strings.Contains(events.Body.String(), `"findingId":"defender-disabled"`) {
+		t.Fatalf("unexpected security events: %d %s", events.Code, events.Body.String())
+	}
+}
+
+func TestContinuousMonitorCollectsImmediatelyAndOnInterval(t *testing.T) {
+	server, store := testServer(t)
+	defer store.Close()
+	calls := make(chan struct{}, 4)
+	snapshot := server.collector.Collect(context.Background())
+	server.collector = signalingCollector{snapshot: snapshot, calls: calls}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	go server.RunMonitor(ctx, 10*time.Millisecond)
+
+	for index := 0; index < 2; index++ {
+		select {
+		case <-calls:
+		case <-time.After(time.Second):
+			t.Fatal("continuous monitor did not collect on schedule")
+		}
+	}
+	cancel()
+	deadline := time.Now().Add(time.Second)
+	for server.monitorStatus().LastSuccessfulAt == nil && time.Now().Before(deadline) {
+		time.Sleep(5 * time.Millisecond)
+	}
+	status := server.monitorStatus()
+	if !status.Enabled || status.IntervalSeconds != 0 || status.LastSuccessfulAt == nil {
+		t.Fatalf("unexpected monitor status: %#v", status)
 	}
 }
 

@@ -80,3 +80,11 @@ export function RemoteAccessIcon(props: IconProps) {
 export function UsersIcon(props: IconProps) {
   return <SvgIcon {...props}><circle cx="9" cy="8" r="3" /><path d="M3.5 20v-2a5.5 5.5 0 0 1 11 0v2M16 5.5a3 3 0 0 1 0 5.8M17 14a5 5 0 0 1 3.5 4.8V20" /></SvgIcon>;
 }
+
+export function ActivityIcon(props: IconProps) {
+  return <SvgIcon {...props}><path d="M3 12h4l2.2-6 4.1 12 2.1-6H21" /></SvgIcon>;
+}
+
+export function BellIcon(props: IconProps) {
+  return <SvgIcon {...props}><path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9M10 21h4" /></SvgIcon>;
+}

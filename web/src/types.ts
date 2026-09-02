@@ -37,6 +37,19 @@ export interface SecurityFinding {
   recommendation: string;
 }
 
+export interface SecurityEvent {
+  id: number;
+  deviceId: string;
+  deviceName: string;
+  findingId: string;
+  kind: "opened" | "resolved";
+  category: string;
+  title: string;
+  severity: "high" | "medium" | "low";
+  summary: string;
+  occurredAt: string;
+}
+
 export interface DeviceSummary {
   deviceId?: string;
   hostName: string;
@@ -108,5 +121,12 @@ export interface RuntimeStatus {
   service: string;
   agentIngestion: string;
   demoMode: boolean;
+  monitor: {
+    enabled: boolean;
+    intervalSeconds: number;
+    lastAttemptAt: string | null;
+    lastSuccessfulAt: string | null;
+    lastCollectionError?: string;
+  };
   timestamp: string;
 }

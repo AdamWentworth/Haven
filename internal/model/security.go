@@ -89,6 +89,29 @@ type SecurityFinding struct {
 	Recommendation string `json:"recommendation"`
 }
 
+// SecurityEvent records a privacy-bounded finding transition. It deliberately
+// excludes connection metadata, account names, threat paths, and credentials.
+type SecurityEvent struct {
+	ID         int64     `json:"id"`
+	DeviceID   string    `json:"deviceId"`
+	DeviceName string    `json:"deviceName"`
+	FindingID  string    `json:"findingId"`
+	Kind       string    `json:"kind"`
+	Category   string    `json:"category"`
+	Title      string    `json:"title"`
+	Severity   string    `json:"severity"`
+	Summary    string    `json:"summary"`
+	OccurredAt time.Time `json:"occurredAt"`
+}
+
+type MonitorStatus struct {
+	Enabled             bool       `json:"enabled"`
+	IntervalSeconds     int64      `json:"intervalSeconds"`
+	LastAttemptAt       *time.Time `json:"lastAttemptAt"`
+	LastSuccessfulAt    *time.Time `json:"lastSuccessfulAt"`
+	LastCollectionError string     `json:"lastCollectionError,omitempty"`
+}
+
 type DeviceSummary struct {
 	DeviceID        string `json:"deviceId,omitempty"`
 	HostName        string `json:"hostName"`

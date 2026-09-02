@@ -6,7 +6,7 @@ HAVEN is a personal security observatory for home devices and networks. It prese
 
 HAVEN is pre-release software. The current milestone combines local device trust with an explainable Windows security baseline; it is not yet an authenticated household deployment or a replacement for native protection.
 
-## Milestone 0.4
+## Milestone 0.5 — Monitor & Respond
 
 The current implementation provides:
 
@@ -21,11 +21,14 @@ The current implementation provides:
 - RDP context that distinguishes NLA-protected, firewall-restricted access from unrestricted or unverifiable exposure
 - Separate healthy, intentionally configured, review, and unverified states with per-check observation timestamps
 - Prioritized findings with evidence and conservative next steps instead of an opaque security score
+- Continuous local collection every 15 minutes by default, with serialized manual refreshes
+- A privacy-bounded activity ledger that records only when a finding opens or resolves
+- An activity-first dashboard with opt-in browser desktop alerts for new high- and medium-severity findings while HAVEN is open
 - Privacy-bounded collection: administrator names, update titles, threat names, and detected resource paths are not collected
 - A hardened, single-service Docker Compose definition for the future Ubuntu hub
 - Visible collector failures instead of silently treating unavailable information as healthy
 
-The dashboard and agent endpoint both bind to loopback during development. No Docker runtime or deployment is needed for local iteration, and the Compose baseline does not publish the agent listener yet.
+The dashboard and agent endpoint both bind to loopback during development. No Docker runtime or deployment is needed for local iteration, and the Compose baseline does not publish the agent listener yet. Desktop alerts require explicit browser permission and currently operate while the HAVEN page is open; they do not install a tray process or background browser extension.
 
 Because HAVEN is pre-release and observation schema 2 is still evolving, hubs and agents should run the same repository revision.
 
@@ -48,6 +51,8 @@ go run .\cmd\haven-hub
 ```
 
 Open <http://127.0.0.1:5080>. The hub binds to loopback by default and writes its development database to the operating system's per-user application-data directory, outside the repository.
+
+The hub takes an observation immediately at startup and every 15 minutes thereafter. Set `HAVEN_COLLECTION_INTERVAL` to a duration from `1m` through `24h` to change it during development.
 
 Run a single read-only agent collection without enrollment:
 
@@ -145,6 +150,6 @@ Haven/
 
 ## Next security milestone
 
-The next milestone is a one-device household pilot: add authenticated finding dismissal/review state, browser authentication and private HTTPS access, package the native agent as a service, measure deployment resources, and schedule backups. GitHub Actions verifies the current Go, frontend, dependency, and public-repository safety checks on each proposed change. Deployment remains deliberate rather than part of everyday development.
+The next milestone is the authenticated action boundary: browser authentication, origin and anti-forgery protections, finding acknowledgement and accepted-risk notes, an audit ledger, and the first narrowly allowlisted actions such as opening the relevant native settings page or requesting a Defender quick scan. Private HTTPS access, native agent service packaging, deployment resource measurements, and scheduled backups remain gates for the household pilot. GitHub Actions verifies the current Go, frontend, dependency, and public-repository safety checks on each proposed change.
 
 Read the [architecture](docs/ARCHITECTURE.md), [threat model](docs/THREAT_MODEL.md), and [public repository policy](docs/PUBLIC_REPOSITORY.md) before expanding the trust boundary.

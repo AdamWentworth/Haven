@@ -172,6 +172,64 @@ func TestMigrationRemovesOlderCaseOnlyLocalDuplicate(t *testing.T) {
 	}
 }
 
+func TestFindingEventsRecordOnlyOpenedAndResolvedTransitions(t *testing.T) {
+	ctx := context.Background()
+	store, err := Open(ctx, filepath.Join(t.TempDir(), "haven.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+
+	startedAt := time.Date(2026, time.September, 1, 12, 0, 0, 0, time.UTC)
+	snapshot := model.SecuritySnapshot{
+		CollectedAt: startedAt,
+		Device: model.DeviceSummary{
+			DeviceID:        "local_event_test",
+			HostName:        "event-test",
+			OperatingSystem: "Microsoft Windows 10 Pro",
+		},
+		Findings: []model.SecurityFinding{{
+			ID:             "defender-disabled",
+			Category:       "Protection",
+			Title:          "Defender protection is incomplete",
+			Severity:       "high",
+			Summary:        "Real-time monitoring is disabled.",
+			Recommendation: "Restore protection.",
+		}},
+		FirewallProfiles: []model.FirewallProfileStatus{},
+		Connections:      []model.NetworkConnection{},
+		Notices:          []model.CollectorNotice{},
+	}
+	if err := store.SaveSnapshot(ctx, snapshot); err != nil {
+		t.Fatal(err)
+	}
+
+	snapshot.CollectedAt = startedAt.Add(time.Minute)
+	if err := store.SaveSnapshot(ctx, snapshot); err != nil {
+		t.Fatal(err)
+	}
+	events, err := store.ListSecurityEvents(ctx, snapshot.Device.DeviceID, 10, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(events) != 1 || events[0].Kind != "opened" || events[0].Severity != "high" {
+		t.Fatalf("expected one opened event, got %#v", events)
+	}
+
+	snapshot.CollectedAt = startedAt.Add(2 * time.Minute)
+	snapshot.Findings = []model.SecurityFinding{}
+	if err := store.SaveSnapshot(ctx, snapshot); err != nil {
+		t.Fatal(err)
+	}
+	events, err = store.ListSecurityEvents(ctx, snapshot.Device.DeviceID, 10, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(events) != 2 || events[0].Kind != "resolved" || events[1].Kind != "opened" {
+		t.Fatalf("expected resolved and opened transitions, got %#v", events)
+	}
+}
+
 func TestEnrollmentReplayRevocationAndBackup(t *testing.T) {
 	ctx := context.Background()
 	directory := t.TempDir()

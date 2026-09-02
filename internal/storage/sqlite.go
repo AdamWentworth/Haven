@@ -118,6 +118,40 @@ var migrations = []migration{
 			   )`,
 		},
 	},
+	{
+		version: 4,
+		statements: []string{
+			`CREATE TABLE IF NOT EXISTS finding_states (
+				device_id TEXT NOT NULL REFERENCES devices(id) ON DELETE CASCADE,
+				finding_id TEXT NOT NULL,
+				category TEXT NOT NULL,
+				title TEXT NOT NULL,
+				severity TEXT NOT NULL,
+				summary TEXT NOT NULL,
+				recommendation TEXT NOT NULL,
+				active INTEGER NOT NULL,
+				first_seen_at TEXT NOT NULL,
+				last_seen_at TEXT NOT NULL,
+				resolved_at TEXT,
+				PRIMARY KEY (device_id, finding_id)
+			)`,
+			`CREATE TABLE IF NOT EXISTS security_events (
+				id INTEGER PRIMARY KEY,
+				device_id TEXT NOT NULL REFERENCES devices(id) ON DELETE CASCADE,
+				finding_id TEXT NOT NULL,
+				kind TEXT NOT NULL,
+				category TEXT NOT NULL,
+				title TEXT NOT NULL,
+				severity TEXT NOT NULL,
+				summary TEXT NOT NULL,
+				occurred_at TEXT NOT NULL
+			)`,
+			`CREATE INDEX IF NOT EXISTS security_events_device_occurred
+				ON security_events (device_id, occurred_at DESC, id DESC)`,
+			`CREATE INDEX IF NOT EXISTS security_events_occurred
+				ON security_events (occurred_at DESC, id DESC)`,
+		},
+	},
 }
 
 func Open(ctx context.Context, path string) (*Store, error) {
@@ -256,6 +290,9 @@ func (store *Store) SaveSnapshot(ctx context.Context, snapshot model.SecuritySna
 		return fmt.Errorf("save local device: %w", err)
 	}
 	if err := insertObservation(ctx, transaction, observationID, deviceID, nil, collectedAt, now, payload); err != nil {
+		return err
+	}
+	if err := reconcileFindingEvents(ctx, transaction, deviceID, snapshot, collectedAt); err != nil {
 		return err
 	}
 	if err := transaction.Commit(); err != nil {
@@ -422,6 +459,9 @@ func (store *Store) AcceptObservation(
 		}
 		return err
 	}
+	if err := reconcileFindingEvents(ctx, transaction, deviceID, envelope.Snapshot, envelope.Snapshot.CollectedAt.UTC()); err != nil {
+		return err
+	}
 	_, err = transaction.ExecContext(
 		ctx,
 		`UPDATE devices SET
@@ -471,6 +511,64 @@ func (store *Store) ListDevices(ctx context.Context, now time.Time) ([]model.Dev
 		return nil, fmt.Errorf("list devices: %w", err)
 	}
 	return devices, nil
+}
+
+func (store *Store) ListSecurityEvents(ctx context.Context, deviceID string, limit int, demoMode bool) ([]model.SecurityEvent, error) {
+	if limit < 1 || limit > 100 {
+		return nil, errors.New("security event limit must be from 1 through 100")
+	}
+	trustFilter := `devices.trust_state <> 'synthetic'`
+	if demoMode {
+		trustFilter = `devices.trust_state = 'synthetic'`
+	}
+	query := `SELECT security_events.id, security_events.device_id, devices.display_name,
+			security_events.finding_id, security_events.kind, security_events.category,
+			security_events.title, security_events.severity, security_events.summary,
+			security_events.occurred_at
+		 FROM security_events
+		 JOIN devices ON devices.id = security_events.device_id
+		 WHERE ` + trustFilter
+	arguments := []any{}
+	if deviceID != "" {
+		query += ` AND security_events.device_id = ?`
+		arguments = append(arguments, deviceID)
+	}
+	query += ` ORDER BY security_events.occurred_at DESC, security_events.id DESC LIMIT ?`
+	arguments = append(arguments, limit)
+
+	rows, err := store.database.QueryContext(ctx, query, arguments...)
+	if err != nil {
+		return nil, fmt.Errorf("list security events: %w", err)
+	}
+	defer rows.Close()
+	events := []model.SecurityEvent{}
+	for rows.Next() {
+		var event model.SecurityEvent
+		var occurredAt string
+		if err := rows.Scan(
+			&event.ID,
+			&event.DeviceID,
+			&event.DeviceName,
+			&event.FindingID,
+			&event.Kind,
+			&event.Category,
+			&event.Title,
+			&event.Severity,
+			&event.Summary,
+			&occurredAt,
+		); err != nil {
+			return nil, fmt.Errorf("read security event: %w", err)
+		}
+		event.OccurredAt, err = parseDatabaseTime(occurredAt)
+		if err != nil {
+			return nil, err
+		}
+		events = append(events, event)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("list security events: %w", err)
+	}
+	return events, nil
 }
 
 func (store *Store) DeviceDetail(ctx context.Context, deviceID string, now time.Time) (model.DeviceDetail, error) {
@@ -653,6 +751,9 @@ func (store *Store) saveSyntheticSnapshot(
 	); err != nil {
 		return err
 	}
+	if err := reconcileFindingEvents(ctx, transaction, snapshot.Device.DeviceID, snapshot, snapshot.CollectedAt.UTC()); err != nil {
+		return err
+	}
 	return transaction.Commit()
 }
 
@@ -683,6 +784,13 @@ func (store *Store) DeleteBefore(ctx context.Context, cutoff time.Time) (int64, 
 		return 0, fmt.Errorf("begin observation retention: %w", err)
 	}
 	defer transaction.Rollback()
+	if _, err := transaction.ExecContext(
+		ctx,
+		`DELETE FROM security_events WHERE occurred_at < ?`,
+		cutoff.UTC().Format(time.RFC3339Nano),
+	); err != nil {
+		return 0, fmt.Errorf("expire security events: %w", err)
+	}
 	result, err := transaction.ExecContext(
 		ctx,
 		`DELETE FROM device_observations WHERE collected_at < ?`,
@@ -774,6 +882,147 @@ func insertObservation(
 	)
 	if err != nil {
 		return fmt.Errorf("save device observation: %w", err)
+	}
+	return nil
+}
+
+type storedFindingState struct {
+	finding model.SecurityFinding
+	active  bool
+}
+
+func reconcileFindingEvents(
+	ctx context.Context,
+	transaction *sql.Tx,
+	deviceID string,
+	snapshot model.SecuritySnapshot,
+	occurredAt time.Time,
+) error {
+	rows, err := transaction.QueryContext(
+		ctx,
+		`SELECT finding_id, category, title, severity, summary, recommendation, active
+		   FROM finding_states WHERE device_id = ?`,
+		deviceID,
+	)
+	if err != nil {
+		return fmt.Errorf("read finding states: %w", err)
+	}
+	states := make(map[string]storedFindingState)
+	for rows.Next() {
+		var state storedFindingState
+		var active int
+		if err := rows.Scan(
+			&state.finding.ID,
+			&state.finding.Category,
+			&state.finding.Title,
+			&state.finding.Severity,
+			&state.finding.Summary,
+			&state.finding.Recommendation,
+			&active,
+		); err != nil {
+			rows.Close()
+			return fmt.Errorf("read finding state: %w", err)
+		}
+		state.active = active != 0
+		states[state.finding.ID] = state
+	}
+	if err := rows.Close(); err != nil {
+		return fmt.Errorf("close finding states: %w", err)
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("iterate finding states: %w", err)
+	}
+
+	timestamp := occurredAt.UTC().Format(time.RFC3339Nano)
+	current := make(map[string]model.SecurityFinding, len(snapshot.Findings))
+	for _, finding := range snapshot.Findings {
+		current[finding.ID] = finding
+		state, existed := states[finding.ID]
+		if !existed || !state.active {
+			if err := insertSecurityEvent(ctx, transaction, deviceID, finding, "opened", timestamp); err != nil {
+				return err
+			}
+		}
+		_, err := transaction.ExecContext(
+			ctx,
+			`INSERT INTO finding_states (
+				device_id, finding_id, category, title, severity, summary, recommendation,
+				active, first_seen_at, last_seen_at, resolved_at
+			 ) VALUES (?, ?, ?, ?, ?, ?, ?, 1, ?, ?, NULL)
+			 ON CONFLICT(device_id, finding_id) DO UPDATE SET
+				category = excluded.category,
+				title = excluded.title,
+				severity = excluded.severity,
+				summary = excluded.summary,
+				recommendation = excluded.recommendation,
+				active = 1,
+				first_seen_at = CASE WHEN finding_states.active = 0 THEN excluded.first_seen_at ELSE finding_states.first_seen_at END,
+				last_seen_at = excluded.last_seen_at,
+				resolved_at = NULL`,
+			deviceID,
+			finding.ID,
+			finding.Category,
+			finding.Title,
+			finding.Severity,
+			finding.Summary,
+			finding.Recommendation,
+			timestamp,
+			timestamp,
+		)
+		if err != nil {
+			return fmt.Errorf("save finding state: %w", err)
+		}
+	}
+
+	for findingID, state := range states {
+		if !state.active {
+			continue
+		}
+		if _, stillActive := current[findingID]; stillActive {
+			continue
+		}
+		if err := insertSecurityEvent(ctx, transaction, deviceID, state.finding, "resolved", timestamp); err != nil {
+			return err
+		}
+		if _, err := transaction.ExecContext(
+			ctx,
+			`UPDATE finding_states
+			    SET active = 0, last_seen_at = ?, resolved_at = ?
+			  WHERE device_id = ? AND finding_id = ?`,
+			timestamp,
+			timestamp,
+			deviceID,
+			findingID,
+		); err != nil {
+			return fmt.Errorf("resolve finding state: %w", err)
+		}
+	}
+	return nil
+}
+
+func insertSecurityEvent(
+	ctx context.Context,
+	transaction *sql.Tx,
+	deviceID string,
+	finding model.SecurityFinding,
+	kind, occurredAt string,
+) error {
+	_, err := transaction.ExecContext(
+		ctx,
+		`INSERT INTO security_events (
+			device_id, finding_id, kind, category, title, severity, summary, occurred_at
+		 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+		deviceID,
+		finding.ID,
+		kind,
+		finding.Category,
+		finding.Title,
+		finding.Severity,
+		finding.Summary,
+		occurredAt,
+	)
+	if err != nil {
+		return fmt.Errorf("save security event: %w", err)
 	}
 	return nil
 }

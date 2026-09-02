@@ -14,13 +14,15 @@ HAVEN must not store passwords, session cookies, authenticator seeds, recovery-c
 
 ## Current boundary
 
-Milestone 0.4 performs read-only collection, explainable baseline evaluation, and authenticated device reporting. On Windows, the Go collector launches one fixed, internally defined PowerShell script with no user-controlled commands or parameters. The dashboard and agent listener bind to loopback by default, there is no CORS policy or remote-control route, and the dashboard sends restrictive browser security headers.
+Milestone 0.5 performs continuous read-only collection, explainable baseline evaluation, privacy-bounded finding-transition logging, and authenticated device reporting. On Windows, the Go collector launches one fixed, internally defined PowerShell script with no user-controlled commands or parameters. The dashboard and agent listener bind to loopback by default, there is no CORS policy or remote-control route, and the dashboard sends restrictive browser security headers.
 
 The agent endpoint uses TLS 1.3. Enrollment tokens are random, short-lived, one-time values; each accepted certificate has a distinct key and device identity. Observation identity, device identity, sequence, timestamp, schema, media type, body size, and request rate are validated. Revoked devices cannot submit reports.
 
 SQLite and private keys are stored outside the source tree. Historical records exclude live connection details and expire after a bounded period. The Docker Compose definition publishes only the dashboard to host loopback; it does not publish the agent listener.
 
 Baseline history contains only bounded posture and counts. HAVEN does not retain administrator names, Windows update titles, Defender threat names, detected file or resource paths, BitLocker recovery keys, or other recovery material. A finding is a local rule evaluation, not proof of compromise or a substitute for native security guidance.
+
+The activity ledger records only finding-opened and finding-resolved transitions using the already bounded finding text. Browser desktop alerts are opt-in, contain no secrets, and operate only while the page is open. HAVEN does not register a privileged tray process or notification service in this milestone.
 
 ## Principal threats
 

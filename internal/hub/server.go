@@ -1,6 +1,7 @@
 package hub
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -8,7 +9,9 @@ import (
 	"log/slog"
 	"net/http"
 	"path"
+	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/AdamWentworth/haven/internal/collector"
@@ -24,6 +27,12 @@ type Server struct {
 	fileSystem fs.FS
 	fileServer http.Handler
 	demoMode   bool
+
+	collectionMutex sync.Mutex
+	latestMutex     sync.RWMutex
+	latestSnapshot  *model.SecuritySnapshot
+	monitorMutex    sync.RWMutex
+	monitor         model.MonitorStatus
 }
 
 type ServerOption func(*Server)
@@ -56,8 +65,10 @@ func (server *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /api/health", server.health)
 	mux.HandleFunc("GET /api/security/snapshot", server.securitySnapshot)
+	mux.HandleFunc("GET /api/security/latest", server.latestSecuritySnapshot)
 	mux.HandleFunc("GET /api/devices", server.devices)
 	mux.HandleFunc("GET /api/devices/{deviceID}", server.deviceDetail)
+	mux.HandleFunc("GET /api/events", server.securityEvents)
 	mux.HandleFunc("/", server.webApplication)
 	return server.securityHeaders(mux)
 }
@@ -68,8 +79,34 @@ func (server *Server) health(writer http.ResponseWriter, _ *http.Request) {
 		"service":        "HAVEN",
 		"agentIngestion": "mutual-tls",
 		"demoMode":       server.demoMode,
+		"monitor":        server.monitorStatus(),
 		"timestamp":      time.Now().UTC(),
 	})
+}
+
+func (server *Server) securityEvents(writer http.ResponseWriter, request *http.Request) {
+	writer.Header().Set("Cache-Control", "no-store")
+	deviceID := request.URL.Query().Get("deviceId")
+	if len(deviceID) > 80 || strings.ContainsAny(deviceID, "/?#") {
+		http.Error(writer, "invalid device identity", http.StatusBadRequest)
+		return
+	}
+	limit := 40
+	if value := request.URL.Query().Get("limit"); value != "" {
+		parsed, err := strconv.Atoi(value)
+		if err != nil || parsed < 1 || parsed > 100 {
+			http.Error(writer, "limit must be from 1 through 100", http.StatusBadRequest)
+			return
+		}
+		limit = parsed
+	}
+	events, err := server.store.ListSecurityEvents(request.Context(), deviceID, limit, server.demoMode)
+	if err != nil {
+		server.logger.Error("could not list security events", "error", err)
+		http.Error(writer, "could not list security events", http.StatusInternalServerError)
+		return
+	}
+	server.writeJSON(writer, http.StatusOK, events)
 }
 
 func (server *Server) devices(writer http.ResponseWriter, request *http.Request) {
@@ -136,17 +173,89 @@ func (server *Server) securitySnapshot(writer http.ResponseWriter, request *http
 		server.writeJSON(writer, http.StatusOK, evaluated)
 		return
 	}
-	snapshot := server.collector.Collect(request.Context())
+	snapshot, _ := server.collectSnapshot(request.Context())
+	server.writeJSON(writer, http.StatusOK, snapshot)
+}
+
+func (server *Server) latestSecuritySnapshot(writer http.ResponseWriter, request *http.Request) {
+	writer.Header().Set("Cache-Control", "no-store")
+	if server.demoMode {
+		server.securitySnapshot(writer, request)
+		return
+	}
+	server.latestMutex.RLock()
+	defer server.latestMutex.RUnlock()
+	if server.latestSnapshot == nil {
+		http.Error(writer, "the first automatic observation is still running", http.StatusServiceUnavailable)
+		return
+	}
+	server.writeJSON(writer, http.StatusOK, *server.latestSnapshot)
+}
+
+func (server *Server) collectSnapshot(ctx context.Context) (model.SecuritySnapshot, error) {
+	server.collectionMutex.Lock()
+	defer server.collectionMutex.Unlock()
+	snapshot := server.collector.Collect(ctx)
 	snapshot = posture.Evaluate(snapshot, time.Now().UTC())
-	if err := server.store.SaveSnapshot(request.Context(), snapshot); err != nil {
+	if err := server.store.SaveSnapshot(ctx, snapshot); err != nil {
 		server.logger.Error("could not persist security observation", "error", err)
 		snapshot.Notices = append(snapshot.Notices, model.CollectorNotice{
 			Source:   "HAVEN storage",
 			Severity: "warning",
 			Message:  "The observation is visible but could not be saved to history.",
 		})
+		return snapshot, err
 	}
-	server.writeJSON(writer, http.StatusOK, snapshot)
+	server.latestMutex.Lock()
+	server.latestSnapshot = &snapshot
+	server.latestMutex.Unlock()
+	return snapshot, nil
+}
+
+// RunMonitor performs an immediate collection and then continues on the
+// configured interval until the context is cancelled. Collections share the
+// same lock as manual refreshes so an expensive native collector never runs
+// twice at once.
+func (server *Server) RunMonitor(ctx context.Context, interval time.Duration) {
+	if server.demoMode || interval <= 0 {
+		return
+	}
+	server.monitorMutex.Lock()
+	server.monitor.Enabled = true
+	server.monitor.IntervalSeconds = int64(interval / time.Second)
+	server.monitorMutex.Unlock()
+
+	server.runScheduledCollection(ctx)
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			server.runScheduledCollection(ctx)
+		}
+	}
+}
+
+func (server *Server) runScheduledCollection(ctx context.Context) {
+	attemptedAt := time.Now().UTC()
+	_, err := server.collectSnapshot(ctx)
+	server.monitorMutex.Lock()
+	defer server.monitorMutex.Unlock()
+	server.monitor.LastAttemptAt = &attemptedAt
+	if err != nil {
+		server.monitor.LastCollectionError = "The latest automatic observation could not be stored."
+		return
+	}
+	server.monitor.LastSuccessfulAt = &attemptedAt
+	server.monitor.LastCollectionError = ""
+}
+
+func (server *Server) monitorStatus() model.MonitorStatus {
+	server.monitorMutex.RLock()
+	defer server.monitorMutex.RUnlock()
+	return server.monitor
 }
 
 func visibleDevices(devices []model.DeviceRecord, demoMode bool) []model.DeviceRecord {

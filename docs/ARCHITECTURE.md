@@ -34,7 +34,7 @@ PostgreSQL becomes appropriate if HAVEN needs multiple hub writers, multiple hub
 
 ## Current milestone boundary
 
-Milestone 0.4 adds an explainable Windows posture baseline to the distributed trust foundation while remaining local-only by default:
+Milestone 0.5 turns the explainable Windows baseline into a continuous local monitor while remaining local-only by default:
 
 - `haven-hub` serves a loopback dashboard, performs local collection, owns SQLite, and exposes a separate loopback TLS 1.3 agent listener.
 - Enrollment uses a short-lived, one-time 256-bit token plus an ECDSA P-256 certificate request. The trusted CA certificate is transferred out of band.
@@ -44,6 +44,9 @@ Milestone 0.4 adds an explainable Windows posture baseline to the distributed tr
 - The Compose dashboard remains loopback-only and its agent listener is not published.
 - Observation schema version 2 adds privacy-bounded Windows posture. The hub derives checks and findings from raw signals so severity logic stays reviewable and consistent.
 - Findings use explicit evidence and recommendations rather than a combined score. Unavailable data remains unknown, never healthy.
+- The local hub collects immediately at startup and on a bounded interval. Manual and scheduled collections are serialized so the fixed native collector cannot run concurrently with itself.
+- SQLite stores an append-only transition event only when an evaluated finding opens or resolves. Unchanged observations do not create activity noise.
+- The browser can request desktop-notification permission and alerts only on newly opened high- or medium-severity findings while the page is open. Notification state stays in browser-local storage.
 - A configured state distinguishes intentionally enabled services with verified compensating controls from both healthy defaults and actionable findings. The Windows collector can verify TPM readiness without elevation and summarizes RDP firewall scope without retaining rule names or network addresses.
 
 The trusted inventory contains only the local collector and explicitly enrolled agents. HAVEN does not infer trust from sharing a network. Any future network-discovery view will keep merely observed assets separate from enrolled devices, and another household member's device requires informed opt-in before an agent is installed.
@@ -58,6 +61,7 @@ Agents will send high-level observations to the hub, never SQL. The SQLite file 
 
 - Posture observations expire after 90 days by default; deployment configuration can shorten that period.
 - Live TCP connection details are returned to the dashboard but removed before a snapshot is stored.
+- Finding-transition events retain the privacy-bounded category, title, severity, and summary already present in posture history; they never copy connection details or excluded identifiers.
 - Packet payloads, browser content, keystrokes, screenshots, and document contents are never collected.
 - Future high-volume network summaries receive shorter retention than posture changes.
 - Account-security records contain status metadata, never passwords, recovery codes, authenticator seeds, cookies, or refresh tokens unless a separately reviewed integration makes a token unavoidable.
