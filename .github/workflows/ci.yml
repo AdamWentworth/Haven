@@ -52,3 +52,71 @@ jobs:
       - name: Check repository for private material
         shell: pwsh
         run: ./scripts/Test-PublicRepository.ps1
+
+  publish-hub-image:
+    name: Publish immutable hub image
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Log in to GHCR
+        run: echo "${{ github.token }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+
+      - name: Build CI-approved image
+        env:
+          IMAGE: ghcr.io/adamwentworth/haven-hub
+        run: |
+          docker build --pull \
+            --build-arg "HAVEN_BUILD_SHA=${GITHUB_SHA}" \
+            --tag "${IMAGE}:sha-${GITHUB_SHA}" \
+            --tag "${IMAGE}:main" \
+            .
+
+      - name: Publish CI-approved image
+        env:
+          IMAGE: ghcr.io/adamwentworth/haven-hub
+        run: |
+          docker push "${IMAGE}:sha-${GITHUB_SHA}"
+          docker push "${IMAGE}:main"
+
+      - name: Log out of GHCR
+        if: always()
+        run: docker logout ghcr.io
+
+  request-production-deployment:
+    name: Request private HomeOps deployment
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && vars.HOMEOPS_AUTO_DEPLOY == 'true'
+    needs: publish-hub-image
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+
+    steps:
+      - name: Dispatch approved revision to HomeOps
+        env:
+          HOMEOPS_DISPATCH_TOKEN: ${{ secrets.HOMEOPS_DISPATCH_TOKEN }}
+        run: |
+          if [[ -z "${HOMEOPS_DISPATCH_TOKEN}" ]]; then
+            echo "HOMEOPS_DISPATCH_TOKEN is not configured." >&2
+            exit 1
+          fi
+          payload=$(jq -n \
+            --arg repository "${GITHUB_REPOSITORY}" \
+            --arg sha "${GITHUB_SHA}" \
+            '{event_type:"deploy-haven",client_payload:{repository:$repository,sha:$sha}}')
+          curl --fail-with-body --silent --show-error \
+            --request POST \
+            --header "Accept: application/vnd.github+json" \
+            --header "Authorization: Bearer ${HOMEOPS_DISPATCH_TOKEN}" \
+            --header "X-GitHub-Api-Version: 2022-11-28" \
+            https://api.github.com/repos/AdamWentworth/HomeOps/dispatches \
+            --data "${payload}"

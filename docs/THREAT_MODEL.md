@@ -22,7 +22,7 @@ Passkey credential data is encrypted at rest with a random key outside the repos
 
 The agent endpoint uses TLS 1.3. Enrollment tokens are random, short-lived, one-time values; each accepted certificate has a distinct key and device identity. Observation identity, device identity, sequence, timestamp, schema, media type, body size, and request rate are validated. Revoked devices cannot submit reports.
 
-SQLite and private keys are stored outside the source tree. Historical records exclude live connection details and expire after a bounded period. The Docker Compose definition publishes only the dashboard to host loopback; it does not publish the agent listener.
+SQLite and private keys are stored outside the source tree. Historical records exclude live connection details and expire after a bounded period. Development Compose publishes only the dashboard to host loopback. The production profile binds exact private addresses for its dashboard, DNS, and agent listeners and does not expose them through public ingress.
 
 Baseline history contains only bounded posture and counts. HAVEN does not retain administrator names, Windows update titles, Defender threat names, detected file or resource paths, BitLocker recovery keys, or other recovery material. A finding is a local rule evaluation, not proof of compromise or a substitute for native security guidance.
 
@@ -89,6 +89,7 @@ Current mitigations:
 - Drop every Linux capability and enable `no-new-privileges`.
 - Mount only the application-data volume and a bounded temporary filesystem.
 - Avoid host networking, host process namespaces, devices, Docker socket access, and privileged mode.
+- Do not attach persistent self-hosted GitHub Actions runners to the public repository. GitHub-hosted CI publishes immutable images; only the private HomeOps repository can schedule the fixed production deployment.
 
 The native agent is not placed inside the hub container because observing a host from a container would require weakening this boundary.
 

@@ -1,6 +1,7 @@
 package trust
 
 import (
+	"crypto/x509"
 	"os"
 	"path/filepath"
 	"testing"
@@ -35,6 +36,23 @@ func TestHubPKISignsBoundAgentIdentity(t *testing.T) {
 	}
 	if loaded.CACertificate.SerialNumber.Cmp(pki.CACertificate.SerialNumber) != 0 {
 		t.Fatal("existing PKI identity was not preserved")
+	}
+}
+
+func TestHubPKIIncludesConfiguredAgentEndpointNames(t *testing.T) {
+	now := time.Date(2026, time.September, 1, 12, 0, 0, 0, time.UTC)
+	pki, err := EnsureHubPKIForServerNames(t.TempDir(), now, []string{"haven.home.arpa", "192.0.2.77"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	certificate, err := x509.ParseCertificate(pki.ServerCertificate.Certificate[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"haven.home.arpa", "192.0.2.77", "localhost"} {
+		if err := certificate.VerifyHostname(name); err != nil {
+			t.Fatalf("expected server certificate to include %s: %v", name, err)
+		}
 	}
 }
 

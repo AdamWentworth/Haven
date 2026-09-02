@@ -37,6 +37,18 @@ type AgentIdentity struct {
 }
 
 func EnsureHubPKI(directory string, now time.Time) (*HubPKI, error) {
+	return EnsureHubPKIForServerNames(directory, now, nil)
+}
+
+// EnsureHubPKIForServerNames creates or loads the private authority used by
+// native agents. Additional names are included in the agent endpoint's server
+// certificate so a remote agent can verify the production hub by its stable
+// private hostname or address.
+func EnsureHubPKIForServerNames(directory string, now time.Time, serverNames []string) (*HubPKI, error) {
+	serverNames, err := normalizeServerNames(serverNames)
+	if err != nil {
+		return nil, err
+	}
 	if err := os.MkdirAll(directory, 0o700); err != nil {
 		return nil, fmt.Errorf("create HAVEN PKI directory: %w", err)
 	}
@@ -52,14 +64,30 @@ func EnsureHubPKI(directory string, now time.Time) (*HubPKI, error) {
 	}
 
 	if existing == 0 {
-		if err := generateHubPKI(paths, now); err != nil {
+		if err := generateHubPKI(paths, now, serverNames); err != nil {
 			return nil, err
 		}
 	} else if existing != len(paths) {
 		return nil, errors.New("HAVEN PKI is incomplete; refusing to regenerate or overwrite identity files")
 	}
 
-	return loadHubPKI(paths)
+	pki, err := loadHubPKI(paths)
+	if err != nil {
+		return nil, err
+	}
+	if len(pki.ServerCertificate.Certificate) == 0 {
+		return nil, errors.New("HAVEN agent endpoint certificate is missing")
+	}
+	serverCertificate, err := x509.ParseCertificate(pki.ServerCertificate.Certificate[0])
+	if err != nil {
+		return nil, fmt.Errorf("parse HAVEN agent endpoint certificate: %w", err)
+	}
+	for _, name := range serverNames {
+		if err := serverCertificate.VerifyHostname(name); err != nil {
+			return nil, fmt.Errorf("HAVEN agent endpoint certificate does not include %q; preserve the existing PKI or rotate it before enrolling agents: %w", name, err)
+		}
+	}
+	return pki, nil
 }
 
 func GenerateAgentIdentity(displayName string) (AgentIdentity, error) {
@@ -198,7 +226,7 @@ func HashEnrollmentToken(token string) []byte {
 	return digest[:]
 }
 
-func generateHubPKI(paths []string, now time.Time) error {
+func generateHubPKI(paths []string, now time.Time, serverNames []string) error {
 	caKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
 	if err != nil {
 		return fmt.Errorf("generate HAVEN authority key: %w", err)
@@ -234,6 +262,15 @@ func generateHubPKI(paths []string, now time.Time) error {
 	if err != nil {
 		return err
 	}
+	dnsNames := []string{"localhost"}
+	ipAddresses := []net.IP{net.ParseIP("127.0.0.1"), net.ParseIP("::1")}
+	for _, name := range serverNames {
+		if address := net.ParseIP(name); address != nil {
+			ipAddresses = append(ipAddresses, address)
+		} else {
+			dnsNames = append(dnsNames, name)
+		}
+	}
 	serverTemplate := &x509.Certificate{
 		SerialNumber: serverSerial,
 		Subject:      pkix.Name{CommonName: "HAVEN local agent endpoint"},
@@ -241,8 +278,8 @@ func generateHubPKI(paths []string, now time.Time) error {
 		NotAfter:     now.AddDate(1, 0, 0),
 		KeyUsage:     x509.KeyUsageDigitalSignature,
 		ExtKeyUsage:  []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
-		DNSNames:     []string{"localhost"},
-		IPAddresses:  []net.IP{net.ParseIP("127.0.0.1"), net.ParseIP("::1")},
+		DNSNames:     dnsNames,
+		IPAddresses:  ipAddresses,
 	}
 	serverDER, err := x509.CreateCertificate(rand.Reader, serverTemplate, caCertificate, &serverKey.PublicKey, caKey)
 	if err != nil {
@@ -270,6 +307,29 @@ func generateHubPKI(paths []string, now time.Time) error {
 		}
 	}
 	return nil
+}
+
+func normalizeServerNames(values []string) ([]string, error) {
+	seen := map[string]bool{"localhost": true, "127.0.0.1": true, "::1": true}
+	names := make([]string, 0, len(values))
+	for _, value := range values {
+		value = strings.TrimSpace(value)
+		if value == "" || seen[value] {
+			continue
+		}
+		if len(value) > 253 || strings.ContainsAny(value, " /\\?#@") {
+			return nil, fmt.Errorf("invalid HAVEN agent server name %q", value)
+		}
+		if net.ParseIP(value) == nil {
+			candidate := &x509.Certificate{DNSNames: []string{value}}
+			if err := candidate.VerifyHostname(value); err != nil {
+				return nil, fmt.Errorf("invalid HAVEN agent server name %q: %w", value, err)
+			}
+		}
+		seen[value] = true
+		names = append(names, value)
+	}
+	return names, nil
 }
 
 func loadHubPKI(paths []string) (*HubPKI, error) {

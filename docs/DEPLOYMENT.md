@@ -1,30 +1,50 @@
 # Hub deployment
 
-The checked-in Compose definition is a secure baseline for the Ubuntu application server, not a local-development requirement or a complete household deployment. Docker is not used to run HAVEN on development workstations. Agent ingestion and passkey authentication are implemented, but the container listener remains unpublished; private HTTPS/routing, recovery, resource, and backup decisions are still required.
+HAVEN's production hub runs in resource-bounded containers on the always-on Ubuntu application server. Development workstations continue to run the Go process directly; Docker is not required there.
 
-## Baseline
+## Delivery model
 
-```sh
-cp .env.example .env
-docker compose build --pull
-docker compose up -d
-docker compose ps
-```
+The public repository does not use a persistent self-hosted GitHub Actions runner. GitHub-hosted CI performs the tests and publishes one immutable GHCR image for each successful push to `main`. A separate private HomeOps repository owns the production runner, Compose model, DNS and TLS configuration, backup service, health checks, and rollback procedure. HAVEN sends only an allowlisted repository identity and full approved commit hash across that boundary.
 
-The published port is bound to host loopback. Do not change it to an all-interface binding merely to make the dashboard reachable. Add private access through a TLS reverse proxy or VPN and set `HAVEN_PUBLIC_ORIGIN` to the exact externally visible private HTTPS origin. WebAuthn and anti-forgery validation intentionally reject a different origin.
+The private workflow independently confirms that the hash is the current HAVEN `main` revision, pulls its commit-tagged image, and verifies the embedded revision label. Public repository workflow code never executes directly on the household server, and the hub container does not receive the Docker socket, host namespaces, devices, broad host mounts, or privileged mode.
 
-## Persistent data
+## Private access
 
-SQLite and its WAL files live together in the `haven-data` volume. Do not place this volume on NFS or another network filesystem.
+The production profile uses three small services:
 
-Use `haven-hub backup --to <new-path>` for a consistent SQLite backup while the hub is running. The destination must be a new path on protected storage. Test restoration separately; a backup that has never been restored is only an assumption. Back up the PKI directory separately because it is not part of the database.
+- `hub`: the Go API, embedded dashboard, SQLite, and mutually authenticated agent endpoint;
+- `proxy`: private HTTPS for the dashboard through a dedicated Caddy internal authority;
+- `dns`: a private `haven.home.arpa` record with recursive forwarding for clients that select the server as their DNS resolver.
 
-Removing the container does not remove the named volume. Removing the volume deletes the observation history and should be treated as a destructive operation.
+The dashboard is published only on the configured LAN address and high HTTPS port. The agent endpoint is a separate TLS 1.3 listener with a certificate containing the configured private DNS name and address. Neither endpoint should be forwarded from the public internet. WireGuard clients can use the same hostname by selecting the private DNS resolver and routing the LAN subnet.
 
-## Updates
+Passkeys are bound to the exact private HTTPS origin. Choose the permanent hostname and port before enrolling production passkeys.
 
-Review dependency and image changes, rebuild the image, run the checks, and then recreate the service. Do not use an unreviewed floating image updater for a security control plane.
+## First installation
+
+Production templates and the runner workflow belong to private HomeOps. Real addresses and filesystem paths belong only in the server's untracked `.env` file.
+
+1. Allow GitHub-hosted HAVEN CI to verify and publish the commit-tagged hub image.
+2. Register the production runner only with the private HomeOps repository.
+3. Install HomeOps' untracked HAVEN environment on the server and create its data, TLS, and protected backup directories.
+4. Manually dispatch the first exact HAVEN `main` revision from HomeOps and verify the dashboard, DNS record, container limits, and backup timer.
+5. After the manual path is proven, enable the public CI workflow's narrowly scoped cross-repository dispatch credential.
+
+After the proxy generates its internal authority, install only its public root certificate in each owner's trust store. Never copy the authority private key to a client. Configure LAN clients—or the router's DHCP service—to use the private resolver. WireGuard client profiles can use the same resolver explicitly.
+
+## Persistent data and recovery
+
+SQLite, the WebAuthn credential-encryption key, and the agent PKI live together in the configured data directory. Caddy's private authority lives in its separate data directory. All are outside the repository.
+
+The daily backup service uses HAVEN's SQLite backup command and then archives:
+
+- the consistent SQLite backup;
+- the WebAuthn credential-encryption key;
+- the hub/agent private authority;
+- the dashboard private authority required to preserve existing client trust.
+
+Backup archives contain security-sensitive private keys and are created with owner-only permissions. A second encrypted or physically protected copy and a tested restoration procedure are still required before the deployment can be treated as durable.
 
 ## Native agents
 
-Endpoint agents run directly under Windows Service Control Manager, systemd, or launchd with the smallest privileges their collectors require. Do not give the hub container host namespaces, broad mounts, devices, or the Docker socket in an attempt to make it an agent.
+Endpoint agents run directly under Windows Service Control Manager, systemd, or launchd with the smallest privileges their collectors require. The current remote protocol accepts read-only observations through per-device mutual TLS. Remote action execution is not implemented and must not be simulated with a shell or Docker access.

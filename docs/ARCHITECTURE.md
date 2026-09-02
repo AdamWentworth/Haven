@@ -41,7 +41,7 @@ Milestone 0.5 turns the explainable Windows baseline into a continuous local mon
 - Every agent receives a unique 90-day client certificate whose URI identity must match its observation envelope and database record.
 - Reports have a version, random identity, strictly increasing per-device sequence, and bounded timestamp. Replays, revoked devices, oversized bodies, unsupported versions, and excessive request rates are rejected.
 - The hub stores posture but removes connection metadata before persistence. There is no remote-control endpoint.
-- The Compose dashboard remains loopback-only and its agent listener is not published.
+- Development listeners remain loopback-only. The production profile publishes explicit private dashboard and agent listeners on the configured LAN address, never on an unconstrained wildcard.
 - Observation schema version 2 adds privacy-bounded Windows posture. The hub derives checks and findings from raw signals so severity logic stays reviewable and consistent.
 - Findings use explicit evidence and recommendations rather than a combined score. Unavailable data remains unknown, never healthy.
 - The local hub collects immediately at startup and on a bounded interval. Manual and scheduled collections are serialized so the fixed native collector cannot run concurrently with itself.
@@ -53,7 +53,7 @@ The trusted inventory contains only the local collector and explicitly enrolled 
 
 Windows baseline collection stores configuration state and aggregate counts only. It excludes local administrator names, update titles, Defender threat names, detection resource paths, and BitLocker recovery material.
 
-Private HTTPS publication, automated certificate renewal, native service packaging, and CI/CD deployment are gates for the household pilot rather than assumptions hidden in local development. Browser authentication uses cross-platform WebAuthn passkeys, supports multiple authenticators and local recovery, and requires fresh confirmation for sensitive capabilities.
+Private HTTPS publication, private DNS, bounded hub containers, consistent local backups, and private HomeOps-controlled CI/CD are explicit production components rather than assumptions hidden in local development. Browser authentication uses cross-platform WebAuthn passkeys, supports multiple authenticators and local recovery, and requires fresh confirmation for sensitive capabilities.
 
 Platform-specific controls sit behind advertised capability providers. The local Windows provider currently exposes two fixed Defender operations. A future Ubuntu, macOS, or remote Windows agent must implement its own provider and authenticated action transport; the hub never translates an unsupported action into an arbitrary shell command.
 
@@ -73,12 +73,12 @@ Agents will send high-level observations to the hub, never SQL. The SQLite file 
 
 The production container contains the Go hub and compiled web assets. It runs as a non-root user with a read-only root filesystem, all Linux capabilities dropped, `no-new-privileges`, a bounded temporary filesystem, and one writable data volume.
 
-The Compose file publishes to host loopback. Deployment-specific private access belongs behind a TLS reverse proxy or VPN and must not be committed with real hostnames, addresses, certificate identities, or credentials.
+The public baseline Compose file publishes to host loopback. The private HomeOps production profile binds an explicit private address behind a dedicated TLS reverse proxy and local resolver. Real addresses, certificate identities, trust roots, and credentials remain untracked server state.
 
 ## Planned deployment stages
 
 1. **Local foundation:** validate Windows collection, UI, persistence, privacy behavior, and container build.
 2. **Trust foundation:** define versioned messages, enrollment, device certificates, mutual TLS, revocation, and replay resistance.
-3. **Household pilot:** deploy the Dockerized hub and one native Windows service through private authenticated access.
+3. **Household pilot:** deploy the Dockerized hub through private authenticated access and enroll one native Windows service.
 4. **Multi-platform:** add least-privileged Linux and macOS agents, preserving platform-specific security meaning.
 5. **Narrow controls:** add separately privileged allowlisted actions only after the read-only system is trustworthy.

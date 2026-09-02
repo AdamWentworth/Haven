@@ -221,7 +221,11 @@ func run(logger *slog.Logger) error {
 	if err != nil {
 		return err
 	}
-	pki, err := trust.EnsureHubPKI(filepath.Join(stateDirectory, "pki"), time.Now().UTC())
+	agentServerNames, err := configuredAgentServerNames()
+	if err != nil {
+		return err
+	}
+	pki, err := trust.EnsureHubPKIForServerNames(filepath.Join(stateDirectory, "pki"), time.Now().UTC(), agentServerNames)
 	if err != nil {
 		return err
 	}
@@ -351,6 +355,18 @@ func configuredCollectionInterval() (time.Duration, error) {
 		return 0, errors.New("HAVEN_COLLECTION_INTERVAL must be a duration from 1m through 24h")
 	}
 	return interval, nil
+}
+
+func configuredAgentServerNames() ([]string, error) {
+	value := strings.TrimSpace(os.Getenv("HAVEN_AGENT_SERVER_NAMES"))
+	if value == "" {
+		return nil, nil
+	}
+	values := strings.Split(value, ",")
+	if len(values) > 16 {
+		return nil, errors.New("HAVEN_AGENT_SERVER_NAMES accepts at most 16 comma-separated hostnames or addresses")
+	}
+	return values, nil
 }
 
 func configuredPublicOrigin(listenAddress string) (string, error) {

@@ -4,7 +4,7 @@
 
 HAVEN is a personal security observatory for home devices and networks. It presents native operating-system protections in one understandable console without trying to replace Microsoft Defender, host firewalls, or other trusted security controls.
 
-HAVEN is pre-release software. The current milestone adds an authenticated local action boundary to the explainable Windows security baseline; it is not yet a household deployment or a replacement for native protection.
+HAVEN is pre-release software. The current milestone adds an authenticated action boundary and a constrained Ubuntu hub deployment; it is not a replacement for native protection.
 
 ## Milestone 0.6 — Authenticated Action Center
 
@@ -31,10 +31,10 @@ The current implementation provides:
 - Provider-advertised action capabilities with fresh passkey confirmation; the first Windows provider offers a Defender quick scan and security-intelligence update
 - No browser endpoint for arbitrary commands, scripts, paths, process launches, firewall changes, or Defender exclusions
 - Privacy-bounded collection: administrator names, update titles, threat names, and detected resource paths are not collected
-- A hardened, single-service Docker Compose definition for the future Ubuntu hub
+- A private HomeOps deployment boundary for a resource-bounded Ubuntu hub with private HTTPS, local DNS, and consistent backups
 - Visible collector failures instead of silently treating unavailable information as healthy
 
-The dashboard and agent endpoint both bind to loopback during development. No Docker runtime or deployment is needed for local iteration, and the Compose baseline does not publish the agent listener yet. Desktop alerts require explicit browser permission and currently operate while the HAVEN page is open; they do not install a tray process or background browser extension.
+The dashboard and agent endpoint both bind to loopback during development. No Docker runtime or deployment is needed for local iteration. Production uses separate, explicitly private listeners. Desktop alerts require explicit browser permission and currently operate while the HAVEN page is open; they do not install a tray process or background browser extension.
 
 Because HAVEN is pre-release and observation schema 2 is still evolving, hubs and agents should run the same repository revision.
 
@@ -124,15 +124,9 @@ pwsh -NoProfile -File .\scripts\Test-PublicRepository.ps1
 
 ## Ubuntu deployment
 
-The hub image and Compose definition are intended to be built and run on the always-on Ubuntu application server—not on development workstations. After cloning the public repository on that server:
+GitHub-hosted CI builds and publishes an immutable `ghcr.io/adamwentworth/haven-hub:sha-<commit>` image only after all verification passes. A separate private HomeOps repository owns the production runner and fixed deployment controls. It validates the requested `main` revision and image label, recreates only HAVEN's constrained containers, health-checks private HTTPS, and rolls back on failure.
 
-```powershell
-docker compose up --build -d
-```
-
-Compose publishes the dashboard on the host loopback interface only and persists SQLite in the `haven-data` volume. Passkeys are implemented, but a remote deployment still requires an exact `HAVEN_PUBLIC_ORIGIN` using private HTTPS, a reverse proxy/VPN routing decision, backups that include the credential-encryption key, and a recovery procedure.
-
-The Compose file intentionally does not publish the agent listener. Deployment comes after the server resource check, private HTTPS/routing decision, passkey recovery test, and CI/CD design. Endpoint agents must run natively, not as privileged containers.
+The production profile uses `haven.home.arpa` as a private DNS name, a private certificate authority for the browser endpoint, a LAN/VPN resolver, and a distinct mutually authenticated agent endpoint. Real addresses, deployment authority, trust roots, private keys, databases, and server configuration do not belong in this public repository. See [the deployment guide](docs/DEPLOYMENT.md) for the trust boundary. Endpoint agents run natively, not as privileged containers.
 
 ## Repository layout
 
@@ -166,6 +160,6 @@ Haven/
 
 ## Next security milestone
 
-The next milestone is native service packaging and startup behavior, followed by network explainability: classify listeners and connections by process, scope, ownership, and expected purpose without pretending that every open port is malicious. Private HTTPS access, authenticated native-agent action routing, deployment resource measurements, and scheduled backups remain gates for the household pilot. The Ubuntu hub does not execute Windows actions on another machine. GitHub Actions verifies the Go, frontend, dependency, and public-repository safety checks on each proposed change.
+The next milestone is native endpoint-agent service packaging and authenticated action routing, followed by network explainability: classify listeners and connections by process, scope, ownership, and expected purpose without pretending that every open port is malicious. The Ubuntu hub does not execute Windows actions on another machine. GitHub Actions verifies the Go, frontend, dependency, image, and public-repository safety checks on each proposed change.
 
 Read the [architecture](docs/ARCHITECTURE.md), [threat model](docs/THREAT_MODEL.md), and [public repository policy](docs/PUBLIC_REPOSITORY.md) before expanding the trust boundary.

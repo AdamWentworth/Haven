@@ -18,6 +18,11 @@ RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /out/haven-h
 RUN mkdir -p /out/data && touch /out/data/.haven-volume
 
 FROM scratch
+ARG HAVEN_BUILD_SHA=development
+LABEL org.opencontainers.image.source="https://github.com/AdamWentworth/Haven" \
+      org.opencontainers.image.description="HAVEN personal security observatory hub" \
+      org.opencontainers.image.licenses="MIT" \
+      org.opencontainers.image.revision="${HAVEN_BUILD_SHA}"
 COPY --from=go-build /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
 COPY --from=go-build /out/haven-hub /haven-hub
 COPY --from=go-build --chown=65532:65532 /out/data/ /var/lib/haven/
