@@ -46,7 +46,6 @@ main, footer { width: min(1180px, 92vw); margin-inline: auto; }
 .auth-card .brand-mark { width: 3rem; height: 3rem; margin-bottom: 2rem; }
 .auth-card h1 { font-size: clamp(2rem, 7vw, 3.5rem); }
 .auth-card > p:not(.eyebrow):not(.inline-error) { color: var(--muted); line-height: 1.65; }
-.bootstrap-command { display: block; margin: 1.2rem 0; padding: .85rem 1rem; overflow-x: auto; border: 1px solid var(--line); border-radius: .75rem; color: var(--cyan); background: #080d0f; font-family: "Cascadia Code", Consolas, monospace; }
 .auth-field { display: grid; gap: .45rem; margin: 1rem 0; color: #dceae2; font-size: .78rem; font-weight: 650; }
 .auth-field input { width: 100%; padding: .8rem .9rem; border: 1px solid var(--line-bright); border-radius: .75rem; outline: none; color: inherit; background: rgba(3, 8, 6, .55); font-family: "Cascadia Code", Consolas, monospace; }
 .auth-field input:focus { border-color: var(--green); box-shadow: 0 0 0 3px rgba(115, 226, 167, .1); }
