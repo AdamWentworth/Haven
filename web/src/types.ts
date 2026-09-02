@@ -129,13 +129,27 @@ export interface NetworkConnection {
 
 export type BindScope = "any" | "local" | "private" | "wildcard" | "specific";
 
+export interface ExpectedServiceInput {
+  deviceId: string;
+  label: string;
+  protocol: "TCP" | "UDP";
+  port: number;
+  portEnd: number;
+  bindScope: BindScope;
+  processNames: string[];
+  workloadNames: string[];
+}
+
 export interface ExpectedService {
   id: string;
   deviceId: string;
   label: string;
   protocol: "TCP" | "UDP";
   port: number;
+  portEnd: number;
   bindScope: BindScope;
+  processNames: string[];
+  workloadNames: string[];
   createdAt: string;
   updatedAt: string;
 }

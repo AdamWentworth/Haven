@@ -369,33 +369,93 @@ func (server *Server) expectedServices(writer http.ResponseWriter, request *http
 	server.writeJSON(writer, http.StatusOK, services)
 }
 
-func (server *Server) saveExpectedService(writer http.ResponseWriter, request *http.Request) {
-	var body struct {
-		DeviceID  string `json:"deviceId"`
-		Label     string `json:"label"`
-		Protocol  string `json:"protocol"`
-		Port      int    `json:"port"`
-		BindScope string `json:"bindScope"`
-	}
-	if !decodeControlJSON(writer, request, &body, 4096) {
-		return
+type expectedServiceRequest struct {
+	DeviceID      string   `json:"deviceId"`
+	Label         string   `json:"label"`
+	Protocol      string   `json:"protocol"`
+	Port          int      `json:"port"`
+	PortEnd       int      `json:"portEnd"`
+	BindScope     string   `json:"bindScope"`
+	ProcessNames  []string `json:"processNames"`
+	WorkloadNames []string `json:"workloadNames"`
+}
+
+func expectedServiceFromRequest(body expectedServiceRequest, deviceID string, now time.Time) (storage.ExpectedService, bool) {
+	if deviceID == "" {
+		deviceID = body.DeviceID
 	}
 	body.Label = strings.TrimSpace(body.Label)
 	body.Protocol = strings.ToUpper(strings.TrimSpace(body.Protocol))
 	body.BindScope = strings.ToLower(strings.TrimSpace(body.BindScope))
+	if body.PortEnd == 0 {
+		body.PortEnd = body.Port
+	}
 	allowedScope := body.BindScope == storage.BindScopeAny || body.BindScope == storage.BindScopeLocal || body.BindScope == storage.BindScopePrivate || body.BindScope == storage.BindScopeWildcard || body.BindScope == storage.BindScopeSpecific
-	if !validIdentifier(body.DeviceID) || body.Label == "" || len(body.Label) > 80 || strings.ContainsAny(body.Label, "\r\n\t") || (body.Protocol != "TCP" && body.Protocol != "UDP") || body.Port < 1 || body.Port > 65535 || !allowedScope {
-		http.Error(writer, "invalid expected service", http.StatusBadRequest)
+	validOwners := func(values []string) bool {
+		if len(values) > 16 {
+			return false
+		}
+		for _, value := range values {
+			value = strings.TrimSpace(value)
+			if value == "" || len(value) > 80 || strings.ContainsAny(value, "\r\n\t") {
+				return false
+			}
+		}
+		return true
+	}
+	valid := validIdentifier(deviceID) && body.Label != "" && len(body.Label) <= 80 && !strings.ContainsAny(body.Label, "\r\n\t") && (body.Protocol == "TCP" || body.Protocol == "UDP") && body.Port >= 1 && body.Port <= 65535 && body.PortEnd >= body.Port && body.PortEnd <= 65535 && allowedScope && validOwners(body.ProcessNames) && validOwners(body.WorkloadNames)
+	return storage.ExpectedService{DeviceID: deviceID, Label: body.Label, Protocol: body.Protocol, Port: body.Port, PortEnd: body.PortEnd, BindScope: body.BindScope, ProcessNames: body.ProcessNames, WorkloadNames: body.WorkloadNames, UpdatedAt: now}, valid
+}
+
+func (server *Server) saveExpectedService(writer http.ResponseWriter, request *http.Request) {
+	var body expectedServiceRequest
+	if !decodeControlJSON(writer, request, &body, 4096) {
 		return
 	}
 	now := time.Now().UTC()
-	service, err := server.store.UpsertExpectedService(request.Context(), storage.ExpectedService{DeviceID: body.DeviceID, Label: body.Label, Protocol: body.Protocol, Port: body.Port, BindScope: body.BindScope, UpdatedAt: now})
+	serviceRequest, valid := expectedServiceFromRequest(body, "", now)
+	if !valid {
+		http.Error(writer, "invalid expected service", http.StatusBadRequest)
+		return
+	}
+	service, err := server.store.UpsertExpectedService(request.Context(), serviceRequest)
 	if err != nil {
 		http.Error(writer, "could not save expected service", http.StatusInternalServerError)
 		return
 	}
-	_ = server.store.AppendAudit(request.Context(), storage.AuditEvent{Actor: "owner", Action: "service.expectation.save", Target: body.DeviceID + "/" + body.Protocol + "/" + fmt.Sprint(body.Port), Outcome: "succeeded", Detail: "An endpoint was classified as an expected service. The friendly label is intentionally omitted from audit history.", OccurredAt: now})
+	_ = server.store.AppendAudit(request.Context(), storage.AuditEvent{Actor: "owner", Action: "service.expectation.save", Target: serviceRequest.DeviceID + "/" + serviceRequest.Protocol + "/" + fmt.Sprint(serviceRequest.Port), Outcome: "succeeded", Detail: "An endpoint was classified as an expected service. The friendly label is intentionally omitted from audit history.", OccurredAt: now})
 	server.writeJSON(writer, http.StatusOK, service)
+}
+
+func (server *Server) saveExpectedServices(writer http.ResponseWriter, request *http.Request) {
+	var body struct {
+		DeviceID string                   `json:"deviceId"`
+		Services []expectedServiceRequest `json:"services"`
+	}
+	if !decodeControlJSON(writer, request, &body, 64*1024) {
+		return
+	}
+	if !validIdentifier(body.DeviceID) || len(body.Services) == 0 || len(body.Services) > 64 {
+		http.Error(writer, "invalid expected service batch", http.StatusBadRequest)
+		return
+	}
+	now := time.Now().UTC()
+	services := make([]storage.ExpectedService, 0, len(body.Services))
+	for _, item := range body.Services {
+		service, valid := expectedServiceFromRequest(item, body.DeviceID, now)
+		if !valid {
+			http.Error(writer, "invalid expected service batch", http.StatusBadRequest)
+			return
+		}
+		services = append(services, service)
+	}
+	saved, err := server.store.UpsertExpectedServices(request.Context(), services)
+	if err != nil {
+		http.Error(writer, "could not save expected service batch", http.StatusInternalServerError)
+		return
+	}
+	_ = server.store.AppendAudit(request.Context(), storage.AuditEvent{Actor: "owner", Action: "service.expectation.baseline", Target: body.DeviceID, Outcome: "succeeded", Detail: fmt.Sprintf("%d reviewed baseline classification(s) were saved. Friendly labels and process names are intentionally omitted from audit history.", len(services)), OccurredAt: now})
+	server.writeJSON(writer, http.StatusOK, saved)
 }
 
 func (server *Server) removeExpectedService(writer http.ResponseWriter, request *http.Request) {

@@ -246,6 +246,23 @@ main, footer { width: min(1180px, 92vw); margin-inline: auto; }
 .endpoint-tabs button { padding: .52rem .7rem; border: 1px solid var(--line); border-radius: .65rem; color: var(--muted); background: rgba(255, 255, 255, .02); cursor: pointer; }
 .endpoint-tabs button:hover, .endpoint-tabs button.selected { color: #e6f2eb; border-color: rgba(111, 216, 229, .4); background: rgba(111, 216, 229, .07); }
 .endpoint-tabs button span { display: inline-grid; min-width: 1.35rem; margin-left: .35rem; padding: .08rem .3rem; place-items: center; border-radius: 999px; color: var(--cyan); background: rgba(111, 216, 229, .09); font-size: .68rem; }
+.baseline-review { margin: 1rem 0; padding: 1rem; border: 1px solid rgba(132, 183, 255, .28); border-radius: .85rem; background: linear-gradient(135deg, rgba(132, 183, 255, .07), rgba(111, 216, 229, .025)); }
+.baseline-review-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 1rem; }
+.baseline-review-heading .eyebrow { margin-bottom: .2rem; }
+.baseline-review h3 { margin: 0; font-size: 1rem; }
+.baseline-review > p { max-width: 850px; margin: .65rem 0 .85rem; color: var(--muted); font-size: .76rem; line-height: 1.55; }
+.baseline-suggestion-list { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .55rem; }
+.baseline-suggestion { display: grid; grid-template-columns: auto 1fr auto; align-items: start; gap: .65rem; padding: .72rem; border: 1px solid var(--line); border-radius: .68rem; background: rgba(0, 0, 0, .12); cursor: pointer; }
+.baseline-suggestion:has(input:checked) { border-color: rgba(115, 226, 167, .28); background: rgba(115, 226, 167, .035); }
+.baseline-suggestion input { margin-top: .18rem; accent-color: var(--green); }
+.baseline-suggestion span { display: grid; gap: .24rem; min-width: 0; }
+.baseline-suggestion strong { color: #e3eee8; font-size: .78rem; }
+.baseline-suggestion small { color: var(--muted); font-size: .68rem; line-height: 1.45; }
+.baseline-suggestion em { padding: .16rem .4rem; border-radius: 999px; color: var(--cyan); background: rgba(111, 216, 229, .08); font-size: .62rem; font-style: normal; white-space: nowrap; }
+.baseline-review-actions { display: flex; align-items: center; justify-content: space-between; gap: 1rem; margin-top: .85rem; }
+.baseline-review-actions span { color: var(--muted); font-size: .68rem; }
+.baseline-review-actions button { padding: .58rem .75rem; border: 1px solid rgba(115, 226, 167, .34); border-radius: .6rem; color: #dff5e9; background: rgba(115, 226, 167, .09); cursor: pointer; }
+.baseline-review-actions button:disabled { opacity: .45; cursor: not-allowed; }
 .service-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .7rem; }
 .service-grid > .activity-empty { grid-column: 1 / -1; }
 .service-card { padding: 1rem; border: 1px solid var(--line); border-left: 3px solid var(--amber); border-radius: .85rem; background: rgba(255, 255, 255, .018); }
@@ -304,7 +321,7 @@ footer { display: flex; justify-content: space-between; padding: 2.5rem 0 3rem; 
   .desktop-alert-button { padding: .5rem; }
   .hero { align-items: start; flex-direction: column; padding-top: 3rem; }
   .collection-time { text-align: left; }
-	.summary-grid, .details-grid, .profile-grid, .baseline-grid, .action-grid, .action-history-grid, .service-grid, .workload-grid, .expectation-form { grid-template-columns: 1fr; }
+	.summary-grid, .details-grid, .profile-grid, .baseline-grid, .action-grid, .action-history-grid, .service-grid, .workload-grid, .expectation-form, .baseline-suggestion-list { grid-template-columns: 1fr; }
   .section-heading { align-items: start; flex-direction: column; gap: .75rem; }
   .search-field, .search-field input { width: 100%; }
   .finding-heading { grid-template-columns: auto 1fr; }

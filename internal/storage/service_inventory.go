@@ -3,6 +3,7 @@ package storage
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/netip"
@@ -22,14 +23,17 @@ const (
 )
 
 type ExpectedService struct {
-	ID        string    `json:"id"`
-	DeviceID  string    `json:"deviceId"`
-	Label     string    `json:"label"`
-	Protocol  string    `json:"protocol"`
-	Port      int       `json:"port"`
-	BindScope string    `json:"bindScope"`
-	CreatedAt time.Time `json:"createdAt"`
-	UpdatedAt time.Time `json:"updatedAt"`
+	ID            string    `json:"id"`
+	DeviceID      string    `json:"deviceId"`
+	Label         string    `json:"label"`
+	Protocol      string    `json:"protocol"`
+	Port          int       `json:"port"`
+	PortEnd       int       `json:"portEnd"`
+	BindScope     string    `json:"bindScope"`
+	ProcessNames  []string  `json:"processNames"`
+	WorkloadNames []string  `json:"workloadNames"`
+	CreatedAt     time.Time `json:"createdAt"`
+	UpdatedAt     time.Time `json:"updatedAt"`
 }
 
 type ObservedListener struct {
@@ -133,12 +137,59 @@ func validExpectedBindScope(value string) bool {
 	return value == BindScopeAny || value == BindScopeLocal || value == BindScopePrivate || value == BindScopeWildcard || value == BindScopeSpecific
 }
 
-func (store *Store) UpsertExpectedService(ctx context.Context, service ExpectedService) (ExpectedService, error) {
+func normalizeExpectedService(service ExpectedService) (ExpectedService, error) {
 	service.Label = strings.TrimSpace(service.Label)
 	service.Protocol = strings.ToUpper(strings.TrimSpace(service.Protocol))
 	service.BindScope = strings.ToLower(strings.TrimSpace(service.BindScope))
-	if service.DeviceID == "" || service.Label == "" || len(service.Label) > 80 || (service.Protocol != "TCP" && service.Protocol != "UDP") || service.Port < 1 || service.Port > 65535 || !validExpectedBindScope(service.BindScope) {
+	if service.PortEnd == 0 {
+		service.PortEnd = service.Port
+	}
+	canonicalNames := func(values []string, trimExecutable bool) ([]string, error) {
+		canonical := make(map[string]struct{}, len(values))
+		for _, value := range values {
+			value = strings.ToLower(strings.TrimSpace(value))
+			if trimExecutable {
+				value = strings.TrimSuffix(value, ".exe")
+			}
+			if value == "" || len(value) > 80 || strings.ContainsAny(value, "\r\n\t") {
+				return nil, errors.New("invalid expected service owner")
+			}
+			canonical[value] = struct{}{}
+		}
+		result := make([]string, 0, len(canonical))
+		for value := range canonical {
+			result = append(result, value)
+		}
+		sort.Strings(result)
+		return result, nil
+	}
+	var err error
+	service.ProcessNames, err = canonicalNames(service.ProcessNames, true)
+	if err != nil {
+		return ExpectedService{}, err
+	}
+	service.WorkloadNames, err = canonicalNames(service.WorkloadNames, false)
+	if err != nil {
+		return ExpectedService{}, err
+	}
+	if service.DeviceID == "" || service.Label == "" || len(service.Label) > 80 || strings.ContainsAny(service.Label, "\r\n\t") || (service.Protocol != "TCP" && service.Protocol != "UDP") || service.Port < 1 || service.Port > 65535 || service.PortEnd < service.Port || service.PortEnd > 65535 || len(service.ProcessNames) > 16 || len(service.WorkloadNames) > 16 || !validExpectedBindScope(service.BindScope) {
 		return ExpectedService{}, errors.New("invalid expected service")
+	}
+	return service, nil
+}
+
+func expectedOwnerJSON(values []string) (string, error) {
+	encoded, err := json.Marshal(values)
+	if err != nil {
+		return "", fmt.Errorf("encode expected service owners: %w", err)
+	}
+	return string(encoded), nil
+}
+
+func (store *Store) UpsertExpectedService(ctx context.Context, service ExpectedService) (ExpectedService, error) {
+	service, err := normalizeExpectedService(service)
+	if err != nil {
+		return ExpectedService{}, err
 	}
 	if service.ID == "" {
 		id, err := randomID("svc_")
@@ -155,15 +206,23 @@ func (store *Store) UpsertExpectedService(ctx context.Context, service ExpectedS
 	if created.IsZero() {
 		created = now
 	}
+	processNames, err := expectedOwnerJSON(service.ProcessNames)
+	if err != nil {
+		return ExpectedService{}, err
+	}
+	workloadNames, err := expectedOwnerJSON(service.WorkloadNames)
+	if err != nil {
+		return ExpectedService{}, err
+	}
 	var id string
-	err := store.database.QueryRowContext(ctx,
-		`INSERT INTO expected_services (id, device_id, label, protocol, port, bind_scope, created_at, updated_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-		 ON CONFLICT(device_id, protocol, port, bind_scope) DO UPDATE SET
+	err = store.database.QueryRowContext(ctx,
+		`INSERT INTO expected_services (id, device_id, label, protocol, port, port_end, bind_scope, process_names, workload_names, created_at, updated_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		 ON CONFLICT(device_id, protocol, port, port_end, bind_scope, process_names, workload_names) DO UPDATE SET
 			label = excluded.label,
 			updated_at = excluded.updated_at
 		 RETURNING id`,
-		service.ID, service.DeviceID, service.Label, service.Protocol, service.Port, service.BindScope,
+		service.ID, service.DeviceID, service.Label, service.Protocol, service.Port, service.PortEnd, service.BindScope, processNames, workloadNames,
 		created.Format(time.RFC3339Nano), now.Format(time.RFC3339Nano)).Scan(&id)
 	if err != nil {
 		return ExpectedService{}, fmt.Errorf("save expected service: %w", err)
@@ -171,13 +230,78 @@ func (store *Store) UpsertExpectedService(ctx context.Context, service ExpectedS
 	return store.expectedService(ctx, id)
 }
 
+func (store *Store) UpsertExpectedServices(ctx context.Context, services []ExpectedService) ([]ExpectedService, error) {
+	if len(services) == 0 || len(services) > 64 {
+		return nil, errors.New("expected service batch must contain from 1 through 64 services")
+	}
+	normalized := make([]ExpectedService, 0, len(services))
+	deviceID := ""
+	for _, service := range services {
+		item, err := normalizeExpectedService(service)
+		if err != nil {
+			return nil, err
+		}
+		if deviceID == "" {
+			deviceID = item.DeviceID
+		} else if item.DeviceID != deviceID {
+			return nil, errors.New("expected service batch must target one device")
+		}
+		if item.ID == "" {
+			item.ID, err = randomID("svc_")
+			if err != nil {
+				return nil, err
+			}
+		}
+		now := item.UpdatedAt.UTC()
+		if now.IsZero() {
+			now = time.Now().UTC()
+		}
+		item.UpdatedAt = now
+		if item.CreatedAt.IsZero() {
+			item.CreatedAt = now
+		}
+		normalized = append(normalized, item)
+	}
+
+	transaction, err := store.database.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, fmt.Errorf("begin expected service batch: %w", err)
+	}
+	defer transaction.Rollback()
+	for _, service := range normalized {
+		processNames, err := expectedOwnerJSON(service.ProcessNames)
+		if err != nil {
+			return nil, err
+		}
+		workloadNames, err := expectedOwnerJSON(service.WorkloadNames)
+		if err != nil {
+			return nil, err
+		}
+		_, err = transaction.ExecContext(ctx,
+			`INSERT INTO expected_services (id, device_id, label, protocol, port, port_end, bind_scope, process_names, workload_names, created_at, updated_at)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			 ON CONFLICT(device_id, protocol, port, port_end, bind_scope, process_names, workload_names) DO UPDATE SET
+				label = excluded.label,
+				updated_at = excluded.updated_at`,
+			service.ID, service.DeviceID, service.Label, service.Protocol, service.Port, service.PortEnd,
+			service.BindScope, processNames, workloadNames, service.CreatedAt.UTC().Format(time.RFC3339Nano), service.UpdatedAt.UTC().Format(time.RFC3339Nano))
+		if err != nil {
+			return nil, fmt.Errorf("save expected service batch: %w", err)
+		}
+	}
+	if err := transaction.Commit(); err != nil {
+		return nil, fmt.Errorf("commit expected service batch: %w", err)
+	}
+	return store.ListExpectedServices(ctx, deviceID)
+}
+
 func (store *Store) expectedService(ctx context.Context, id string) (ExpectedService, error) {
 	var service ExpectedService
-	var created, updated string
+	var processNames, workloadNames, created, updated string
 	err := store.database.QueryRowContext(ctx,
-		`SELECT id, device_id, label, protocol, port, bind_scope, created_at, updated_at
+		`SELECT id, device_id, label, protocol, port, port_end, bind_scope, process_names, workload_names, created_at, updated_at
 		 FROM expected_services WHERE id = ?`, id).
-		Scan(&service.ID, &service.DeviceID, &service.Label, &service.Protocol, &service.Port, &service.BindScope, &created, &updated)
+		Scan(&service.ID, &service.DeviceID, &service.Label, &service.Protocol, &service.Port, &service.PortEnd, &service.BindScope, &processNames, &workloadNames, &created, &updated)
 	if err != nil {
 		return ExpectedService{}, err
 	}
@@ -187,13 +311,19 @@ func (store *Store) expectedService(ctx context.Context, id string) (ExpectedSer
 	if service.UpdatedAt, err = parseDatabaseTime(updated); err != nil {
 		return ExpectedService{}, err
 	}
+	if err := json.Unmarshal([]byte(processNames), &service.ProcessNames); err != nil {
+		return ExpectedService{}, fmt.Errorf("decode expected service processes: %w", err)
+	}
+	if err := json.Unmarshal([]byte(workloadNames), &service.WorkloadNames); err != nil {
+		return ExpectedService{}, fmt.Errorf("decode expected service workloads: %w", err)
+	}
 	return service, nil
 }
 
 func (store *Store) ListExpectedServices(ctx context.Context, deviceID string) ([]ExpectedService, error) {
 	rows, err := store.database.QueryContext(ctx,
-		`SELECT id, device_id, label, protocol, port, bind_scope, created_at, updated_at
-		 FROM expected_services WHERE device_id = ? ORDER BY protocol, port, bind_scope`, deviceID)
+		`SELECT id, device_id, label, protocol, port, port_end, bind_scope, process_names, workload_names, created_at, updated_at
+		 FROM expected_services WHERE device_id = ? ORDER BY protocol, port, port_end, bind_scope`, deviceID)
 	if err != nil {
 		return nil, err
 	}
@@ -201,8 +331,8 @@ func (store *Store) ListExpectedServices(ctx context.Context, deviceID string) (
 	services := []ExpectedService{}
 	for rows.Next() {
 		var service ExpectedService
-		var created, updated string
-		if err := rows.Scan(&service.ID, &service.DeviceID, &service.Label, &service.Protocol, &service.Port, &service.BindScope, &created, &updated); err != nil {
+		var processNames, workloadNames, created, updated string
+		if err := rows.Scan(&service.ID, &service.DeviceID, &service.Label, &service.Protocol, &service.Port, &service.PortEnd, &service.BindScope, &processNames, &workloadNames, &created, &updated); err != nil {
 			return nil, err
 		}
 		if service.CreatedAt, err = parseDatabaseTime(created); err != nil {
@@ -210,6 +340,12 @@ func (store *Store) ListExpectedServices(ctx context.Context, deviceID string) (
 		}
 		if service.UpdatedAt, err = parseDatabaseTime(updated); err != nil {
 			return nil, err
+		}
+		if err := json.Unmarshal([]byte(processNames), &service.ProcessNames); err != nil {
+			return nil, fmt.Errorf("decode expected service processes: %w", err)
+		}
+		if err := json.Unmarshal([]byte(workloadNames), &service.WorkloadNames); err != nil {
+			return nil, fmt.Errorf("decode expected service workloads: %w", err)
 		}
 		services = append(services, service)
 	}

@@ -94,6 +94,7 @@ func (server *Server) Handler() http.Handler {
 	mux.Handle("POST /api/finding-reviews", server.mutating(http.HandlerFunc(server.reviewFinding)))
 	mux.Handle("GET /api/expected-services", server.protected(http.HandlerFunc(server.expectedServices)))
 	mux.Handle("POST /api/expected-services", server.mutating(http.HandlerFunc(server.saveExpectedService)))
+	mux.Handle("POST /api/expected-services/batch", server.mutating(http.HandlerFunc(server.saveExpectedServices)))
 	mux.Handle("POST /api/expected-services/{serviceID}/remove", server.mutating(http.HandlerFunc(server.removeExpectedService)))
 	mux.Handle("GET /api/listener-observations", server.protected(http.HandlerFunc(server.listenerObservations)))
 	mux.Handle("GET /api/audit", server.protected(http.HandlerFunc(server.auditEvents)))

@@ -254,6 +254,36 @@ var migrations = []migration{
 				ON observed_listeners (device_id, present, protocol, port)`,
 		},
 	},
+	{
+		version: 8,
+		statements: []string{
+			`CREATE TABLE expected_services_v2 (
+				id TEXT PRIMARY KEY,
+				device_id TEXT NOT NULL REFERENCES devices(id) ON DELETE CASCADE,
+				label TEXT NOT NULL,
+				protocol TEXT NOT NULL,
+				port INTEGER NOT NULL,
+				port_end INTEGER NOT NULL,
+				bind_scope TEXT NOT NULL,
+				process_names TEXT NOT NULL DEFAULT '[]',
+				workload_names TEXT NOT NULL DEFAULT '[]',
+				created_at TEXT NOT NULL,
+				updated_at TEXT NOT NULL,
+				UNIQUE (device_id, protocol, port, port_end, bind_scope, process_names, workload_names)
+			)`,
+			`INSERT INTO expected_services_v2 (
+				id, device_id, label, protocol, port, port_end, bind_scope,
+				process_names, workload_names, created_at, updated_at
+			 )
+			 SELECT id, device_id, label, protocol, port, port, bind_scope,
+				'[]', '[]', created_at, updated_at
+			 FROM expected_services`,
+			`DROP TABLE expected_services`,
+			`ALTER TABLE expected_services_v2 RENAME TO expected_services`,
+			`CREATE INDEX expected_services_device
+				ON expected_services (device_id, protocol, port, port_end)`,
+		},
+	},
 }
 
 func Open(ctx context.Context, path string) (*Store, error) {
@@ -830,6 +860,15 @@ func (store *Store) SeedSyntheticDevices(ctx context.Context, count int, now tim
 				LocalAccounts:    &model.LocalAccountStatus{AdministratorCount: &administratorCount, EnabledAdministratorCount: &enabledAdministratorCount},
 				Threats:          &model.DefenderThreatStatus{ActiveThreatCount: &threatCount, RecentDetectionCount: &threatCount},
 			}
+			snapshot.Connections = []model.NetworkConnection{
+				{Protocol: "TCP", LocalAddress: "0.0.0.0", LocalPort: 135, State: "Listen", ProcessID: 1120, ProcessName: "svchost"},
+				{Protocol: "TCP", LocalAddress: "0.0.0.0", LocalPort: 445, State: "Listen", ProcessID: 4, ProcessName: "System"},
+				{Protocol: "TCP", LocalAddress: "0.0.0.0", LocalPort: 3389, State: "Listen", ProcessID: 1312, ProcessName: "svchost"},
+				{Protocol: "TCP", LocalAddress: "0.0.0.0", LocalPort: 49664, State: "Listen", ProcessID: 852, ProcessName: "lsass"},
+				{Protocol: "TCP", LocalAddress: "0.0.0.0", LocalPort: 49674, State: "Listen", ProcessID: 6200, ProcessName: "ControlServer"},
+				{Protocol: "TCP", LocalAddress: "0.0.0.0", LocalPort: 54306, State: "Listen", ProcessID: 14820, ProcessName: "Spotify"},
+				{Protocol: "TCP", LocalAddress: "127.0.0.1", LocalPort: 5080, State: "Listen", ProcessID: 19440, ProcessName: "haven-hub"},
+			}
 		} else if strings.Contains(platform.operatingSystem, "Ubuntu") {
 			pendingPackages := index % 3
 			pendingSecurityPackages := 0
@@ -846,6 +885,25 @@ func (store *Store) SeedSyntheticDevices(ctx context.Context, count int, now tim
 				AppArmor:         &model.LinuxAppArmorStatus{Enabled: &active},
 				TimeSync:         &model.LinuxTimeSyncStatus{Synchronized: &active},
 				Storage:          &model.LinuxStorageStatus{MountPoint: "/", UsedPercentage: &storageUsed},
+			}
+			if strings.Contains(platform.operatingSystem, "Server") {
+				snapshot.Connections = []model.NetworkConnection{
+					{Protocol: "TCP", LocalAddress: "0.0.0.0", LocalPort: 22, State: "Listen", ProcessID: 992, ProcessName: "sshd"},
+					{Protocol: "TCP", LocalAddress: "0.0.0.0", LocalPort: 8081, State: "Listen", ProcessID: 0, ProcessName: ""},
+					{Protocol: "TCP", LocalAddress: "0.0.0.0", LocalPort: 8443, State: "Listen", ProcessID: 0, ProcessName: ""},
+					{Protocol: "TCP", LocalAddress: "127.0.0.1", LocalPort: 5432, State: "Listen", ProcessID: 1440, ProcessName: "postgres"},
+					{Protocol: "UDP", LocalAddress: "0.0.0.0", LocalPort: 5353, State: "Bound", ProcessID: 847, ProcessName: "avahi-daemon"},
+					{Protocol: "UDP", LocalAddress: "0.0.0.0", LocalPort: 51822, State: "Bound", ProcessID: 0, ProcessName: ""},
+				}
+				snapshot.LinuxBaseline.Workloads = &model.WorkloadInventory{
+					Runtime:     "docker",
+					CollectedAt: collectedAt,
+					Workloads: []model.ContainerWorkload{
+						{Name: "binderledger_web", Image: "ghcr.io/example/binderledger-web:demo", Project: "binderledger", Service: "web", State: "running", Health: "healthy", Ports: []model.ContainerPortBinding{{Protocol: "TCP", ContainerPort: 8080, Published: true, HostAddress: "0.0.0.0", HostPort: 8081}}},
+						{Name: "haven_proxy", Image: "caddy:demo", Project: "haven", Service: "proxy", State: "running", Health: "healthy", Ports: []model.ContainerPortBinding{{Protocol: "TCP", ContainerPort: 8443, Published: true, HostAddress: "0.0.0.0", HostPort: 8443}}},
+						{Name: "demo_database", Image: "postgres:demo", Project: "demo", Service: "database", State: "running", Health: "healthy", Ports: []model.ContainerPortBinding{{Protocol: "TCP", ContainerPort: 5432, Published: false}}},
+					},
+				}
 			}
 		}
 		if !enabled {
@@ -866,7 +924,11 @@ func (store *Store) saveSyntheticSnapshot(
 	snapshot model.SecuritySnapshot,
 	now time.Time,
 ) error {
-	payload, err := historicalPayload(snapshot)
+	// Synthetic fixtures intentionally keep their invented live-only fields so
+	// demo mode can exercise listener and workload review after a hub restart.
+	// Real observations continue through historicalPayload and never persist
+	// connection or container-runtime metadata.
+	payload, err := json.Marshal(snapshot)
 	if err != nil {
 		return err
 	}

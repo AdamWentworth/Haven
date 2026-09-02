@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { addPasskey, collectSnapshot, getAuthStatus, getDevice, getLatestSnapshot, getRuntimeStatus, listAuditEvents, listDevices, listEvents, listExpectedServices, listFindingReviews, listObservedListeners, listPasskeys, listSecurityActions, loginWithPasskey, logout, registerPasskey, removeExpectedService, removePasskey, requestSecurityAction, saveExpectedService, saveFindingReview } from "./api";
+import { addPasskey, collectSnapshot, getAuthStatus, getDevice, getLatestSnapshot, getRuntimeStatus, listAuditEvents, listDevices, listEvents, listExpectedServices, listFindingReviews, listObservedListeners, listPasskeys, listSecurityActions, loginWithPasskey, logout, registerPasskey, removeExpectedService, removePasskey, requestSecurityAction, saveExpectedService, saveExpectedServices, saveFindingReview } from "./api";
 import { ActivityIcon, AlertIcon, BellIcon, CheckIcon, ChipIcon, DefenderIcon, DevicesIcon, FirewallIcon, HavenIcon, HelpIcon, LaptopIcon, LockIcon, MonitorIcon, NetworkIcon, RefreshIcon, RemoteAccessIcon, ServerIcon, UpdateIcon, UsersIcon, WorkloadIcon } from "./icons";
 import type {
   BaselineCheck,
@@ -12,6 +12,7 @@ import type {
   DefenderStatus,
   DeviceRecord,
   ExpectedService,
+  ExpectedServiceInput,
   FindingReview,
   FindingReviewState,
   FirewallProfileStatus,
@@ -237,6 +238,119 @@ function workloadAttribution(listener: LogicalListener, inventory: WorkloadInven
 	});
 }
 
+function canonicalOwnerName(value: string, executable = false) {
+	let name = value.trim().toLowerCase();
+	if (executable && name.endsWith(".exe")) name = name.slice(0, -4);
+	return name;
+}
+
+function expectedServiceMatches(listener: LogicalListener, service: ExpectedService, inventory: WorkloadInventory | null) {
+	const portEnd = service.portEnd || service.port;
+	if (service.protocol !== listener.protocol || listener.port < service.port || listener.port > portEnd || (service.bindScope !== "any" && service.bindScope !== listener.bindScope)) return false;
+	if (service.processNames?.length) {
+		const expectedProcesses = new Set(service.processNames.map((process) => canonicalOwnerName(process, true)));
+		const observedProcesses = listener.processes.map((process) => canonicalOwnerName(process, true));
+		if (observedProcesses.length === 0 || !observedProcesses.every((process) => expectedProcesses.has(process))) return false;
+	}
+	if (service.workloadNames?.length) {
+		const expectedWorkloads = new Set(service.workloadNames.map((workload) => canonicalOwnerName(workload)));
+		const observedWorkloads = workloadAttribution(listener, inventory).map(({ workload }) => canonicalOwnerName(workload.name));
+		if (observedWorkloads.length === 0 || !observedWorkloads.every((workload) => expectedWorkloads.has(workload))) return false;
+	}
+	return true;
+}
+
+interface BaselineSuggestion {
+	id: string;
+	title: string;
+	description: string;
+	listenerKeys: string[];
+	services: ExpectedServiceInput[];
+}
+
+const workloadLabels: Record<string, string> = {
+	frontend_nginx: "PokeGoNexus public web ingress",
+	binderledger_api: "BinderLedger API",
+	binderledger_web: "BinderLedger web",
+	haven_dns: "HAVEN private DNS",
+	haven_hub: "HAVEN agent hub",
+	haven_proxy: "HAVEN HTTPS console",
+	winrift_api: "WinRift API",
+	winrift_web: "WinRift web",
+};
+
+function readableIdentifier(value: string) {
+	return value.replace(/[_-]+/g, " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
+}
+
+function suggestedBaseline(deviceId: string, operatingSystem: string, listeners: LogicalListener[], inventory: WorkloadInventory | null, expectedServices: ExpectedService[]) {
+	const suggestions: BaselineSuggestion[] = [];
+	const isWindows = /windows/i.test(operatingSystem);
+	const unreviewed = listeners.filter((listener) => listener.bindScope !== "local" && !expectedServices.some((service) => expectedServiceMatches(listener, service, inventory)));
+	const exactLabels = isWindows ? new Map<string, string>([
+		["TCP:135", "Windows RPC Endpoint Mapper"],
+		["TCP:139", "Windows file sharing (NetBIOS)"],
+		["TCP:445", "Windows file sharing (SMB)"],
+		["TCP:3389", "Remote Desktop"],
+		["TCP:5040", "Windows Connected Devices"],
+		["TCP:5357", "Windows device discovery (WSD)"],
+		["TCP:8096", "Jellyfin"],
+	]) : new Map<string, string>([
+		["TCP:22", "OpenSSH"],
+		["UDP:546", "DHCPv6 client"],
+		["UDP:5353", "Avahi mDNS"],
+		["UDP:51822", "WireGuard VPN"],
+	]);
+
+	for (const listener of unreviewed) {
+		const attributions = workloadAttribution(listener, inventory);
+		if (attributions.length === 1) {
+			const workload = attributions[0].workload;
+			const title = workloadLabels[workload.name] || readableIdentifier(workload.name);
+			suggestions.push({
+				id: `workload:${listener.key}:${workload.name}`,
+				title,
+				description: `${listener.protocol} ${listener.port} · ${bindScopeLabel(listener.bindScope)} · currently published by Docker workload ${workload.name}.`,
+				listenerKeys: [listener.key],
+				services: [{ deviceId, label: title, protocol: listener.protocol, port: listener.port, portEnd: listener.port, bindScope: listener.bindScope, processNames: [], workloadNames: [workload.name] }],
+			});
+			continue;
+		}
+		const title = exactLabels.get(`${listener.protocol}:${listener.port}`);
+		if (!title) continue;
+		suggestions.push({
+			id: `native:${listener.key}`,
+			title,
+			description: `${listener.protocol} ${listener.port} · ${bindScopeLabel(listener.bindScope)}${listener.processes.length ? ` · owned by ${listener.processes.join(", ")}` : ""}.`,
+			listenerKeys: [listener.key],
+			services: [{ deviceId, label: title, protocol: listener.protocol, port: listener.port, portEnd: listener.port, bindScope: listener.bindScope, processNames: listener.processes, workloadNames: [] }],
+		});
+	}
+
+	if (isWindows) {
+		const systemProcesses = new Set(["system", "svchost", "services", "lsass", "wininit", "winlogon", "spoolsv"]);
+		const exactSuggestionKeys = new Set(suggestions.flatMap((suggestion) => suggestion.listenerKeys));
+		const dynamicByScope = new Map<LogicalListener["bindScope"], LogicalListener[]>();
+		for (const listener of unreviewed) {
+			const processes = listener.processes.map((process) => canonicalOwnerName(process, true));
+			if (exactSuggestionKeys.has(listener.key) || listener.protocol !== "TCP" || listener.port < 49152 || listener.port > 65535 || processes.length === 0 || !processes.every((process) => systemProcesses.has(process))) continue;
+			dynamicByScope.set(listener.bindScope, [...(dynamicByScope.get(listener.bindScope) || []), listener]);
+		}
+		for (const [scope, grouped] of dynamicByScope) {
+			const processes = [...new Set(grouped.flatMap((listener) => listener.processes.map((process) => canonicalOwnerName(process, true))))].sort();
+			suggestions.push({
+				id: `windows-rpc:${scope}:${processes.join(",")}`,
+				title: "Windows dynamic RPC services",
+				description: `Groups ${grouped.length} current listener${grouped.length === 1 ? "" : "s"} in TCP 49152–65535, but only while owned by reviewed Windows system processes: ${processes.join(", ")}.`,
+				listenerKeys: grouped.map((listener) => listener.key),
+				services: [{ deviceId, label: "Windows dynamic RPC services", protocol: "TCP", port: 49152, portEnd: 65535, bindScope: scope, processNames: processes, workloadNames: [] }],
+			});
+		}
+	}
+
+	return suggestions;
+}
+
 function formatPortBinding(binding: ContainerPortBinding) {
 	if (!binding.published) return `${binding.containerPort}/${binding.protocol.toLowerCase()} · container only`;
 	const address = normalizeAddress(binding.hostAddress || "") || "*";
@@ -447,7 +561,7 @@ function FirewallPanel({ profiles, isLinux }: { profiles: FirewallProfileStatus[
   );
 }
 
-function ConnectionsPanel({ deviceId, connections, workloads, expectedServices, observations, saveExpectation, removeExpectation, busy }: { deviceId: string; connections: NetworkConnection[]; workloads: WorkloadInventory | null; expectedServices: ExpectedService[]; observations: ObservedListener[]; saveExpectation: (service: { deviceId: string; label: string; protocol: "TCP" | "UDP"; port: number; bindScope: BindScope }) => void; removeExpectation: (service: ExpectedService) => void; busy: boolean }) {
+function ConnectionsPanel({ deviceId, operatingSystem, connections, workloads, expectedServices, observations, saveExpectation, saveExpectations, removeExpectation, busy }: { deviceId: string; operatingSystem: string; connections: NetworkConnection[]; workloads: WorkloadInventory | null; expectedServices: ExpectedService[]; observations: ObservedListener[]; saveExpectation: (service: ExpectedServiceInput) => void; saveExpectations: (services: ExpectedServiceInput[]) => void; removeExpectation: (service: ExpectedService) => void; busy: boolean }) {
   const [filter, setFilter] = useState("");
 	const [view, setView] = useState<"review" | "expected" | "local" | "active">("review");
 	const [manualLabel, setManualLabel] = useState("");
@@ -456,11 +570,16 @@ function ConnectionsPanel({ deviceId, connections, workloads, expectedServices, 
 	const [manualScope, setManualScope] = useState<BindScope>("any");
 	const listeners = useMemo(() => logicalListeners(connections), [connections]);
 	const active = useMemo(() => connections.filter((connection) => connection.state.toLowerCase() === "established"), [connections]);
-	const expectedFor = useCallback((listener: LogicalListener) => expectedServices.find((service) => service.protocol === listener.protocol && service.port === listener.port && (service.bindScope === "any" || service.bindScope === listener.bindScope)), [expectedServices]);
+	const expectedFor = useCallback((listener: LogicalListener) => expectedServices.find((service) => expectedServiceMatches(listener, service, workloads)), [expectedServices, workloads]);
 	const reviewListeners = listeners.filter((listener) => listener.bindScope !== "local" && !expectedFor(listener));
 	const expectedListeners = listeners.filter((listener) => !!expectedFor(listener));
 	const localListeners = listeners.filter((listener) => listener.bindScope === "local" && !expectedFor(listener));
 	const shownListeners = view === "review" ? reviewListeners : view === "expected" ? expectedListeners : view === "local" ? localListeners : [];
+	const baselineSuggestions = useMemo(() => suggestedBaseline(deviceId, operatingSystem, listeners, workloads, expectedServices), [deviceId, operatingSystem, listeners, workloads, expectedServices]);
+	const suggestionSignature = baselineSuggestions.map((suggestion) => suggestion.id).join("|");
+	const [selectedSuggestions, setSelectedSuggestions] = useState<Set<string>>(new Set());
+	useEffect(() => setSelectedSuggestions(new Set(baselineSuggestions.map((suggestion) => suggestion.id))), [deviceId, suggestionSignature]);
+	const selectedBaseline = baselineSuggestions.filter((suggestion) => selectedSuggestions.has(suggestion.id));
   const filtered = useMemo(() => {
     const query = filter.trim().toLowerCase();
     if (!query) return connections;
@@ -473,13 +592,13 @@ function ConnectionsPanel({ deviceId, connections, workloads, expectedServices, 
 	const markExpected = (listener: LogicalListener) => {
 		const entered = window.prompt(`Friendly name for ${listener.protocol} port ${listener.port} (for example, SSH or WireGuard).`, `${listener.protocol} ${listener.port}`);
 		if (entered === null || entered.trim() === "") return;
-		saveExpectation({ deviceId, label: entered.trim(), protocol: listener.protocol, port: listener.port, bindScope: listener.bindScope });
+		saveExpectation({ deviceId, label: entered.trim(), protocol: listener.protocol, port: listener.port, portEnd: listener.port, bindScope: listener.bindScope, processNames: [], workloadNames: [] });
 	};
 	const addManual = (event: React.FormEvent) => {
 		event.preventDefault();
 		const port = Number(manualPort);
 		if (!manualLabel.trim() || !Number.isInteger(port) || port < 1 || port > 65535) return;
-		saveExpectation({ deviceId, label: manualLabel.trim(), protocol: manualProtocol, port, bindScope: manualScope });
+		saveExpectation({ deviceId, label: manualLabel.trim(), protocol: manualProtocol, port, portEnd: port, bindScope: manualScope, processNames: [], workloadNames: [] });
 		setManualLabel("");
 		setManualPort("");
 	};
@@ -490,8 +609,16 @@ function ConnectionsPanel({ deviceId, connections, workloads, expectedServices, 
       <div className="section-heading connections-heading">
 		<div className="heading-identity"><span className="section-icon cyan"><NetworkIcon /></span><div><p className="eyebrow">SERVICE EXPOSURE · NOT A THREAT LIST</p><h2 id="connections-title">Listener review</h2></div></div>
 		<p>{listeners.length} logical service endpoint{listeners.length === 1 ? "" : "s"} from {connections.filter((item) => ["listen", "open", "bound"].includes(item.state.toLowerCase())).length} raw sockets</p>
-      </div>
+	  </div>
 	  <p className="service-explainer">HAVEN groups IPv4/IPv6 duplicates and asks you to classify intended services. “Unreviewed” means no expectation has been saved yet—it does not mean malicious or Internet-accessible.</p>
+	  {baselineSuggestions.length > 0 && <section className="baseline-review" aria-labelledby="baseline-review-title">
+		<div className="baseline-review-heading"><div><p className="eyebrow">ONE-TIME REVIEW</p><h3 id="baseline-review-title">Suggested service baseline</h3></div><StatusChip label={`${baselineSuggestions.length} suggestion${baselineSuggestions.length === 1 ? "" : "s"}`} tone="configured" /></div>
+		<p>These are high-confidence suggestions derived from platform roles, current process ownership, and Docker workload mappings. Nothing becomes trusted until you approve it; unchecked listeners remain visible for individual review.</p>
+		<div className="baseline-suggestion-list">
+		  {baselineSuggestions.map((suggestion) => <label className="baseline-suggestion" key={suggestion.id}><input type="checkbox" checked={selectedSuggestions.has(suggestion.id)} disabled={busy} onChange={(event) => setSelectedSuggestions((current) => { const next = new Set(current); if (event.target.checked) next.add(suggestion.id); else next.delete(suggestion.id); return next; })} /><span><strong>{suggestion.title}</strong><small>{suggestion.description}</small></span><em>{suggestion.listenerKeys.length} listener{suggestion.listenerKeys.length === 1 ? "" : "s"}</em></label>)}
+		</div>
+		<div className="baseline-review-actions"><span>{selectedBaseline.reduce((count, suggestion) => count + suggestion.listenerKeys.length, 0)} current listener{selectedBaseline.reduce((count, suggestion) => count + suggestion.listenerKeys.length, 0) === 1 ? "" : "s"} covered</span><button type="button" disabled={busy || selectedBaseline.length === 0} onClick={() => saveExpectations(selectedBaseline.flatMap((suggestion) => suggestion.services))}>{busy ? "Saving…" : `Approve selected baseline (${selectedBaseline.length})`}</button></div>
+	  </section>}
 	  <div className="endpoint-tabs" role="tablist" aria-label="Endpoint categories">
 		<button className={view === "review" ? "selected" : ""} type="button" onClick={() => setView("review")}>Needs review <span>{reviewListeners.length}</span></button>
 		<button className={view === "expected" ? "selected" : ""} type="button" onClick={() => setView("expected")}>Expected <span>{expectedListeners.length}</span></button>
@@ -518,7 +645,7 @@ function ConnectionsPanel({ deviceId, connections, workloads, expectedServices, 
 		<summary>Manage expected-service registry ({expectedServices.length})</summary>
 		<p>Expectations are local HAVEN metadata. They do not open ports or change firewall rules.</p>
 		<form className="expectation-form" onSubmit={addManual}><label><span>Friendly label</span><input maxLength={80} value={manualLabel} onChange={(event) => setManualLabel(event.target.value)} placeholder="SSH" /></label><label><span>Protocol</span><select value={manualProtocol} onChange={(event) => setManualProtocol(event.target.value as "TCP" | "UDP")}><option>TCP</option><option>UDP</option></select></label><label><span>Port</span><input type="number" min={1} max={65535} value={manualPort} onChange={(event) => setManualPort(event.target.value)} placeholder="22" /></label><label><span>Expected bind</span><select value={manualScope} onChange={(event) => setManualScope(event.target.value as BindScope)}><option value="any">Any bind</option><option value="local">This host only</option><option value="private">Private address</option><option value="wildcard">All interfaces</option><option value="specific">Specific address</option></select></label><button type="submit" disabled={busy || !manualLabel.trim() || !manualPort}>Add expectation</button></form>
-		{expectedServices.length > 0 && <ul className="registry-list">{expectedServices.map((service) => <li key={service.id}><span><strong>{service.label}</strong><small>{service.protocol} {service.port} · {bindScopeLabel(service.bindScope)}</small></span><button type="button" disabled={busy} onClick={() => removeExpectation(service)}>Remove</button></li>)}</ul>}
+		{expectedServices.length > 0 && <ul className="registry-list">{expectedServices.map((service) => <li key={service.id}><span><strong>{service.label}</strong><small>{service.protocol} {service.portEnd > service.port ? `${service.port}–${service.portEnd}` : service.port} · {bindScopeLabel(service.bindScope)}{service.processNames?.length ? ` · processes: ${service.processNames.join(", ")}` : ""}{service.workloadNames?.length ? ` · workloads: ${service.workloadNames.join(", ")}` : ""}</small></span><button type="button" disabled={busy} onClick={() => removeExpectation(service)}>Remove</button></li>)}</ul>}
 	  </details>
 	  <details className="raw-endpoints">
 		<summary>Raw technical details ({connections.length})</summary>
@@ -721,7 +848,7 @@ function BaselinePanel({ checks, collectedAt, platform }: { checks: BaselineChec
   );
 }
 
-function Application({ snapshot, devices, events, runtime, selectedDevice, selectDevice, refresh, refreshing, error, demoMode, alertsEnabled, alertsSupported, enableAlerts, reviews, expectedServices, listenerObservations, audit, actions, passkeys, reviewFinding, saveServiceExpectation, removeServiceExpectation, runAction, addOwnerPasskey, removeOwnerPasskey, actionBusy, signOut }: { snapshot: SecuritySnapshot; devices: DeviceRecord[]; events: SecurityEvent[]; runtime: RuntimeStatus | null; selectedDevice: DeviceRecord | null; selectDevice: (id: string) => void; refresh: () => void; refreshing: boolean; error: string | null; demoMode: boolean; alertsEnabled: boolean; alertsSupported: boolean; enableAlerts: () => void; reviews: FindingReview[]; expectedServices: ExpectedService[]; listenerObservations: ObservedListener[]; audit: AuditEvent[]; actions: SecurityAction[]; passkeys: PasskeyInfo[]; reviewFinding: (finding: SecurityFinding, state: FindingReviewState) => void; saveServiceExpectation: (service: { deviceId: string; label: string; protocol: "TCP" | "UDP"; port: number; bindScope: BindScope }) => void; removeServiceExpectation: (service: ExpectedService) => void; runAction: (kind: SecurityActionKind) => void; addOwnerPasskey: () => void; removeOwnerPasskey: (passkey: PasskeyInfo) => void; actionBusy: boolean; signOut: () => void }) {
+function Application({ snapshot, devices, events, runtime, selectedDevice, selectDevice, refresh, refreshing, error, demoMode, alertsEnabled, alertsSupported, enableAlerts, reviews, expectedServices, listenerObservations, audit, actions, passkeys, reviewFinding, saveServiceExpectation, saveServiceExpectations, removeServiceExpectation, runAction, addOwnerPasskey, removeOwnerPasskey, actionBusy, signOut }: { snapshot: SecuritySnapshot; devices: DeviceRecord[]; events: SecurityEvent[]; runtime: RuntimeStatus | null; selectedDevice: DeviceRecord | null; selectDevice: (id: string) => void; refresh: () => void; refreshing: boolean; error: string | null; demoMode: boolean; alertsEnabled: boolean; alertsSupported: boolean; enableAlerts: () => void; reviews: FindingReview[]; expectedServices: ExpectedService[]; listenerObservations: ObservedListener[]; audit: AuditEvent[]; actions: SecurityAction[]; passkeys: PasskeyInfo[]; reviewFinding: (finding: SecurityFinding, state: FindingReviewState) => void; saveServiceExpectation: (service: ExpectedServiceInput) => void; saveServiceExpectations: (services: ExpectedServiceInput[]) => void; removeServiceExpectation: (service: ExpectedService) => void; runAction: (kind: SecurityActionKind) => void; addOwnerPasskey: () => void; removeOwnerPasskey: (passkey: PasskeyInfo) => void; actionBusy: boolean; signOut: () => void }) {
   const isLinux = snapshot.linuxBaseline !== null || /linux|ubuntu/i.test(snapshot.device.operatingSystem);
   const defenderHealthy = snapshot.defender?.antivirusEnabled === true
     && snapshot.defender.realTimeProtectionEnabled === true
@@ -731,7 +858,8 @@ function Application({ snapshot, devices, events, runtime, selectedDevice, selec
   const established = snapshot.connections.filter((item) => item.state.toLowerCase() === "established").length;
 	const listeners = logicalListeners(snapshot.connections);
 	const broadListeners = listeners.filter((item) => item.bindScope === "wildcard").length;
-	const unreviewedListeners = listeners.filter((listener) => listener.bindScope !== "local" && !expectedServices.some((service) => service.protocol === listener.protocol && service.port === listener.port && (service.bindScope === "any" || service.bindScope === listener.bindScope))).length;
+	const workloadInventory = snapshot.linuxBaseline?.workloads ?? null;
+	const unreviewedListeners = listeners.filter((listener) => listener.bindScope !== "local" && !expectedServices.some((service) => expectedServiceMatches(listener, service, workloadInventory))).length;
 	const findingCount = (snapshot.findings || []).length;
 	const unknownChecks = (snapshot.baselineChecks || []).filter((check) => check.status === "unknown").length;
 
@@ -768,9 +896,9 @@ function Application({ snapshot, devices, events, runtime, selectedDevice, selec
         {isLinux && snapshot.linuxBaseline ? <LinuxPanel baseline={snapshot.linuxBaseline} /> : <DefenderPanel defender={snapshot.defender} />}
 		{isLinux && <WorkloadsPanel inventory={snapshot.linuxBaseline?.workloads ?? null} />}
 		<FirewallPanel profiles={snapshot.firewallProfiles} isLinux={isLinux} />
-		<ConnectionsPanel deviceId={selectedDevice?.id || snapshot.device.deviceId || ""} connections={snapshot.connections} workloads={snapshot.linuxBaseline?.workloads ?? null} expectedServices={expectedServices} observations={listenerObservations} saveExpectation={saveServiceExpectation} removeExpectation={removeServiceExpectation} busy={actionBusy} />
+		<ConnectionsPanel deviceId={selectedDevice?.id || snapshot.device.deviceId || ""} operatingSystem={snapshot.device.operatingSystem} connections={snapshot.connections} workloads={workloadInventory} expectedServices={expectedServices} observations={listenerObservations} saveExpectation={saveServiceExpectation} saveExpectations={saveServiceExpectations} removeExpectation={removeServiceExpectation} busy={actionBusy} />
       </main>
-	  <footer><span>HAVEN milestone 0.7.3 · Workload attribution</span><span>Observe continuously. Act deliberately.</span></footer>
+	  <footer><span>HAVEN milestone 0.7.4 · Baseline review</span><span>Observe continuously. Act deliberately.</span></footer>
     </>
   );
 }
@@ -890,7 +1018,7 @@ export function App() {
     }
   }, [loadControls, selectedId]);
 
-	const saveServiceExpectation = useCallback(async (service: { deviceId: string; label: string; protocol: "TCP" | "UDP"; port: number; bindScope: BindScope }) => {
+	const saveServiceExpectation = useCallback(async (service: ExpectedServiceInput) => {
 		setActionBusy(true);
 		try {
 			await saveExpectedService(service);
@@ -903,6 +1031,21 @@ export function App() {
 			setActionBusy(false);
 		}
 	}, []);
+
+	const saveServiceBaseline = useCallback(async (services: ExpectedServiceInput[]) => {
+		if (!selectedId || services.length === 0) return;
+		setActionBusy(true);
+		try {
+			const saved = await saveExpectedServices(selectedId, services);
+			setExpectedServices(saved);
+			setAudit(await listAuditEvents());
+			setError(null);
+		} catch (reason) {
+			setError(reason instanceof Error ? reason.message : "The suggested service baseline could not be saved.");
+		} finally {
+			setActionBusy(false);
+		}
+	}, [selectedId]);
 
 	const removeServiceExpectation = useCallback(async (service: ExpectedService) => {
 		if (!window.confirm(`Remove the expected-service classification “${service.label}”? This changes HAVEN's interpretation only; it does not stop the service.`)) return;
@@ -1118,5 +1261,5 @@ export function App() {
 
   const selectedDevice = devices.find((device) => device.id === selectedId) || null;
   const selectedEvents = selectedId ? events.filter((event) => event.deviceId === selectedId) : events;
-	return <Application snapshot={snapshot} devices={devices} events={selectedEvents} runtime={runtime} selectedDevice={selectedDevice} selectDevice={(id) => void selectDevice(id)} refresh={() => void refresh()} refreshing={refreshing} error={error} demoMode={demoMode} alertsEnabled={alertsEnabled} alertsSupported={alertsSupported} enableAlerts={() => void enableAlerts()} reviews={reviews} expectedServices={expectedServices} listenerObservations={listenerObservations} audit={audit} actions={actions} passkeys={passkeys} reviewFinding={(finding, state) => void reviewFinding(finding, state)} saveServiceExpectation={(service) => void saveServiceExpectation(service)} removeServiceExpectation={(service) => void removeServiceExpectation(service)} runAction={(kind) => void runAction(kind)} addOwnerPasskey={() => void addOwnerPasskey()} removeOwnerPasskey={(passkey) => void removeOwnerPasskey(passkey)} actionBusy={actionBusy} signOut={() => void signOut()} />;
+	return <Application snapshot={snapshot} devices={devices} events={selectedEvents} runtime={runtime} selectedDevice={selectedDevice} selectDevice={(id) => void selectDevice(id)} refresh={() => void refresh()} refreshing={refreshing} error={error} demoMode={demoMode} alertsEnabled={alertsEnabled} alertsSupported={alertsSupported} enableAlerts={() => void enableAlerts()} reviews={reviews} expectedServices={expectedServices} listenerObservations={listenerObservations} audit={audit} actions={actions} passkeys={passkeys} reviewFinding={(finding, state) => void reviewFinding(finding, state)} saveServiceExpectation={(service) => void saveServiceExpectation(service)} saveServiceExpectations={(services) => void saveServiceBaseline(services)} removeServiceExpectation={(service) => void removeServiceExpectation(service)} runAction={(kind) => void runAction(kind)} addOwnerPasskey={() => void addOwnerPasskey()} removeOwnerPasskey={(passkey) => void removeOwnerPasskey(passkey)} actionBusy={actionBusy} signOut={() => void signOut()} />;
 }

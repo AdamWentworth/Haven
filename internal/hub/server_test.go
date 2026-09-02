@@ -302,6 +302,31 @@ func TestExpectedServiceAndListenerEndpoints(t *testing.T) {
 	}
 }
 
+func TestExpectedServiceBatchEndpoint(t *testing.T) {
+	server, store := testServer(t)
+	defer store.Close()
+	collect := httptest.NewRecorder()
+	server.Handler().ServeHTTP(collect, httptest.NewRequest(http.MethodPost, "/api/security/snapshot", nil))
+	if collect.Code != http.StatusOK {
+		t.Fatalf("could not seed baseline device: %d %s", collect.Code, collect.Body.String())
+	}
+
+	request := httptest.NewRecorder()
+	body := strings.NewReader(`{"deviceId":"test-device","services":[{"label":"Windows dynamic RPC services","protocol":"TCP","port":49152,"portEnd":65535,"bindScope":"wildcard","processNames":["svchost.exe","SYSTEM"],"workloadNames":[]},{"label":"HAVEN HTTPS console","protocol":"TCP","port":8443,"portEnd":8443,"bindScope":"private","processNames":[],"workloadNames":["haven_proxy"]}]}`)
+	server.Handler().ServeHTTP(request, httptest.NewRequest(http.MethodPost, "/api/expected-services/batch", body))
+	if request.Code != http.StatusOK || !strings.Contains(request.Body.String(), `"portEnd":65535`) || !strings.Contains(request.Body.String(), `"workloadNames":["haven_proxy"]`) {
+		t.Fatalf("unexpected expected-service batch response: %d %s", request.Code, request.Body.String())
+	}
+
+	events, err := store.ListAudit(context.Background(), 10)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(events) == 0 || events[0].Action != "service.expectation.baseline" || !strings.Contains(events[0].Detail, "2 reviewed baseline") {
+		t.Fatalf("expected one privacy-bounded baseline audit event, got %#v", events)
+	}
+}
+
 func TestContinuousMonitorCollectsImmediatelyAndOnInterval(t *testing.T) {
 	server, store := testServer(t)
 	defer store.Close()
@@ -369,6 +394,11 @@ func TestDemoModeExcludesLiveDevices(t *testing.T) {
 	server.Handler().ServeHTTP(liveDetail, httptest.NewRequest(http.MethodGet, "/api/devices/test-device", nil))
 	if liveDetail.Code != http.StatusNotFound {
 		t.Fatalf("demo mode exposed live device detail with HTTP %d", liveDetail.Code)
+	}
+	syntheticDetail := httptest.NewRecorder()
+	server.Handler().ServeHTTP(syntheticDetail, httptest.NewRequest(http.MethodGet, "/api/devices/demo-01", nil))
+	if syntheticDetail.Code != http.StatusOK || !strings.Contains(syntheticDetail.Body.String(), `"localPort":135`) {
+		t.Fatalf("demo detail did not retain its invented listener fixture: %d %s", syntheticDetail.Code, syntheticDetail.Body.String())
 	}
 	snapshot := httptest.NewRecorder()
 	server.Handler().ServeHTTP(snapshot, httptest.NewRequest(http.MethodPost, "/api/security/snapshot", nil))

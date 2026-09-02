@@ -334,7 +334,7 @@ func TestServiceInventoryGroupsListenersAndTracksExpectations(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if updated.ID != expected.ID || updated.Label != "Web proxy" {
+	if updated.ID != expected.ID || updated.Label != "Web proxy" || updated.PortEnd != 443 || len(updated.ProcessNames) != 0 || len(updated.WorkloadNames) != 0 {
 		t.Fatalf("expected the same endpoint classification to update in place, got %#v", updated)
 	}
 
@@ -370,6 +370,96 @@ func TestServiceInventoryGroupsListenersAndTracksExpectations(t *testing.T) {
 	services, err := store.ListExpectedServices(ctx, snapshot.Device.DeviceID)
 	if err != nil || len(services) != 0 {
 		t.Fatalf("expected the service classification to be removed, got %#v, %v", services, err)
+	}
+}
+
+func TestExpectedServiceBatchSupportsOwnerConstrainedRanges(t *testing.T) {
+	ctx := context.Background()
+	store, err := Open(ctx, filepath.Join(t.TempDir(), "haven.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	now := time.Date(2026, time.September, 2, 13, 0, 0, 0, time.UTC)
+	snapshot := model.SecuritySnapshot{CollectedAt: now, Device: model.DeviceSummary{DeviceID: "baseline-test", HostName: "baseline-test", OperatingSystem: "Windows"}}
+	if err := store.SaveSnapshot(ctx, snapshot); err != nil {
+		t.Fatal(err)
+	}
+
+	services, err := store.UpsertExpectedServices(ctx, []ExpectedService{
+		{DeviceID: "baseline-test", Label: "Windows dynamic RPC services", Protocol: "tcp", Port: 49152, PortEnd: 65535, BindScope: BindScopeWildcard, ProcessNames: []string{"svchost.exe", "SYSTEM", "svchost"}, UpdatedAt: now},
+		{DeviceID: "baseline-test", Label: "HAVEN HTTPS console", Protocol: "TCP", Port: 8443, BindScope: BindScopePrivate, WorkloadNames: []string{"HAVEN_PROXY", "haven_proxy"}, UpdatedAt: now},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(services) != 2 {
+		t.Fatalf("expected two baseline classifications, got %#v", services)
+	}
+	if services[0].Port != 8443 || services[0].PortEnd != 8443 || len(services[0].WorkloadNames) != 1 || services[0].WorkloadNames[0] != "haven_proxy" {
+		t.Fatalf("expected a canonical workload-owned exact service, got %#v", services[0])
+	}
+	if services[1].Port != 49152 || services[1].PortEnd != 65535 || len(services[1].ProcessNames) != 2 || services[1].ProcessNames[0] != "svchost" || services[1].ProcessNames[1] != "system" {
+		t.Fatalf("expected a canonical process-owned port range, got %#v", services[1])
+	}
+	if _, err := store.UpsertExpectedServices(ctx, []ExpectedService{{DeviceID: "baseline-test", Label: "one", Protocol: "TCP", Port: 80, BindScope: BindScopeWildcard}, {DeviceID: "other-device", Label: "two", Protocol: "TCP", Port: 443, BindScope: BindScopeWildcard}}); err == nil {
+		t.Fatal("expected a mixed-device baseline batch to be rejected")
+	}
+}
+
+func TestExpectedServiceMigrationPreservesVersionSevenRows(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "haven.db")
+	database, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	statements := []string{
+		`CREATE TABLE schema_migrations (version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL)`,
+		`CREATE TABLE devices (id TEXT PRIMARY KEY)`,
+		`CREATE TABLE expected_services (
+			id TEXT PRIMARY KEY,
+			device_id TEXT NOT NULL REFERENCES devices(id) ON DELETE CASCADE,
+			label TEXT NOT NULL,
+			protocol TEXT NOT NULL,
+			port INTEGER NOT NULL,
+			bind_scope TEXT NOT NULL,
+			created_at TEXT NOT NULL,
+			updated_at TEXT NOT NULL,
+			UNIQUE (device_id, protocol, port, bind_scope)
+		)`,
+		`CREATE INDEX expected_services_device ON expected_services (device_id, protocol, port)`,
+		`INSERT INTO devices (id) VALUES ('migration-device')`,
+		`INSERT INTO expected_services (id, device_id, label, protocol, port, bind_scope, created_at, updated_at)
+		 VALUES ('svc_existing', 'migration-device', 'Existing HTTPS', 'TCP', 443, 'wildcard', '2026-09-02T13:00:00Z', '2026-09-02T13:00:00Z')`,
+	}
+	for _, statement := range statements {
+		if _, err := database.ExecContext(ctx, statement); err != nil {
+			database.Close()
+			t.Fatal(err)
+		}
+	}
+	for version := 1; version <= 7; version++ {
+		if _, err := database.ExecContext(ctx, `INSERT INTO schema_migrations (version, applied_at) VALUES (?, '2026-09-02T13:00:00Z')`, version); err != nil {
+			database.Close()
+			t.Fatal(err)
+		}
+	}
+	if err := database.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	store, err := Open(ctx, path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	services, err := store.ListExpectedServices(ctx, "migration-device")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(services) != 1 || services[0].ID != "svc_existing" || services[0].Port != 443 || services[0].PortEnd != 443 || len(services[0].ProcessNames) != 0 || len(services[0].WorkloadNames) != 0 {
+		t.Fatalf("expected the version-seven classification to survive migration, got %#v", services)
 	}
 }
 

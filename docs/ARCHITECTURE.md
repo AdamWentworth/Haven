@@ -34,13 +34,13 @@ PostgreSQL becomes appropriate if HAVEN needs multiple hub writers, multiple hub
 
 ## Current milestone boundary
 
-Milestone 0.7.3 extends the authenticated native-agent hub with privacy-bounded Docker workload attribution:
+Milestone 0.7.4 extends the authenticated native-agent hub with an owner-reviewed listener baseline:
 
 - `haven-hub` serves a loopback dashboard, owns SQLite, and exposes a separate loopback TLS 1.3 agent listener. Native development may enable local collection; a containerized production hub disables it and never treats its ephemeral container hostname as a device.
 - Enrollment uses a short-lived, one-time 256-bit token plus an ECDSA P-256 certificate request. The trusted CA certificate is transferred out of band.
 - Every agent receives a unique 90-day client certificate whose URI identity must match its observation envelope and database record.
 - Reports have a version, random identity, strictly increasing per-device sequence, and bounded timestamp. Replays, revoked devices, oversized bodies, unsupported versions, and excessive request rates are rejected.
-- The hub removes raw connection and workload metadata before persistence. It retains only a bounded listener baseline—protocol, port, bind scope, and appearance timestamps—so it can identify newly appearing or reappearing services without retaining remote endpoints, payloads, process history, or a deployment timeline. There is no remote-control endpoint.
+- The hub removes raw connection and workload observations before persistence. It retains only a bounded listener baseline—protocol, port, bind scope, and appearance timestamps—so it can identify newly appearing or reappearing services without retaining remote endpoints, payloads, process history, or a deployment timeline. Separately, owner-approved expectation metadata may retain a bounded process/workload allowlist so port ranges and workload ownership remain meaningful. There is no remote-control endpoint.
 - The Ubuntu reporter remains unable to open either Docker socket path. Before each report, a separate one-shot service queries the local Docker Engine over its Unix socket and writes a mode-0600, fixed-schema JSON file. It keeps only running workload names, image references, Compose project/service labels, state/health, and port mappings; it has no IP-network access and exits before the reporter reads the file.
 - Docker socket access is root-equivalent authority. The exporter is therefore isolated from the network-facing reporting client and never accepts browser input, sends observations, performs container actions, or retains environment variables, commands, mounts, arbitrary labels, logs, IDs, or container network addresses.
 - Development listeners remain loopback-only. The production profile publishes explicit private dashboard and agent listeners on the configured LAN address, never on an unconstrained wildcard.
@@ -66,7 +66,7 @@ Agents will send high-level observations to the hub, never SQL. The SQLite file 
 - Posture observations expire after 90 days by default; deployment configuration can shorten that period.
 - Live TCP connection and Docker workload details are returned to the dashboard but removed before a snapshot is stored.
 - Finding-transition events retain the privacy-bounded category, title, severity, and summary already present in posture history; they never copy connection details or excluded identifiers.
-- Expected-service records are per-device owner metadata containing a friendly label, protocol, port, and bind expectation. Changing one is audited but does not start a service or alter a firewall.
+- Expected-service records are per-device owner metadata containing a friendly label, protocol, exact port or bounded range, bind expectation, and optional approved process/workload owners. Suggestions are generated from the current live observation but are never saved automatically. Single and bulk changes are audited but do not start a service or alter a firewall.
 - Packet payloads, browser content, keystrokes, screenshots, and document contents are never collected.
 - Future high-volume network summaries receive shorter retention than posture changes.
 - Account-security records contain status metadata, never passwords, recovery codes, authenticator seeds, cookies, or refresh tokens unless a separately reviewed integration makes a token unavoidable.
@@ -86,6 +86,7 @@ The public baseline Compose file publishes to host loopback. The private HomeOps
 4. **Native Linux monitoring:** enroll the Ubuntu application host through a boot-persistent, unprivileged service. Collect platform-specific update, firewall, SSH, AppArmor, time, service, storage, and TCP posture without granting the reporter Docker control.
 5. **Host network explainability:** group listeners, track bounded appearance metadata, and let the owner classify expected services without changing host configuration.
 6. **Workload attribution:** isolate root-equivalent runtime access in a fixed-output, one-shot exporter and correlate sanitized port mappings with live listeners.
-7. **Multi-platform:** add macOS and additional Linux agents with informed owner consent, preserving platform-specific security meaning.
-8. **Network-wide explainability:** keep observed network assets separate from enrolled devices, then combine host listeners, firewall scope, router exposure, and privacy-bounded flow metadata.
-9. **Narrow controls:** add separately privileged allowlisted actions only after the read-only system is trustworthy.
+7. **Baseline review:** generate high-confidence platform/process/workload suggestions, require explicit owner approval, and preserve ownership constraints across bounded port ranges.
+8. **Multi-platform:** add macOS and additional Linux agents with informed owner consent, preserving platform-specific security meaning.
+9. **Network-wide explainability:** keep observed network assets separate from enrolled devices, then combine host listeners, firewall scope, router exposure, and privacy-bounded flow metadata.
+10. **Narrow controls:** add separately privileged allowlisted actions only after the read-only system is trustworthy.

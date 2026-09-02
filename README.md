@@ -4,9 +4,9 @@
 
 HAVEN is a personal security observatory for home devices and networks. It presents native operating-system protections in one understandable console without trying to replace Microsoft Defender, host firewalls, or other trusted security controls.
 
-HAVEN is pre-release software. The current milestone attributes Linux host listeners to sanitized Docker workload metadata in the authenticated, resource-constrained Ubuntu hub deployment; it is not a replacement for native protection.
+HAVEN is pre-release software. The current milestone turns attributed host listeners into an owner-reviewed, persistent service baseline in the authenticated, resource-constrained Ubuntu hub deployment; it is not a replacement for native protection.
 
-## Milestone 0.7.3 — Workload Attribution
+## Milestone 0.7.4 — Baseline Review
 
 The current implementation provides:
 
@@ -18,7 +18,9 @@ The current implementation provides:
 - A logical listener inventory that groups duplicate IPv4/IPv6 sockets and separates non-local services needing review, expected services, host-only services, and active connections
 - A short-lived, isolated Docker inventory exporter that supplies only running workload names, image references, Compose identity, health, and published/container-only port mappings to the normal socket-blocked Linux agent
 - Live Docker-to-listener attribution without collecting environment variables, commands, mounts, arbitrary labels, logs, container IDs, or container network addresses
-- Per-device expected-service labels for protocol, port, and bind scope, with an auditable owner decision and no firewall or service side effects
+- A one-time suggested-baseline review that derives high-confidence candidates from platform roles, live process ownership, and sanitized Docker workload mappings without silently trusting the first observation
+- Per-device expected-service labels for exact ports or bounded ranges, bind scope, and optional approved process/workload owners, with atomic bulk approval, an auditable owner decision, and no firewall or service side effects
+- Process-constrained grouping for Windows dynamic RPC listeners so ordinary port rotation does not create dozens of permanent exceptions or conceal unrelated high-port services
 - Privacy-bounded listener appearance history containing only protocol, port, bind scope, and timestamps—never payloads or historical remote connections
 - Strictly increasing report sequences, timestamp checks, payload limits, rate limits, device revocation, and versioned messages
 - A device inventory and detail view with explicitly synthetic demo fixtures for portfolio work
@@ -167,6 +169,6 @@ Haven/
 
 ## Current and next security milestone
 
-Milestone 0.7 adds native Linux monitoring and boot-persistent endpoint-agent scheduling. Milestone 0.7.1 makes its network results explainable, and 0.7.2 makes report freshness and finding lifecycles explicit. Milestone 0.7.3 correlates host listeners with sanitized Docker port mappings. The production Ubuntu agent remains outside the hub container with an explicit device identity; its normal reporting service is denied Docker-socket access. A separate short-lived exporter receives socket access only long enough to write a fixed-schema inventory, has no IP-network access, and exits before the reporter reads that file. Workload details remain live-only and genuinely unavailable root-only signals remain unknown. The next milestone can add network-wide asset observation while keeping merely observed assets separate from explicitly enrolled devices. The Ubuntu hub does not execute Windows actions on another machine. GitHub Actions verifies the Go, frontend, dependency, image, and public-repository safety checks on each proposed change.
+Milestone 0.7 adds native Linux monitoring and boot-persistent endpoint-agent scheduling. Milestone 0.7.1 makes its network results explainable, 0.7.2 makes report freshness and finding lifecycles explicit, and 0.7.3 correlates host listeners with sanitized Docker port mappings. Milestone 0.7.4 adds a deliberate suggested-baseline review with process- and workload-constrained expectations. The production Ubuntu agent remains outside the hub container with an explicit device identity; its normal reporting service is denied Docker-socket access. A separate short-lived exporter receives socket access only long enough to write a fixed-schema inventory, has no IP-network access, and exits before the reporter reads that file. Workload details remain live-only and genuinely unavailable root-only signals remain unknown. The next milestone can add network-wide asset observation while keeping merely observed assets separate from explicitly enrolled devices. The Ubuntu hub does not execute Windows actions on another machine. GitHub Actions verifies the Go, frontend, dependency, image, and public-repository safety checks on each proposed change.
 
 Read the [architecture](docs/ARCHITECTURE.md), [threat model](docs/THREAT_MODEL.md), and [public repository policy](docs/PUBLIC_REPOSITORY.md) before expanding the trust boundary.
