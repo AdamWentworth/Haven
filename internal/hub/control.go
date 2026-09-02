@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
@@ -15,10 +16,10 @@ import (
 )
 
 type authStatus struct {
-	Configured    bool   `json:"configured"`
-	Authenticated bool   `json:"authenticated"`
-	Origin        string `json:"origin"`
-	UseLocalhost  bool   `json:"useLocalhost"`
+	Configured          bool   `json:"configured"`
+	Authenticated       bool   `json:"authenticated"`
+	Origin              string `json:"origin"`
+	UseConfiguredOrigin bool   `json:"useConfiguredOrigin"`
 }
 
 func (server *Server) registerAuthenticationRoutes(mux *http.ServeMux) {
@@ -95,11 +96,13 @@ func (server *Server) authenticationStatus(writer http.ResponseWriter, request *
 	if cookie, cookieErr := request.Cookie(authn.SessionCookie); cookieErr == nil {
 		authenticated, _ = server.auth.ValidateSession(request.Context(), cookie.Value, time.Now().UTC())
 	}
-	host, _, splitErr := net.SplitHostPort(request.Host)
-	if splitErr != nil {
-		host = request.Host
-	}
-	server.writeJSON(writer, http.StatusOK, authStatus{Configured: configured, Authenticated: authenticated, Origin: server.auth.Origin(), UseLocalhost: !strings.EqualFold(host, "localhost")})
+	configuredOrigin, _ := url.Parse(server.auth.Origin())
+	server.writeJSON(writer, http.StatusOK, authStatus{
+		Configured:          configured,
+		Authenticated:       authenticated,
+		Origin:              server.auth.Origin(),
+		UseConfiguredOrigin: !strings.EqualFold(request.Host, configuredOrigin.Host),
+	})
 }
 
 func (server *Server) beginRegistration(writer http.ResponseWriter, request *http.Request) {

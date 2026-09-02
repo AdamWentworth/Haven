@@ -2,6 +2,7 @@ package hub
 
 import (
 	"context"
+	"encoding/json"
 	"io"
 	"io/fs"
 	"log/slog"
@@ -129,6 +130,42 @@ func TestAuthenticatedBoundaryAndAntiforgery(t *testing.T) {
 	server.Handler().ServeHTTP(sensitive, sensitiveRequest)
 	if sensitive.Code != http.StatusForbidden || !strings.Contains(sensitive.Body.String(), "passkey") {
 		t.Fatalf("expected fresh passkey confirmation boundary, got HTTP %d: %s", sensitive.Code, sensitive.Body.String())
+	}
+}
+
+func TestAuthenticationStatusAcceptsConfiguredPrivateOrigin(t *testing.T) {
+	server, store := testServer(t)
+	defer store.Close()
+	service, err := authn.New(store, filepath.Join(t.TempDir(), "auth.key"), "https://haven.home.arpa:8443")
+	if err != nil {
+		t.Fatal(err)
+	}
+	server.auth = service
+
+	request := httptest.NewRequest(http.MethodGet, "/api/auth/status", nil)
+	request.Host = "haven.home.arpa:8443"
+	response := httptest.NewRecorder()
+	server.Handler().ServeHTTP(response, request)
+	if response.Code != http.StatusOK {
+		t.Fatalf("expected authentication status, got HTTP %d: %s", response.Code, response.Body.String())
+	}
+	var status authStatus
+	if err := json.NewDecoder(response.Body).Decode(&status); err != nil {
+		t.Fatal(err)
+	}
+	if status.UseConfiguredOrigin {
+		t.Fatal("configured private origin must not be redirected")
+	}
+
+	request = httptest.NewRequest(http.MethodGet, "/api/auth/status", nil)
+	request.Host = "192.0.2.77:8443"
+	response = httptest.NewRecorder()
+	server.Handler().ServeHTTP(response, request)
+	if err := json.NewDecoder(response.Body).Decode(&status); err != nil {
+		t.Fatal(err)
+	}
+	if !status.UseConfiguredOrigin {
+		t.Fatal("an alternate address must redirect to the configured private origin")
 	}
 }
 

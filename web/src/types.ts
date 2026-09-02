@@ -136,7 +136,7 @@ export interface AuthStatus {
   configured: boolean;
   authenticated: boolean;
   origin: string;
-  useLocalhost: boolean;
+  useConfiguredOrigin: boolean;
 }
 
 export interface PasskeyInfo {

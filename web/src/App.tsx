@@ -49,8 +49,8 @@ function AuthenticationGate({ status, authenticate }: { status: AuthStatus; auth
     }
   };
 
-  if (status.useLocalhost) {
-    return <main className="auth-shell"><section className="auth-card"><span className="brand-mark"><HavenIcon /></span><p className="eyebrow">SECURE LOCAL ORIGIN</p><h1>Open HAVEN as localhost</h1><p>Passkeys require HAVEN's exact trusted origin. Your data stays on this machine; only the browser address changes.</p><a className="primary-action" href={status.origin}>Continue to {status.origin}</a></section></main>;
+  if (status.useConfiguredOrigin) {
+    return <main className="auth-shell"><section className="auth-card"><span className="brand-mark"><HavenIcon /></span><p className="eyebrow">TRUSTED PRIVATE ORIGIN</p><h1>Open HAVEN at its trusted address</h1><p>Passkeys require HAVEN's exact configured origin. Your data stays on your private network; only the browser address changes.</p><a className="primary-action" href={status.origin}>Continue to {status.origin}</a></section></main>;
   }
 
   return (
