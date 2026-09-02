@@ -76,12 +76,20 @@ func runCommand(command string, arguments []string) (bool, error) {
 			return true, err
 		}
 		defer store.Close()
+		configured, err := store.AuthConfigured(ctx)
+		if err != nil {
+			return true, err
+		}
 		code, err := authn.CreateBootstrap(ctx, store, *validFor, time.Now().UTC())
 		if err != nil {
 			return true, err
 		}
 		fmt.Println(code)
-		fmt.Fprintf(os.Stderr, "One-time HAVEN passkey bootstrap code expires in %s. Open http://localhost:5080 to use it.\n", validFor.String())
+		purpose := "first-passkey setup"
+		if configured {
+			purpose = "local passkey recovery"
+		}
+		fmt.Fprintf(os.Stderr, "One-time HAVEN %s code expires in %s. Open http://localhost:5080 to use it.\n", purpose, validFor.String())
 		return true, nil
 
 	case "enrollment":

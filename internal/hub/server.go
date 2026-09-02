@@ -103,15 +103,19 @@ func (server *Server) health(writer http.ResponseWriter, _ *http.Request) {
 }
 
 func (server *Server) runtimeStatus(writer http.ResponseWriter, _ *http.Request) {
+	capabilities := []action.Capability{}
+	if server.actions != nil {
+		capabilities = server.actions.Capabilities()
+	}
 	server.writeJSON(writer, http.StatusOK, map[string]any{
-		"status":           "ready",
-		"service":          "HAVEN",
-		"agentIngestion":   "mutual-tls",
-		"demoMode":         server.demoMode,
-		"authentication":   server.auth != nil,
-		"actionsAvailable": server.actions != nil,
-		"monitor":          server.monitorStatus(),
-		"timestamp":        time.Now().UTC(),
+		"status":             "ready",
+		"service":            "HAVEN",
+		"agentIngestion":     "mutual-tls",
+		"demoMode":           server.demoMode,
+		"authentication":     server.auth != nil,
+		"actionCapabilities": capabilities,
+		"monitor":            server.monitorStatus(),
+		"timestamp":          time.Now().UTC(),
 	})
 }
 

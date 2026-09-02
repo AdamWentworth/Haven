@@ -53,7 +53,9 @@ The trusted inventory contains only the local collector and explicitly enrolled 
 
 Windows baseline collection stores configuration state and aggregate counts only. It excludes local administrator names, update titles, Defender threat names, detection resource paths, and BitLocker recovery material.
 
-Private HTTPS publication, passkey recovery, automated certificate renewal, native service packaging, and CI/CD deployment are gates for the household pilot rather than assumptions hidden in local development. Browser passkey authentication is implemented for the local hub.
+Private HTTPS publication, automated certificate renewal, native service packaging, and CI/CD deployment are gates for the household pilot rather than assumptions hidden in local development. Browser authentication uses cross-platform WebAuthn passkeys, supports multiple authenticators and local recovery, and requires fresh confirmation for sensitive capabilities.
+
+Platform-specific controls sit behind advertised capability providers. The local Windows provider currently exposes two fixed Defender operations. A future Ubuntu, macOS, or remote Windows agent must implement its own provider and authenticated action transport; the hub never translates an unsupported action into an arbitrary shell command.
 
 ## Storage and retention
 

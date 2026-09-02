@@ -34,6 +34,15 @@ type Service struct {
 	logger   *slog.Logger
 }
 
+type Capability struct {
+	ID                      string `json:"id"`
+	Provider                string `json:"provider"`
+	Platform                string `json:"platform"`
+	Label                   string `json:"label"`
+	Description             string `json:"description"`
+	RequiresReauthorization bool   `json:"requiresReauthorization"`
+}
+
 func New(store *storage.Store, logger *slog.Logger) *Service {
 	return &Service{store: store, executor: NativeExecutor{}, logger: logger}
 }
@@ -44,6 +53,13 @@ func NewWithExecutor(store *storage.Store, logger *slog.Logger, executor Executo
 
 func IsAllowed(kind string) bool {
 	return kind == DefenderQuickScan || kind == DefenderSignatureUpdate
+}
+
+func (service *Service) Capabilities() []Capability {
+	return []Capability{
+		{ID: DefenderQuickScan, Provider: "Microsoft Defender", Platform: "windows", Label: "Defender quick scan", Description: "Scan common malware locations on the local Windows hub.", RequiresReauthorization: true},
+		{ID: DefenderSignatureUpdate, Provider: "Microsoft Defender", Platform: "windows", Label: "Update threat intelligence", Description: "Retrieve the latest available Defender security intelligence.", RequiresReauthorization: true},
+	}
 }
 
 func (service *Service) Request(ctx context.Context, kind string, now time.Time) (storage.SecurityAction, error) {

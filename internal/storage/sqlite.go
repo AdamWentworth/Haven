@@ -214,6 +214,12 @@ var migrations = []migration{
 			`CREATE INDEX IF NOT EXISTS security_actions_requested ON security_actions (requested_at DESC)`,
 		},
 	},
+	{
+		version: 6,
+		statements: []string{
+			`ALTER TABLE auth_credentials ADD COLUMN label TEXT NOT NULL DEFAULT 'Passkey'`,
+		},
+	},
 }
 
 func Open(ctx context.Context, path string) (*Store, error) {

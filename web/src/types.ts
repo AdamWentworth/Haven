@@ -121,7 +121,7 @@ export interface RuntimeStatus {
   service: string;
   agentIngestion: string;
   demoMode: boolean;
-  actionsAvailable: boolean;
+  actionCapabilities: ActionCapability[];
   monitor: {
     enabled: boolean;
     intervalSeconds: number;
@@ -137,6 +137,13 @@ export interface AuthStatus {
   authenticated: boolean;
   origin: string;
   useLocalhost: boolean;
+}
+
+export interface PasskeyInfo {
+  id: string;
+  label: string;
+  createdAt: string;
+  lastUsedAt: string | null;
 }
 
 export type FindingReviewState = "new" | "acknowledged" | "snoozed" | "accepted-risk";
@@ -160,7 +167,16 @@ export interface AuditEvent {
   occurredAt: string;
 }
 
-export type SecurityActionKind = "defender-quick-scan" | "defender-signature-update";
+export type SecurityActionKind = string;
+
+export interface ActionCapability {
+  id: SecurityActionKind;
+  provider: string;
+  platform: string;
+  label: string;
+  description: string;
+  requiresReauthorization: boolean;
+}
 
 export interface SecurityAction {
   id: string;

@@ -23,11 +23,20 @@ type authStatus struct {
 
 func (server *Server) registerAuthenticationRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /api/auth/status", server.authenticationStatus)
+	if server.auth == nil {
+		return
+	}
 	mux.HandleFunc("POST /api/auth/register/begin", server.beginRegistration)
 	mux.HandleFunc("POST /api/auth/register/finish", server.finishRegistration)
 	mux.HandleFunc("POST /api/auth/login/begin", server.beginLogin)
 	mux.HandleFunc("POST /api/auth/login/finish", server.finishLogin)
+	mux.Handle("POST /api/auth/reauthorize/begin", server.mutating(http.HandlerFunc(server.beginReauthorization)))
+	mux.Handle("POST /api/auth/reauthorize/finish", server.mutating(http.HandlerFunc(server.finishReauthorization)))
 	mux.Handle("POST /api/auth/logout", server.mutating(http.HandlerFunc(server.logout)))
+	mux.Handle("GET /api/passkeys", server.protected(http.HandlerFunc(server.passkeys)))
+	mux.Handle("POST /api/passkeys/register/begin", server.mutating(http.HandlerFunc(server.beginAdditionalPasskey)))
+	mux.Handle("POST /api/passkeys/register/finish", server.mutating(http.HandlerFunc(server.finishAdditionalPasskey)))
+	mux.Handle("POST /api/passkeys/remove", server.mutating(http.HandlerFunc(server.removePasskey)))
 }
 
 func (server *Server) protected(next http.Handler) http.Handler {
@@ -100,11 +109,12 @@ func (server *Server) beginRegistration(writer http.ResponseWriter, request *htt
 	}
 	var body struct {
 		BootstrapCode string `json:"bootstrapCode"`
+		Label         string `json:"label"`
 	}
 	if !decodeControlJSON(writer, request, &body, 4096) {
 		return
 	}
-	response, err := server.auth.BeginRegistration(request.Context(), body.BootstrapCode, time.Now().UTC())
+	response, err := server.auth.BeginRegistration(request.Context(), body.BootstrapCode, body.Label, time.Now().UTC())
 	if err != nil {
 		server.authError(writer, err)
 		return
@@ -153,6 +163,99 @@ func (server *Server) finishLogin(writer http.ResponseWriter, request *http.Requ
 	server.writeJSON(writer, http.StatusOK, map[string]bool{"authenticated": true})
 }
 
+func (server *Server) beginReauthorization(writer http.ResponseWriter, request *http.Request) {
+	var body struct {
+		Scope string `json:"scope"`
+	}
+	if !decodeControlJSON(writer, request, &body, 1024) {
+		return
+	}
+	if !validReauthorizationScope(body.Scope) {
+		http.Error(writer, "invalid reauthorization scope", http.StatusBadRequest)
+		return
+	}
+	response, err := server.auth.BeginReauthorization(request.Context(), body.Scope, time.Now().UTC())
+	if err != nil {
+		server.authError(writer, err)
+		return
+	}
+	server.writeJSON(writer, http.StatusOK, response)
+}
+
+func (server *Server) finishReauthorization(writer http.ResponseWriter, request *http.Request) {
+	sessionCookie, err := request.Cookie(authn.SessionCookie)
+	if err != nil {
+		server.writeJSON(writer, http.StatusUnauthorized, map[string]string{"error": "Passkey sign-in is required."})
+		return
+	}
+	token, err := server.auth.FinishReauthorization(request.Context(), request.Header.Get("X-HAVEN-Ceremony"), sessionCookie.Value, request, time.Now().UTC())
+	if err != nil {
+		server.authError(writer, err)
+		return
+	}
+	server.writeJSON(writer, http.StatusOK, map[string]string{"reauthorizationToken": token})
+}
+
+func (server *Server) passkeys(writer http.ResponseWriter, request *http.Request) {
+	items, err := server.auth.Passkeys(request.Context())
+	if err != nil {
+		http.Error(writer, "could not list passkeys", http.StatusInternalServerError)
+		return
+	}
+	server.writeJSON(writer, http.StatusOK, items)
+}
+
+func (server *Server) beginAdditionalPasskey(writer http.ResponseWriter, request *http.Request) {
+	var body struct {
+		Label string `json:"label"`
+	}
+	if !decodeControlJSON(writer, request, &body, 1024) {
+		return
+	}
+	if !server.consumeReauthorization(writer, request, "passkey:add") {
+		return
+	}
+	response, err := server.auth.BeginAdditionalRegistration(request.Context(), body.Label, time.Now().UTC())
+	if err != nil {
+		server.authError(writer, err)
+		return
+	}
+	server.writeJSON(writer, http.StatusOK, response)
+}
+
+func (server *Server) finishAdditionalPasskey(writer http.ResponseWriter, request *http.Request) {
+	item, err := server.auth.FinishAdditionalRegistration(request.Context(), request.Header.Get("X-HAVEN-Ceremony"), request, time.Now().UTC())
+	if err != nil {
+		server.authError(writer, err)
+		return
+	}
+	server.writeJSON(writer, http.StatusCreated, item)
+}
+
+func (server *Server) removePasskey(writer http.ResponseWriter, request *http.Request) {
+	var body struct {
+		ID string `json:"id"`
+	}
+	if !decodeControlJSON(writer, request, &body, 2048) {
+		return
+	}
+	if len(body.ID) > 1024 || body.ID == "" {
+		http.Error(writer, "invalid passkey identity", http.StatusBadRequest)
+		return
+	}
+	if !server.consumeReauthorization(writer, request, "passkey:remove:"+body.ID) {
+		return
+	}
+	if err := server.auth.RemovePasskey(request.Context(), body.ID, time.Now().UTC()); errors.Is(err, authn.ErrFinalPasskey) {
+		server.writeJSON(writer, http.StatusConflict, map[string]string{"error": "The final passkey cannot be removed. Add a replacement first."})
+		return
+	} else if err != nil {
+		http.Error(writer, "could not remove passkey", http.StatusBadRequest)
+		return
+	}
+	writer.WriteHeader(http.StatusNoContent)
+}
+
 func (server *Server) logout(writer http.ResponseWriter, request *http.Request) {
 	if cookie, err := request.Cookie(authn.SessionCookie); err == nil {
 		_ = server.auth.Logout(request.Context(), cookie.Value)
@@ -177,10 +280,6 @@ func (server *Server) authError(writer http.ResponseWriter, err error) {
 	server.logger.Warn("authentication ceremony rejected", "error", err)
 	status := http.StatusUnauthorized
 	message := "The passkey ceremony could not be verified."
-	if errors.Is(err, authn.ErrAlreadyConfigured) {
-		status = http.StatusConflict
-		message = "HAVEN already has a passkey."
-	}
 	if errors.Is(err, authn.ErrNotConfigured) {
 		status = http.StatusPreconditionRequired
 		message = "HAVEN needs its first passkey."
@@ -281,6 +380,9 @@ func (server *Server) requestSecurityAction(writer http.ResponseWriter, request 
 	if !decodeControlJSON(writer, request, &body, 1024) {
 		return
 	}
+	if !server.consumeReauthorization(writer, request, "action:"+body.Kind) {
+		return
+	}
 	requested, err := server.actions.Request(request.Context(), body.Kind, time.Now().UTC())
 	if errors.Is(err, action.ErrUnsupportedAction) {
 		http.Error(writer, "unsupported security action", http.StatusBadRequest)
@@ -304,6 +406,9 @@ func (server *Server) revokeDevice(writer http.ResponseWriter, request *http.Req
 		http.NotFound(writer, request)
 		return
 	}
+	if !server.consumeReauthorization(writer, request, "device:revoke:"+deviceID) {
+		return
+	}
 	now := time.Now().UTC()
 	if err := server.store.RevokeDevice(request.Context(), deviceID, now); errors.Is(err, sql.ErrNoRows) {
 		http.NotFound(writer, request)
@@ -314,6 +419,43 @@ func (server *Server) revokeDevice(writer http.ResponseWriter, request *http.Req
 	}
 	_ = server.store.AppendAudit(request.Context(), storage.AuditEvent{Actor: "owner", Action: "device.revoke", Target: deviceID, Outcome: "succeeded", Detail: "The enrolled device certificate was revoked.", OccurredAt: now})
 	writer.WriteHeader(http.StatusNoContent)
+}
+
+func (server *Server) consumeReauthorization(writer http.ResponseWriter, request *http.Request, scope string) bool {
+	if server.demoMode {
+		return true
+	}
+	if server.auth == nil {
+		server.writeJSON(writer, http.StatusNotImplemented, map[string]string{"error": "Passkey confirmation is unavailable."})
+		return false
+	}
+	sessionCookie, err := request.Cookie(authn.SessionCookie)
+	if err != nil {
+		server.writeJSON(writer, http.StatusUnauthorized, map[string]string{"error": "Passkey sign-in is required."})
+		return false
+	}
+	if err := server.auth.ConsumeReauthorization(sessionCookie.Value, request.Header.Get("X-HAVEN-Reauthorization"), scope, time.Now().UTC()); err != nil {
+		server.writeJSON(writer, http.StatusForbidden, map[string]string{"error": "Confirm this sensitive operation with a passkey first."})
+		return false
+	}
+	return true
+}
+
+func validReauthorizationScope(scope string) bool {
+	if scope == "passkey:add" {
+		return true
+	}
+	if strings.HasPrefix(scope, "action:") {
+		return action.IsAllowed(strings.TrimPrefix(scope, "action:"))
+	}
+	if strings.HasPrefix(scope, "device:revoke:") {
+		return validIdentifier(strings.TrimPrefix(scope, "device:revoke:"))
+	}
+	if strings.HasPrefix(scope, "passkey:remove:") {
+		value := strings.TrimPrefix(scope, "passkey:remove:")
+		return value != "" && len(value) <= 1024
+	}
+	return false
 }
 
 func validIdentifier(value string) bool {

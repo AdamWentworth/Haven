@@ -24,10 +24,11 @@ The current implementation provides:
 - Continuous local collection every 15 minutes by default, with serialized manual refreshes
 - A privacy-bounded activity ledger that records only when a finding opens or resolves
 - An activity-first dashboard with opt-in browser desktop alerts for new high- and medium-severity findings while HAVEN is open
-- Passwordless owner authentication with a discoverable passkey backed by Windows Hello
+- Passwordless owner authentication using the cross-platform WebAuthn passkey standard (Windows Hello is one supported provider)
+- Multiple labeled owner passkeys for trusted computers, phones, and hardware security keys, with local terminal recovery
 - Expiring server-side sessions, strict same-origin checks, anti-forgery tokens, and rate-limited authentication ceremonies
 - Finding acknowledgement, 24-hour snooze, accepted-risk notes, and a privacy-bounded audit trail
-- Confirmed, asynchronous allowlisted controls for a Defender quick scan and Defender security-intelligence update on a local Windows hub
+- Provider-advertised action capabilities with fresh passkey confirmation; the first Windows provider offers a Defender quick scan and security-intelligence update
 - No browser endpoint for arbitrary commands, scripts, paths, process launches, firewall changes, or Defender exclusions
 - Privacy-bounded collection: administrator names, update titles, threat names, and detected resource paths are not collected
 - A hardened, single-service Docker Compose definition for the future Ubuntu hub
@@ -63,7 +64,9 @@ On first use, keep the hub running and create a one-time bootstrap code in anoth
 go run .\cmd\haven-hub auth bootstrap
 ```
 
-Paste the code into HAVEN and follow the Windows Hello prompt. The code expires after 10 minutes and is consumed only by a successful passkey registration. The passkey credential is encrypted with a random key stored beside the database outside the repository. Back up both the state directory and that key together; losing the key makes the passkey record unusable.
+Paste the code into HAVEN and follow the passkey prompt offered by the browser and operating system. On Windows this may be Windows Hello; other systems may offer Touch ID, a phone, a synchronized passkey provider, or a hardware security key. The code expires after 10 minutes and is consumed only by a successful passkey registration. The same command provides local recovery if every registered passkey is later unavailable.
+
+HAVEN supports multiple labeled owner passkeys. A signed-in owner can add or remove them from the dashboard; the final passkey cannot be removed without first adding a replacement. Direct enrollment from another computer requires HAVEN's eventual stable private HTTPS hostname because a `localhost` passkey belongs to the local development origin. Trusted-browser sessions last up to 30 days, while each sensitive control requires a fresh, single-use passkey confirmation. Passkey credential data is encrypted with a random key stored beside the database outside the repository. Back up both the state directory and that key together; losing the key makes the stored passkeys unusable.
 
 The hub takes an observation immediately at startup and every 15 minutes thereafter. Set `HAVEN_COLLECTION_INTERVAL` to a duration from `1m` through `24h` to change it during development.
 
@@ -157,12 +160,12 @@ Haven/
 2. **Use native protections.** HAVEN coordinates trusted OS security controls instead of replacing them.
 3. **Centralize understanding, not secrets.** Passwords, recovery codes, MFA seeds, cookies, and unrestricted device credentials do not belong in HAVEN.
 4. **Treat unavailable as unknown.** A failed collector is never shown as a healthy signal.
-5. **Keep actions narrow and reversible.** Controls use named, allowlisted operations with confirmation and audit history—never a remote shell.
+5. **Keep actions narrow and reversible.** Platform providers advertise named, allowlisted operations with fresh confirmation and audit history—never a remote shell.
 6. **Collect proportionately.** Connection details are live-only by default; packet payloads and browsing content are outside HAVEN's scope.
 7. **Respect every household member.** Monitoring another person's device requires visible opt-in and transparent collection.
 
 ## Next security milestone
 
-The next milestone is network explainability: classify listeners and connections by process, scope, ownership, and expected purpose without pretending that every open port is malicious. Private HTTPS access, native agent service packaging, deployment resource measurements, passkey recovery, and scheduled backups remain gates for the household pilot. Remote controls will require an authenticated native agent action protocol; the Ubuntu hub does not execute Windows actions on another machine. GitHub Actions verifies the Go, frontend, dependency, and public-repository safety checks on each proposed change.
+The next milestone is native service packaging and startup behavior, followed by network explainability: classify listeners and connections by process, scope, ownership, and expected purpose without pretending that every open port is malicious. Private HTTPS access, authenticated native-agent action routing, deployment resource measurements, and scheduled backups remain gates for the household pilot. The Ubuntu hub does not execute Windows actions on another machine. GitHub Actions verifies the Go, frontend, dependency, and public-repository safety checks on each proposed change.
 
 Read the [architecture](docs/ARCHITECTURE.md), [threat model](docs/THREAT_MODEL.md), and [public repository policy](docs/PUBLIC_REPOSITORY.md) before expanding the trust boundary.

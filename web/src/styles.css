@@ -52,6 +52,8 @@ main, footer { width: min(1180px, 92vw); margin-inline: auto; }
 .auth-field input:focus { border-color: var(--green); box-shadow: 0 0 0 3px rgba(115, 226, 167, .1); }
 .primary-action { display: inline-flex; justify-content: center; width: 100%; margin-top: 1rem; padding: .82rem 1rem; border: 1px solid rgba(115, 226, 167, .4); border-radius: .8rem; color: #07100b; background: var(--green); font-weight: 750; text-decoration: none; cursor: pointer; }
 .primary-action:disabled { opacity: .55; cursor: wait; }
+.text-action { width: 100%; margin-top: .8rem; padding: .45rem; border: 0; color: var(--blue); background: transparent; cursor: pointer; }
+.text-action:hover { color: #b8d3ff; }
 .auth-footnote { margin: 1rem 0 0; font-size: .72rem; }
 .device-inventory { margin-top: 2rem; padding: 1rem; border: 1px solid var(--line); border-radius: 1.1rem; background: rgba(13, 21, 23, .78); }
 .inventory-heading { display: flex; align-items: center; justify-content: space-between; padding: .2rem .2rem .85rem; }
@@ -135,6 +137,15 @@ main, footer { width: min(1180px, 92vw); margin-inline: auto; }
 .review-actions button:hover, .action-card button:hover { border-color: rgba(132, 183, 255, .5); background: rgba(132, 183, 255, .08); }
 
 .action-center { border-color: rgba(132, 183, 255, .24); }
+.passkey-panel { border-color: rgba(115, 226, 167, .2); }
+.passkey-list { display: grid; gap: .6rem; padding-top: 1rem; }
+.passkey-card { display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: .8rem; padding: .85rem; border: 1px solid var(--line); border-radius: .8rem; background: rgba(115, 226, 167, .025); }
+.passkey-icon { display: grid; width: 2.3rem; height: 2.3rem; place-items: center; border-radius: .7rem; color: var(--green); background: rgba(115, 226, 167, .08); }
+.passkey-card h3 { margin: 0 0 .25rem; font-size: .85rem; }
+.passkey-card p { margin: 0; color: var(--muted); font-size: .7rem; }
+.passkey-card button, .secondary-action { padding: .5rem .72rem; border: 1px solid var(--line-bright); border-radius: .65rem; color: #dceae2; background: rgba(255, 255, 255, .035); cursor: pointer; }
+.passkey-card button:disabled, .secondary-action:disabled { opacity: .45; cursor: not-allowed; }
+.secondary-action { margin-top: .8rem; }
 .action-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: .75rem; padding-top: 1rem; }
 .action-card { display: grid; grid-template-columns: auto 1fr; gap: .8rem; padding: 1rem; border: 1px solid var(--line); border-radius: .85rem; background: rgba(132, 183, 255, .035); }
 .action-card > svg { color: var(--blue); }
@@ -240,6 +251,8 @@ footer { display: flex; justify-content: space-between; padding: 2.5rem 0 3rem; 
   .severity-label { grid-column: 2; width: fit-content; }
   .next-step { grid-template-columns: 1fr; gap: .25rem; }
   .activity-heading { align-items: start; flex-direction: column; gap: .45rem; }
+  .passkey-card { grid-template-columns: auto 1fr; }
+  .passkey-card button { grid-column: 2; width: fit-content; }
   footer { flex-direction: column; gap: .4rem; }
 }
 

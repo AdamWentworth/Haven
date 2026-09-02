@@ -119,6 +119,17 @@ func TestAuthenticatedBoundaryAndAntiforgery(t *testing.T) {
 	if allowed.Code != http.StatusOK {
 		t.Fatalf("expected authenticated mutation, got HTTP %d: %s", allowed.Code, allowed.Body.String())
 	}
+
+	sensitiveRequest := httptest.NewRequest(http.MethodPost, "/api/devices/test-device/revoke", nil)
+	sensitiveRequest.Header.Set("Origin", "http://localhost:5080")
+	sensitiveRequest.Header.Set("X-HAVEN-CSRF", session.CSRFToken)
+	sensitiveRequest.AddCookie(&http.Cookie{Name: authn.SessionCookie, Value: session.Token})
+	sensitiveRequest.AddCookie(&http.Cookie{Name: authn.CSRFCookie, Value: session.CSRFToken})
+	sensitive := httptest.NewRecorder()
+	server.Handler().ServeHTTP(sensitive, sensitiveRequest)
+	if sensitive.Code != http.StatusForbidden || !strings.Contains(sensitive.Body.String(), "passkey") {
+		t.Fatalf("expected fresh passkey confirmation boundary, got HTTP %d: %s", sensitive.Code, sensitive.Body.String())
+	}
 }
 
 func TestDeviceInventoryEndpoints(t *testing.T) {

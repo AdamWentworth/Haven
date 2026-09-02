@@ -9,7 +9,10 @@ import (
 	"time"
 )
 
-var ErrBootstrapInvalid = errors.New("bootstrap code is invalid, expired, or already used")
+var (
+	ErrBootstrapInvalid    = errors.New("bootstrap code is invalid, expired, or already used")
+	ErrFinalAuthCredential = errors.New("the final passkey cannot be removed")
+)
 
 type AuthUserRecord struct {
 	ID          string
@@ -21,6 +24,9 @@ type AuthUserRecord struct {
 type AuthCredentialRecord struct {
 	ID                  []byte
 	EncryptedCredential []byte
+	Label               string
+	CreatedAt           time.Time
+	LastUsedAt          *time.Time
 }
 
 type FindingReview struct {
@@ -89,7 +95,7 @@ func (store *Store) LoadAuthUser(ctx context.Context) (AuthUserRecord, error) {
 
 func (store *Store) AuthCredentials(ctx context.Context) ([]AuthCredentialRecord, error) {
 	rows, err := store.database.QueryContext(ctx,
-		`SELECT credential_id, encrypted_credential FROM auth_credentials WHERE user_id = 'owner' ORDER BY created_at`)
+		`SELECT credential_id, encrypted_credential, label, created_at, last_used_at FROM auth_credentials WHERE user_id = 'owner' ORDER BY created_at`)
 	if err != nil {
 		return nil, err
 	}
@@ -97,7 +103,15 @@ func (store *Store) AuthCredentials(ctx context.Context) ([]AuthCredentialRecord
 	records := []AuthCredentialRecord{}
 	for rows.Next() {
 		var record AuthCredentialRecord
-		if err := rows.Scan(&record.ID, &record.EncryptedCredential); err != nil {
+		var createdAt string
+		var lastUsedAt sql.NullString
+		if err := rows.Scan(&record.ID, &record.EncryptedCredential, &record.Label, &createdAt, &lastUsedAt); err != nil {
+			return nil, err
+		}
+		if record.CreatedAt, err = parseDatabaseTime(createdAt); err != nil {
+			return nil, err
+		}
+		if record.LastUsedAt, err = optionalDatabaseTime(lastUsedAt); err != nil {
 			return nil, err
 		}
 		records = append(records, record)
@@ -123,7 +137,7 @@ func (store *Store) BootstrapValid(ctx context.Context, tokenHash []byte, now ti
 	return count == 1, err
 }
 
-func (store *Store) CompleteAuthBootstrap(ctx context.Context, tokenHash, credentialID, encryptedCredential []byte, now time.Time) error {
+func (store *Store) CompleteAuthBootstrap(ctx context.Context, tokenHash, credentialID, encryptedCredential []byte, label string, now time.Time) error {
 	tx, err := store.database.BeginTx(ctx, nil)
 	if err != nil {
 		return err
@@ -139,9 +153,39 @@ func (store *Store) CompleteAuthBootstrap(ctx context.Context, tokenHash, creden
 		return ErrBootstrapInvalid
 	}
 	if _, err := tx.ExecContext(ctx,
-		`INSERT INTO auth_credentials (credential_id, user_id, encrypted_credential, created_at) VALUES (?, 'owner', ?, ?)`,
-		credentialID, encryptedCredential, now.UTC().Format(time.RFC3339Nano)); err != nil {
+		`INSERT INTO auth_credentials (credential_id, user_id, encrypted_credential, created_at, label) VALUES (?, 'owner', ?, ?, ?)`,
+		credentialID, encryptedCredential, now.UTC().Format(time.RFC3339Nano), label); err != nil {
 		return err
+	}
+	return tx.Commit()
+}
+
+func (store *Store) AddAuthCredential(ctx context.Context, credentialID, encryptedCredential []byte, label string, now time.Time) error {
+	_, err := store.database.ExecContext(ctx,
+		`INSERT INTO auth_credentials (credential_id, user_id, encrypted_credential, created_at, label) VALUES (?, 'owner', ?, ?, ?)`,
+		credentialID, encryptedCredential, now.UTC().Format(time.RFC3339Nano), label)
+	return err
+}
+
+func (store *Store) DeleteAuthCredential(ctx context.Context, credentialID []byte) error {
+	tx, err := store.database.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	var count int
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM auth_credentials`).Scan(&count); err != nil {
+		return err
+	}
+	if count <= 1 {
+		return ErrFinalAuthCredential
+	}
+	result, err := tx.ExecContext(ctx, `DELETE FROM auth_credentials WHERE credential_id = ?`, credentialID)
+	if err != nil {
+		return err
+	}
+	if rows, _ := result.RowsAffected(); rows != 1 {
+		return sql.ErrNoRows
 	}
 	return tx.Commit()
 }

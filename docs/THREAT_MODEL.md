@@ -16,7 +16,9 @@ HAVEN must not store passwords, session cookies, authenticator seeds, recovery-c
 
 Milestone 0.6 performs continuous collection, explainable baseline evaluation, privacy-bounded finding-transition logging, authenticated device reporting, and an authenticated local action boundary. On Windows, the collector launches one fixed, internally defined PowerShell script with no user-controlled commands or parameters. The two available controls also select fixed internal PowerShell commands for a Defender quick scan or security-intelligence update; browser text is never interpolated into them.
 
-The owner registers a discoverable passkey through a one-time CLI bootstrap code and signs in using WebAuthn/Windows Hello. Passkey credential data is encrypted at rest with a random key outside the repository. Session and anti-forgery tokens are random; only hashes are stored in SQLite. Sessions expire after 12 hours. Mutating routes require an authenticated session, an exact configured Origin, and a matching anti-forgery cookie/header pair. Authentication attempts are rate limited.
+The owner registers one or more discoverable passkeys through the cross-platform WebAuthn standard. Windows Hello, platform biometric providers, synchronized phone passkeys, and hardware security keys are authenticator choices rather than HAVEN dependencies. The first passkey requires a one-time local CLI code; the same short-lived mechanism provides local recovery. A signed-in owner can add or remove passkeys, but cannot remove the final credential without a replacement.
+
+Passkey credential data is encrypted at rest with a random key outside the repository. Session and anti-forgery tokens are random; only hashes are stored in SQLite. Trusted-browser sessions expire after 30 days. Mutating routes require an authenticated session, an exact configured Origin, and a matching anti-forgery cookie/header pair. Sensitive actions additionally require a fresh passkey assertion that issues a two-minute, single-use authorization bound to the current session and exact capability. Authentication attempts are rate limited.
 
 The agent endpoint uses TLS 1.3. Enrollment tokens are random, short-lived, one-time values; each accepted certificate has a distinct key and device identity. Observation identity, device identity, sequence, timestamp, schema, media type, body size, and request rate are validated. Revoked devices cannot submit reports.
 
@@ -46,7 +48,7 @@ Passkey verification provides the session boundary, and the current UI requires 
 Current mitigations and requirements:
 
 - Never expose arbitrary command, script, file-write, registry-write, or process-launch APIs.
-- Model actions as named capabilities with strict schemas. The current allowlist contains exactly two Defender operations.
+- Model actions as provider-advertised named capabilities with strict schemas. The current Windows provider contains exactly two Defender operations; other operating systems require separate native providers.
 - Separate read-only collection from any privileged helper.
 - Require confirmation and reauthorization for sensitive operations.
 - Give changes an expiry or rollback path where practical.

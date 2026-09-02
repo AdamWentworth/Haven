@@ -1,4 +1,4 @@
-import type { AuditEvent, AuthStatus, DeviceDetail, DeviceRecord, FindingReview, FindingReviewState, RuntimeStatus, SecurityAction, SecurityActionKind, SecurityEvent, SecuritySnapshot } from "./types";
+import type { AuditEvent, AuthStatus, DeviceDetail, DeviceRecord, FindingReview, FindingReviewState, PasskeyInfo, RuntimeStatus, SecurityAction, SecurityActionKind, SecurityEvent, SecuritySnapshot } from "./types";
 
 async function getJSON<T>(path: string, signal?: AbortSignal): Promise<T> {
   const response = await fetch(path, {
@@ -94,12 +94,11 @@ function requestOptions(value: PublicKeyCredentialRequestOptions) {
   } satisfies PublicKeyCredentialRequestOptions;
 }
 
-export async function registerPasskey(bootstrapCode: string) {
-  const ceremony = await postJSON<Ceremony>("/api/auth/register/begin", { bootstrapCode });
+async function createPasskeyCredential(ceremony: Ceremony) {
   const credential = await navigator.credentials.create({ publicKey: creationOptions(ceremony.publicKey as PublicKeyCredentialCreationOptions) });
-  if (!(credential instanceof PublicKeyCredential) || !(credential.response instanceof AuthenticatorAttestationResponse)) throw new Error("Windows Hello did not return a passkey credential.");
+  if (!(credential instanceof PublicKeyCredential) || !(credential.response instanceof AuthenticatorAttestationResponse)) throw new Error("The passkey provider did not return a credential.");
   const response = credential.response;
-  return postJSON<{ authenticated: boolean }>("/api/auth/register/finish", {
+  return {
     id: credential.id,
     rawId: toBase64url(credential.rawId),
     type: credential.type,
@@ -109,15 +108,14 @@ export async function registerPasskey(bootstrapCode: string) {
       transports: response.getTransports?.() || [],
     },
     clientExtensionResults: credential.getClientExtensionResults(),
-  }, { "X-HAVEN-Ceremony": ceremony.ceremonyId });
+  };
 }
 
-export async function loginWithPasskey() {
-  const ceremony = await postJSON<Ceremony>("/api/auth/login/begin");
+async function getPasskeyAssertion(ceremony: Ceremony) {
   const credential = await navigator.credentials.get({ publicKey: requestOptions(ceremony.publicKey as PublicKeyCredentialRequestOptions) });
-  if (!(credential instanceof PublicKeyCredential) || !(credential.response instanceof AuthenticatorAssertionResponse)) throw new Error("Windows Hello did not return a passkey assertion.");
+  if (!(credential instanceof PublicKeyCredential) || !(credential.response instanceof AuthenticatorAssertionResponse)) throw new Error("The passkey provider did not return an assertion.");
   const response = credential.response;
-  return postJSON<{ authenticated: boolean }>("/api/auth/login/finish", {
+  return {
     id: credential.id,
     rawId: toBase64url(credential.rawId),
     type: credential.type,
@@ -128,7 +126,36 @@ export async function loginWithPasskey() {
       userHandle: toBase64url(response.userHandle),
     },
     clientExtensionResults: credential.getClientExtensionResults(),
-  }, { "X-HAVEN-Ceremony": ceremony.ceremonyId });
+  };
+}
+
+export async function registerPasskey(bootstrapCode: string, label: string) {
+  const ceremony = await postJSON<Ceremony>("/api/auth/register/begin", { bootstrapCode, label });
+  return postJSON<{ authenticated: boolean }>("/api/auth/register/finish", await createPasskeyCredential(ceremony), { "X-HAVEN-Ceremony": ceremony.ceremonyId });
+}
+
+export async function loginWithPasskey() {
+  const ceremony = await postJSON<Ceremony>("/api/auth/login/begin");
+  return postJSON<{ authenticated: boolean }>("/api/auth/login/finish", await getPasskeyAssertion(ceremony), { "X-HAVEN-Ceremony": ceremony.ceremonyId });
+}
+
+export async function reauthorize(scope: string) {
+  const ceremony = await postJSON<Ceremony>("/api/auth/reauthorize/begin", { scope });
+  const result = await postJSON<{ reauthorizationToken: string }>("/api/auth/reauthorize/finish", await getPasskeyAssertion(ceremony), { "X-HAVEN-Ceremony": ceremony.ceremonyId });
+  return result.reauthorizationToken;
+}
+
+export const listPasskeys = (signal?: AbortSignal) => getJSON<PasskeyInfo[]>("/api/passkeys", signal);
+
+export async function addPasskey(label: string) {
+  const grant = await reauthorize("passkey:add");
+  const ceremony = await postJSON<Ceremony>("/api/passkeys/register/begin", { label }, { "X-HAVEN-Reauthorization": grant });
+  return postJSON<PasskeyInfo>("/api/passkeys/register/finish", await createPasskeyCredential(ceremony), { "X-HAVEN-Ceremony": ceremony.ceremonyId });
+}
+
+export async function removePasskey(id: string) {
+  const grant = await reauthorize(`passkey:remove:${id}`);
+  return postJSON<void>("/api/passkeys/remove", { id }, { "X-HAVEN-Reauthorization": grant });
 }
 
 export const logout = () => postJSON<void>("/api/auth/logout");
@@ -141,6 +168,12 @@ export const listAuditEvents = (signal?: AbortSignal) => getJSON<AuditEvent[]>("
 
 export const listSecurityActions = (signal?: AbortSignal) => getJSON<SecurityAction[]>("/api/actions", signal);
 
-export const requestSecurityAction = (kind: SecurityActionKind) => postJSON<SecurityAction>("/api/actions", { kind });
+export async function requestSecurityAction(kind: SecurityActionKind) {
+  const grant = await reauthorize(`action:${kind}`);
+  return postJSON<SecurityAction>("/api/actions", { kind }, { "X-HAVEN-Reauthorization": grant });
+}
 
-export const revokeDevice = (deviceId: string) => postJSON<void>(`/api/devices/${encodeURIComponent(deviceId)}/revoke`);
+export async function revokeDevice(deviceId: string) {
+  const grant = await reauthorize(`device:revoke:${deviceId}`);
+  return postJSON<void>(`/api/devices/${encodeURIComponent(deviceId)}/revoke`, undefined, { "X-HAVEN-Reauthorization": grant });
+}
