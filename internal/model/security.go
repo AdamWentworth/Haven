@@ -20,6 +20,8 @@ type SecuritySnapshot struct {
 // LinuxBaseline contains host-level, privacy-bounded Linux posture. It keeps
 // counts and effective configuration states, never usernames, login source
 // addresses, package names, journal contents, or file paths from user data.
+// Failed systemd unit names are bounded and sanitized because the name is the
+// minimum useful identifier for investigating a failed service.
 type LinuxBaseline struct {
 	Updates          *LinuxUpdateStatus          `json:"updates"`
 	Firewall         *LinuxFirewallStatus        `json:"firewall"`
@@ -53,7 +55,8 @@ type LinuxSSHStatus struct {
 }
 
 type LinuxServiceStatus struct {
-	FailedUnitCount *int `json:"failedUnitCount"`
+	FailedUnitCount *int     `json:"failedUnitCount"`
+	FailedUnits     []string `json:"failedUnits"`
 }
 
 type LinuxAutomaticUpdateStatus struct {

@@ -227,6 +227,8 @@ tbody tr:hover { background: rgba(115, 226, 167, .035); }
 .process-name { font-weight: 650; }
 .process-id { color: var(--muted); font-size: .7rem; }
 .endpoint { color: #c9d9d0; font-family: "Cascadia Code", "SFMono-Regular", Consolas, monospace; }
+.protocol { color: var(--cyan); font-size: .7rem; font-weight: 750; letter-spacing: .08em; }
+.scope { color: var(--muted); }
 .state { color: var(--blue); }
 .footnote { margin: .8rem 0 0; font-size: .72rem; }
 .empty-state { padding: 1.5rem 0; color: var(--muted); text-align: center; }

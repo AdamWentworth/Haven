@@ -33,6 +33,7 @@ func TestLinuxCollectorBuildsPrivacyBoundedHostSnapshot(t *testing.T) {
 		command("timedatectl", "show", "-p", "NTPSynchronized", "--value"):               []byte("yes\n"),
 		command("df", "-Pk", "/"):                                                        []byte("Filesystem 1024-blocks Used Available Capacity Mounted on\n/dev/sda3 100000 30000 70000 30% /\n"),
 		command("ss", "-H", "-tanp"):                                                     []byte("LISTEN 0 4096 192.0.2.77:8443 0.0.0.0:* users:((\"caddy\",pid=42,fd=3))\nESTAB 0 0 192.0.2.77:22 198.51.100.10:51000 users:((\"sshd\",pid=55,fd=4))\n"),
+		command("ss", "-H", "-uanp"):                                                     []byte("UNCONN 0 0 0.0.0.0:51822 0.0.0.0:*\n"),
 	}, errors: map[string]error{}}
 	files := map[string][]byte{
 		"/etc/os-release":   []byte("PRETTY_NAME=\"Ubuntu 24.04.4 LTS\"\n"),
@@ -63,11 +64,25 @@ func TestLinuxCollectorBuildsPrivacyBoundedHostSnapshot(t *testing.T) {
 	if snapshot.LinuxBaseline.SSH.PasswordAuthentication != "no" || snapshot.LinuxBaseline.SSH.PermitRootLogin != "prohibit-password" {
 		t.Fatalf("SSH posture was not collected: %#v", snapshot.LinuxBaseline.SSH)
 	}
-	if len(snapshot.Connections) != 2 || snapshot.Connections[0].ProcessName != "caddy" || snapshot.Connections[1].State != "Established" {
-		t.Fatalf("TCP endpoints were not mapped: %#v", snapshot.Connections)
+	if len(snapshot.Connections) != 3 || snapshot.Connections[0].ProcessName != "caddy" || snapshot.Connections[1].State != "Established" || snapshot.Connections[2].Protocol != "UDP" || snapshot.Connections[2].State != "Open" {
+		t.Fatalf("network endpoints were not mapped: %#v", snapshot.Connections)
+	}
+	if snapshot.LinuxBaseline.Services == nil || len(snapshot.LinuxBaseline.Services.FailedUnits) != 1 || snapshot.LinuxBaseline.Services.FailedUnits[0] != "certbot.service" {
+		t.Fatalf("failed systemd units were not mapped: %#v", snapshot.LinuxBaseline.Services)
 	}
 	if len(snapshot.Notices) != 0 {
 		t.Fatalf("healthy fake collection returned notices: %#v", snapshot.Notices)
+	}
+}
+
+func TestSanitizeSystemdUnitName(t *testing.T) {
+	for _, value := range []string{"certbot.service", "docker-worker-1.service", `dev-disk\\x2dby.mount`} {
+		if got := sanitizeSystemdUnitName(value); got != value {
+			t.Fatalf("expected %q to remain unchanged, got %q", value, got)
+		}
+	}
+	if got := sanitizeSystemdUnitName("bad unit.service"); got != "" {
+		t.Fatalf("unsafe unit name was retained: %q", got)
 	}
 }
 

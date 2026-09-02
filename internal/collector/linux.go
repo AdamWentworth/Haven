@@ -229,12 +229,20 @@ func (collector *LinuxCollector) services(ctx context.Context, notices *[]model.
 		return &model.LinuxServiceStatus{}
 	}
 	count := 0
+	failedUnits := []string{}
 	for _, line := range strings.Split(strings.TrimSpace(string(output)), "\n") {
-		if strings.TrimSpace(line) != "" {
-			count++
+		fields := strings.Fields(line)
+		if len(fields) == 0 {
+			continue
+		}
+		count++
+		if len(failedUnits) < 20 {
+			if unit := sanitizeSystemdUnitName(fields[0]); unit != "" {
+				failedUnits = append(failedUnits, unit)
+			}
 		}
 	}
-	return &model.LinuxServiceStatus{FailedUnitCount: intPointer(count)}
+	return &model.LinuxServiceStatus{FailedUnitCount: intPointer(count), FailedUnits: failedUnits}
 }
 
 func (collector *LinuxCollector) automaticUpdates(ctx context.Context, notices *[]model.CollectorNotice) *model.LinuxAutomaticUpdateStatus {
@@ -309,17 +317,26 @@ func (collector *LinuxCollector) storage(ctx context.Context, notices *[]model.C
 }
 
 func (collector *LinuxCollector) connections(ctx context.Context, notices *[]model.CollectorNotice) []model.NetworkConnection {
-	output, err := collector.runner.Run(ctx, "ss", "-H", "-tanp")
-	if err != nil {
-		addNotice(notices, "TCP endpoints", "information", "Listening and established TCP endpoints could not be collected.")
-		return []model.NetworkConnection{}
-	}
 	connections := []model.NetworkConnection{}
-	for _, line := range strings.Split(string(output), "\n") {
-		if connection, ok := parseSSLine(line); ok {
-			connections = append(connections, connection)
-			if len(connections) == 250 {
-				break
+	queries := []struct {
+		protocol  string
+		arguments []string
+	}{
+		{protocol: "TCP", arguments: []string{"-H", "-tanp"}},
+		{protocol: "UDP", arguments: []string{"-H", "-uanp"}},
+	}
+	for _, query := range queries {
+		output, err := collector.runner.Run(ctx, "ss", query.arguments...)
+		if err != nil {
+			addNotice(notices, query.protocol+" endpoints", "information", "Live "+query.protocol+" endpoints could not be collected.")
+			continue
+		}
+		for _, line := range strings.Split(string(output), "\n") {
+			if connection, ok := parseSSLine(line, query.protocol); ok {
+				connections = append(connections, connection)
+				if len(connections) == 250 {
+					return connections
+				}
 			}
 		}
 	}
@@ -370,13 +387,13 @@ func parseSSHOutput(output []byte) map[string]string {
 	return values
 }
 
-func parseSSLine(line string) (model.NetworkConnection, bool) {
+func parseSSLine(line, protocol string) (model.NetworkConnection, bool) {
 	fields := strings.Fields(line)
 	if len(fields) < 5 {
 		return model.NetworkConnection{}, false
 	}
 	state := strings.ToLower(fields[0])
-	if state != "listen" && state != "estab" && state != "established" {
+	if state != "listen" && state != "estab" && state != "established" && !(strings.EqualFold(protocol, "UDP") && state == "unconn") {
 		return model.NetworkConnection{}, false
 	}
 	localAddress, localPort, localOK := parseLinuxEndpoint(fields[3])
@@ -385,12 +402,12 @@ func parseSSLine(line string) (model.NetworkConnection, bool) {
 		return model.NetworkConnection{}, false
 	}
 	connection := model.NetworkConnection{
-		Protocol:      "TCP",
+		Protocol:      strings.ToUpper(protocol),
 		LocalAddress:  localAddress,
 		LocalPort:     localPort,
 		RemoteAddress: remoteAddress,
 		RemotePort:    remotePort,
-		State:         map[string]string{"listen": "Listen", "estab": "Established", "established": "Established"}[state],
+		State:         map[string]string{"listen": "Listen", "estab": "Established", "established": "Established", "unconn": "Open"}[state],
 	}
 	processFields := strings.Join(fields[5:], " ")
 	if start := strings.Index(processFields, `(("`); start >= 0 {
@@ -407,6 +424,25 @@ func parseSSLine(line string) (model.NetworkConnection, bool) {
 		connection.ProcessID, _ = strconv.Atoi(value)
 	}
 	return connection, true
+}
+
+func sanitizeSystemdUnitName(value string) string {
+	value = strings.TrimPrefix(strings.TrimSpace(value), "●")
+	if value == "" || len(value) > 128 {
+		return ""
+	}
+	for _, character := range value {
+		if (character >= 'a' && character <= 'z') || (character >= 'A' && character <= 'Z') || (character >= '0' && character <= '9') {
+			continue
+		}
+		switch character {
+		case '.', '-', '_', '@', ':', '\\':
+			continue
+		default:
+			return ""
+		}
+	}
+	return value
 }
 
 func parseLinuxEndpoint(value string) (string, int, bool) {

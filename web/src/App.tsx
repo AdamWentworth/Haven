@@ -148,6 +148,19 @@ function endpoint(address: string, port: number) {
   return `${host}:${port}`;
 }
 
+function endpointScope(connection: NetworkConnection) {
+  if (connection.state.toLowerCase() === "established") return "Active connection";
+  const address = connection.localAddress.toLowerCase();
+  if (address === "127.0.0.1" || address === "::1" || address.startsWith("127.")) return "This host only";
+  if (address === "0.0.0.0" || address === "*") return "All IPv4 interfaces";
+  if (address === "::") return "All IPv6 interfaces";
+  if (address.startsWith("10.") || address.startsWith("192.168.")) return "Private network address";
+  const octets = address.split(".").map(Number);
+  if (octets.length === 4 && octets[0] === 172 && octets[1] >= 16 && octets[1] <= 31) return "Private network address";
+  if (address.startsWith("169.254.") || address.startsWith("fe80:")) return "Link-local address";
+  return "Specific interface address";
+}
+
 function policyValue(value?: string) {
   return !value || value === "NotConfigured" ? "System default" : value;
 }
@@ -240,6 +253,7 @@ function LinuxPanel({ baseline }: { baseline: LinuxBaseline }) {
     ["SSH password authentication", ssh?.passwordAuthentication || "Not fully verified"],
     ["SSH root login", ssh?.permitRootLogin || "Not fully verified"],
     ["Failed systemd units", baseline.services?.failedUnitCount === null || baseline.services?.failedUnitCount === undefined ? "Not verified" : String(baseline.services.failedUnitCount)],
+    ["Failed unit names", baseline.services?.failedUnits?.length ? baseline.services.failedUnits.join(", ") : "None reported"],
     ["Root filesystem", storage?.usedPercentage === null || storage?.usedPercentage === undefined ? "Not verified" : `${storage.usedPercentage.toFixed(0)}% used · ${formatBytes(storage.availableBytes)} available`],
   ];
   return (
@@ -315,14 +329,15 @@ function ConnectionsPanel({ connections }: { connections: NetworkConnection[] })
     const query = filter.trim().toLowerCase();
     if (!query) return connections;
     return connections.filter((connection) =>
-      Object.values(connection).some((value) => String(value).toLowerCase().includes(query)),
+      Object.values(connection).some((value) => String(value).toLowerCase().includes(query))
+      || endpointScope(connection).toLowerCase().includes(query),
     );
   }, [connections, filter]);
 
   return (
     <section className="panel connections-panel" aria-labelledby="connections-title">
       <div className="section-heading connections-heading">
-        <div className="heading-identity"><span className="section-icon cyan"><NetworkIcon /></span><div><p className="eyebrow">LIVE OBSERVATION · NOT A THREAT LIST</p><h2 id="connections-title">TCP connections</h2></div></div>
+        <div className="heading-identity"><span className="section-icon cyan"><NetworkIcon /></span><div><p className="eyebrow">LIVE OBSERVATION · NOT A THREAT LIST</p><h2 id="connections-title">Network endpoints</h2></div></div>
         <label className="search-field">
           <span className="sr-only">Filter connections</span>
           <input
@@ -336,22 +351,24 @@ function ConnectionsPanel({ connections }: { connections: NetworkConnection[] })
       </div>
       <div className="table-wrap">
         <table>
-          <thead><tr><th>Process</th><th>Local endpoint</th><th>Remote endpoint</th><th>State</th></tr></thead>
+          <thead><tr><th>Protocol</th><th>Process</th><th>Local endpoint</th><th>Remote endpoint</th><th>Scope</th><th>State</th></tr></thead>
           <tbody>
             {filtered.length === 0 ? (
-              <tr><td colSpan={4} className="empty-state">{connections.length ? "No connections match this filter." : "No TCP connections were returned."}</td></tr>
+              <tr><td colSpan={6} className="empty-state">{connections.length ? "No endpoints match this filter." : "No network endpoints were returned."}</td></tr>
             ) : filtered.map((connection) => (
-              <tr key={`${connection.processId}-${connection.localAddress}-${connection.localPort}-${connection.remoteAddress}-${connection.remotePort}-${connection.state}`}>
+              <tr key={`${connection.protocol}-${connection.processId}-${connection.localAddress}-${connection.localPort}-${connection.remoteAddress}-${connection.remotePort}-${connection.state}`}>
+                <td className="protocol">{connection.protocol}</td>
                 <td><div className="process-name">{connection.processName || "Owner unavailable"}</div><div className="process-id">{connection.processId > 0 ? `PID ${connection.processId}` : "Process hidden from this agent"}</div></td>
                 <td className="endpoint">{endpoint(connection.localAddress, connection.localPort)}</td>
                 <td className="endpoint">{endpoint(connection.remoteAddress, connection.remotePort)}</td>
+                <td className="scope">{endpointScope(connection)}</td>
                 <td className="state">{connection.state}</td>
               </tr>
             ))}
           </tbody>
         </table>
       </div>
-      <p className="footnote">Showing {filtered.length} of {connections.length} established and listening TCP endpoints. An entry is not automatically suspicious, and payload contents are never captured or stored.</p>
+      <p className="footnote">Showing {filtered.length} of {connections.length} live TCP and UDP endpoints. “All interfaces” describes the local bind—not proven Internet reachability. Payload contents are never captured or stored.</p>
     </section>
   );
 }
@@ -516,7 +533,8 @@ function Application({ snapshot, devices, events, runtime, selectedDevice, selec
     && snapshot.linuxBaseline?.automaticUpdates?.enabled !== null && snapshot.linuxBaseline?.automaticUpdates?.enabled !== undefined;
   const linuxHardeningHealthy = snapshot.linuxBaseline?.appArmor?.enabled === true && snapshot.linuxBaseline?.automaticUpdates?.enabled === true;
   const established = snapshot.connections.filter((item) => item.state.toLowerCase() === "established").length;
-  const listening = snapshot.connections.filter((item) => item.state.toLowerCase() === "listen").length;
+  const listening = snapshot.connections.filter((item) => ["listen", "open"].includes(item.state.toLowerCase())).length;
+  const broadListeners = snapshot.connections.filter((item) => ["All IPv4 interfaces", "All IPv6 interfaces"].includes(endpointScope(item))).length;
 
   return (
     <>
@@ -540,8 +558,8 @@ function Application({ snapshot, devices, events, runtime, selectedDevice, selec
         </section>
         <section className="summary-grid" aria-label="Security summary">
           <SummaryCard icon={isLinux ? <ChipIcon /> : <DefenderIcon />} accent="blue" title={isLinux ? "Host hardening" : "Protection"} label={isLinux ? (linuxHardeningKnown ? (linuxHardeningHealthy ? "Active" : "Attention") : "Unavailable") : snapshot.defender ? (defenderHealthy ? "Protected" : "Attention") : "Unavailable"} tone={isLinux ? (linuxHardeningKnown ? (linuxHardeningHealthy ? "healthy" : "attention") : "unknown") : snapshot.defender ? (defenderHealthy ? "healthy" : "attention") : "unknown"}>{isLinux ? (linuxHardeningKnown ? (linuxHardeningHealthy ? "AppArmor and automatic update protections are enabled." : "One or more Linux hardening signals need review.") : "Linux hardening status was not fully returned.") : snapshot.defender ? (defenderHealthy ? "Antivirus and real-time monitoring are active." : "One or more protection signals are off or unavailable.") : "Defender status was not returned."}</SummaryCard>
-          <SummaryCard icon={<FirewallIcon />} accent="amber" title="Firewall" label={firewallsKnown ? (firewallsEnabled ? "Enabled" : "Attention") : "Unavailable"} tone={firewallsKnown ? (firewallsEnabled ? "healthy" : "danger") : "unknown"}>{firewallsKnown ? (firewallsEnabled ? `All ${snapshot.firewallProfiles.length} firewall profiles are enabled.` : "At least one firewall profile is disabled.") : "Firewall profile data was not returned."}</SummaryCard>
-          <SummaryCard icon={<NetworkIcon />} accent="cyan" title="Network" label={`${established} connected`} tone="healthy">{established} established and {listening} listening TCP endpoints observed right now. These are not threat counts.</SummaryCard>
+          <SummaryCard icon={<FirewallIcon />} accent="amber" title="Firewall" label={firewallsKnown ? (firewallsEnabled ? "Enabled" : "Attention") : "Unavailable"} tone={firewallsKnown ? (firewallsEnabled ? "healthy" : "danger") : "unknown"}>{firewallsKnown ? (isLinux ? `${snapshot.firewallProfiles[0].name} is ${firewallsEnabled ? "enabled" : "disabled"} as the host firewall provider.` : firewallsEnabled ? `All ${snapshot.firewallProfiles.length} Windows Firewall profiles are enabled.` : "At least one Windows Firewall profile is disabled.") : "Firewall status was not returned."}</SummaryCard>
+          <SummaryCard icon={<NetworkIcon />} accent="cyan" title="Network" label={`${broadListeners} broad bind${broadListeners === 1 ? "" : "s"}`} tone={broadListeners > 0 ? "configured" : "healthy"}>{established} established connection{established === 1 ? "" : "s"}, {listening} listening/open endpoint{listening === 1 ? "" : "s"}, and {broadListeners} bound to all IPv4 or IPv6 interfaces. These are exposure clues, not threat counts.</SummaryCard>
           <SummaryCard icon={<ActivityIcon />} accent="green" title="Monitor" label={runtime?.localCollection && runtime.monitor.enabled ? `Every ${formatInterval(runtime.monitor.intervalSeconds)}` : "Agent reported"} tone={runtime?.monitor.lastCollectionError ? "attention" : "healthy"}>{runtime?.localCollection ? (runtime.monitor.lastCollectionError || (runtime.monitor.lastSuccessfulAt ? `Last automatic observation succeeded ${formatDate(runtime.monitor.lastSuccessfulAt)}.` : "Automatic monitoring is starting.")) : `Latest authenticated agent observation arrived ${formatDate(snapshot.collectedAt)}.`}</SummaryCard>
         </section>
         {!demoMode && <><PasskeyPanel passkeys={passkeys} add={addOwnerPasskey} remove={removeOwnerPasskey} busy={actionBusy} /><ActionCenter actions={actions} audit={audit} capabilities={runtime?.actionCapabilities || []} run={runAction} busy={actionBusy} /></>}

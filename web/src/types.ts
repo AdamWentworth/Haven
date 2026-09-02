@@ -15,7 +15,7 @@ export interface LinuxBaseline {
   updates: { pendingPackageCount: number | null; pendingSecurityPackageCount: number | null; pendingReboot: boolean | null } | null;
   firewall: { provider: string; active: boolean | null; defaultInboundAction?: string; defaultOutboundAction?: string } | null;
   ssh: { serverRunning: boolean | null; passwordAuthentication?: string; permitRootLogin?: string; publicKeyAuthentication?: string; failedLoginCount24Hours: number | null } | null;
-  services: { failedUnitCount: number | null } | null;
+  services: { failedUnitCount: number | null; failedUnits: string[] } | null;
   automaticUpdates: { enabled: boolean | null; active: boolean | null } | null;
   appArmor: { enabled: boolean | null } | null;
   timeSync: { synchronized: boolean | null } | null;

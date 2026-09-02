@@ -163,6 +163,7 @@ func TestEvaluateActionableLinuxBaseline(t *testing.T) {
 	snapshot.LinuxBaseline.SSH.PasswordAuthentication = "yes"
 	snapshot.LinuxBaseline.AutomaticUpdates.Enabled = boolPointer(false)
 	snapshot.LinuxBaseline.Services.FailedUnitCount = intPointer(1)
+	snapshot.LinuxBaseline.Services.FailedUnits = []string{"certbot.service"}
 	snapshot.LinuxBaseline.Storage.UsedPercentage = floatPointer(91)
 
 	evaluated := Evaluate(snapshot, time.Now())
@@ -172,6 +173,10 @@ func TestEvaluateActionableLinuxBaseline(t *testing.T) {
 	assertFinding(t, evaluated.Findings, "linux-ssh-passwords", "medium")
 	assertFinding(t, evaluated.Findings, "linux-automatic-updates", "medium")
 	assertFinding(t, evaluated.Findings, "linux-failed-services", "low")
+	serviceCheck := findCheck(t, evaluated.BaselineChecks, "linux-services")
+	if !strings.Contains(serviceCheck.Evidence, "certbot.service") {
+		t.Fatalf("failed unit name missing from evidence: %#v", serviceCheck)
+	}
 	assertFinding(t, evaluated.Findings, "linux-storage-low", "medium")
 }
 

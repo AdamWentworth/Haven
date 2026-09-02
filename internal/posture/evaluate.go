@@ -180,8 +180,15 @@ func evaluateLinuxServices(snapshot *model.SecuritySnapshot) {
 	}
 	count := *snapshot.LinuxBaseline.Services.FailedUnitCount
 	if count > 0 {
-		addCheck(snapshot, "linux-services", "Reliability", "Failed system services", "attention", fmt.Sprintf("systemd reports %d failed unit(s).", count), "Unit names are intentionally not retained")
-		addFinding(snapshot, "linux-failed-services", "Reliability", "Ubuntu has failed system services", "low", fmt.Sprintf("systemd reports %d failed unit(s); HAVEN does not retain their names in observation history.", count), "Run systemctl --failed directly on the server, review each unit, and repair or deliberately disable obsolete services.")
+		failedUnits := snapshot.LinuxBaseline.Services.FailedUnits
+		evidence := "No unit names were returned"
+		summary := fmt.Sprintf("systemd reports %d failed unit(s).", count)
+		if len(failedUnits) > 0 {
+			evidence = "Failed: " + strings.Join(failedUnits, ", ")
+			summary += " Failed: " + strings.Join(failedUnits, ", ") + "."
+		}
+		addCheck(snapshot, "linux-services", "Reliability", "Failed system services", "attention", fmt.Sprintf("systemd reports %d failed unit(s).", count), evidence)
+		addFinding(snapshot, "linux-failed-services", "Reliability", "Ubuntu has failed system services", "low", summary, "Review the named unit, then repair it or deliberately disable obsolete services. HAVEN does not collect journal contents.")
 		return
 	}
 	addCheck(snapshot, "linux-services", "Reliability", "Failed system services", "pass", "systemd reports no failed units.", "0 failed units")
