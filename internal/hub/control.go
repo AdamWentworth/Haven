@@ -378,6 +378,7 @@ type expectedServiceRequest struct {
 	BindScope     string   `json:"bindScope"`
 	ProcessNames  []string `json:"processNames"`
 	WorkloadNames []string `json:"workloadNames"`
+	SystemdUnits  []string `json:"systemdUnits"`
 }
 
 func expectedServiceFromRequest(body expectedServiceRequest, deviceID string, now time.Time) (storage.ExpectedService, bool) {
@@ -403,8 +404,8 @@ func expectedServiceFromRequest(body expectedServiceRequest, deviceID string, no
 		}
 		return true
 	}
-	valid := validIdentifier(deviceID) && body.Label != "" && len(body.Label) <= 80 && !strings.ContainsAny(body.Label, "\r\n\t") && (body.Protocol == "TCP" || body.Protocol == "UDP") && body.Port >= 1 && body.Port <= 65535 && body.PortEnd >= body.Port && body.PortEnd <= 65535 && allowedScope && validOwners(body.ProcessNames) && validOwners(body.WorkloadNames)
-	return storage.ExpectedService{DeviceID: deviceID, Label: body.Label, Protocol: body.Protocol, Port: body.Port, PortEnd: body.PortEnd, BindScope: body.BindScope, ProcessNames: body.ProcessNames, WorkloadNames: body.WorkloadNames, UpdatedAt: now}, valid
+	valid := validIdentifier(deviceID) && body.Label != "" && len(body.Label) <= 80 && !strings.ContainsAny(body.Label, "\r\n\t") && (body.Protocol == "TCP" || body.Protocol == "UDP") && body.Port >= 1 && body.Port <= 65535 && body.PortEnd >= body.Port && body.PortEnd <= 65535 && allowedScope && validOwners(body.ProcessNames) && validOwners(body.WorkloadNames) && validOwners(body.SystemdUnits)
+	return storage.ExpectedService{DeviceID: deviceID, Label: body.Label, Protocol: body.Protocol, Port: body.Port, PortEnd: body.PortEnd, BindScope: body.BindScope, ProcessNames: body.ProcessNames, WorkloadNames: body.WorkloadNames, SystemdUnits: body.SystemdUnits, UpdatedAt: now}, valid
 }
 
 func (server *Server) saveExpectedService(writer http.ResponseWriter, request *http.Request) {
@@ -454,7 +455,7 @@ func (server *Server) saveExpectedServices(writer http.ResponseWriter, request *
 		http.Error(writer, "could not save expected service batch", http.StatusInternalServerError)
 		return
 	}
-	_ = server.store.AppendAudit(request.Context(), storage.AuditEvent{Actor: "owner", Action: "service.expectation.baseline", Target: body.DeviceID, Outcome: "succeeded", Detail: fmt.Sprintf("%d reviewed baseline classification(s) were saved. Friendly labels and process names are intentionally omitted from audit history.", len(services)), OccurredAt: now})
+	_ = server.store.AppendAudit(request.Context(), storage.AuditEvent{Actor: "owner", Action: "service.expectation.baseline", Target: body.DeviceID, Outcome: "succeeded", Detail: fmt.Sprintf("%d reviewed baseline classification(s) were saved. Friendly labels and owner names are intentionally omitted from audit history.", len(services)), OccurredAt: now})
 	server.writeJSON(writer, http.StatusOK, saved)
 }
 

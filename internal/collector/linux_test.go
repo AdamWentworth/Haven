@@ -37,12 +37,13 @@ func TestLinuxCollectorBuildsPrivacyBoundedHostSnapshot(t *testing.T) {
 		command("aa-status", "--enabled"):                                                []byte{},
 		command("timedatectl", "show", "-p", "NTPSynchronized", "--value"):               []byte("yes\n"),
 		command("df", "-Pk", "/"):                                                        []byte("Filesystem 1024-blocks Used Available Capacity Mounted on\n/dev/sda3 100000 30000 70000 30% /\n"),
-		command("ss", "-H", "-tanp"):                                                     []byte("LISTEN 0 4096 192.0.2.77:8443 0.0.0.0:* users:((\"caddy\",pid=42,fd=3))\nESTAB 0 0 192.0.2.77:22 198.51.100.10:51000 users:((\"sshd\",pid=55,fd=4))\n"),
-		command("ss", "-H", "-uanp"):                                                     []byte("UNCONN 0 0 0.0.0.0:51822 0.0.0.0:*\n"),
+		command("ss", "-H", "-tanpe"):                                                    []byte("LISTEN 0 4096 192.0.2.77:8443 0.0.0.0:* users:((\"caddy\",pid=42,fd=3)) cgroup:/user.slice/user-1000.slice/user@1000.service/init.scope\nESTAB 0 0 192.0.2.77:22 198.51.100.10:51000 users:((\"sshd\",pid=55,fd=4)) cgroup:/system.slice/ssh.service\n"),
+		command("ss", "-H", "-uanpe"):                                                    []byte("UNCONN 0 0 0.0.0.0:51822 0.0.0.0:*\n"),
 	}, errors: map[string]error{}}
 	files := map[string][]byte{
 		"/etc/os-release":   []byte("PRETTY_NAME=\"Ubuntu 24.04.4 LTS\"\n"),
 		"/proc/uptime":      []byte("86401.50 100.00\n"),
+		"/proc/42/cgroup":   []byte("0::/system.slice/caddy.service\n"),
 		"/etc/ufw/ufw.conf": []byte("ENABLED=yes\n"),
 		"/etc/default/ufw":  []byte("DEFAULT_INPUT_POLICY=\"DROP\"\nDEFAULT_OUTPUT_POLICY=\"ACCEPT\"\n"),
 	}
@@ -69,7 +70,7 @@ func TestLinuxCollectorBuildsPrivacyBoundedHostSnapshot(t *testing.T) {
 	if snapshot.LinuxBaseline.SSH.PasswordAuthentication != "no" || snapshot.LinuxBaseline.SSH.KeyboardInteractiveAuthentication != "no" || snapshot.LinuxBaseline.SSH.PermitRootLogin != "prohibit-password" {
 		t.Fatalf("SSH posture was not collected: %#v", snapshot.LinuxBaseline.SSH)
 	}
-	if len(snapshot.Connections) != 3 || snapshot.Connections[0].ProcessName != "caddy" || snapshot.Connections[1].State != "Established" || snapshot.Connections[2].Protocol != "UDP" || snapshot.Connections[2].State != "Bound" {
+	if len(snapshot.Connections) != 3 || snapshot.Connections[0].ProcessName != "caddy" || snapshot.Connections[0].SystemdUnit != "caddy.service" || snapshot.Connections[1].State != "Established" || snapshot.Connections[2].Protocol != "UDP" || snapshot.Connections[2].State != "Bound" {
 		t.Fatalf("network endpoints were not mapped: %#v", snapshot.Connections)
 	}
 	if snapshot.LinuxBaseline.Services == nil || len(snapshot.LinuxBaseline.Services.FailedUnits) != 1 || snapshot.LinuxBaseline.Services.FailedUnits[0] != "certbot.service" {
@@ -121,6 +122,29 @@ func TestSanitizeSystemdUnitName(t *testing.T) {
 	}
 	if got := sanitizeSystemdUnitName("bad unit.service"); got != "" {
 		t.Fatalf("unsafe unit name was retained: %q", got)
+	}
+}
+
+func TestParseSystemdUnitFromSocketCgroup(t *testing.T) {
+	for _, test := range []struct {
+		input string
+		want  string
+	}{
+		{"ino:11956 cgroup:/system.slice/glances.service <->", "glances.service"},
+		{"cgroup:/user.slice/user-1000.slice/user@1000.service/app.slice/binderledger-localhost-proxy@8081.service", "binderledger-localhost-proxy@8081.service"},
+		{"cgroup:/user.slice/user-1000.slice/user@1000.service/init.scope", ""},
+		{"cgroup:/system.slice/docker-example.scope", ""},
+	} {
+		if got := parseSystemdUnit(test.input); got != test.want {
+			t.Fatalf("parseSystemdUnit(%q) = %q, want %q", test.input, got, test.want)
+		}
+	}
+}
+
+func TestParseSystemdUnitFromProcCgroup(t *testing.T) {
+	value := "0::/user.slice/user-1000.slice/user@1000.service/app.slice/binderledger-localhost-proxy@8081.service\n"
+	if got := parseProcSystemdUnit(value); got != "binderledger-localhost-proxy@8081.service" {
+		t.Fatalf("unexpected process cgroup unit: %q", got)
 	}
 }
 

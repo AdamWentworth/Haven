@@ -206,6 +206,7 @@ interface LogicalListener {
 	bindScope: Exclude<BindScope, "any">;
 	addresses: string[];
 	processes: string[];
+	systemdUnits: string[];
 	rawCount: number;
 	state: "Listening" | "Bound";
 }
@@ -216,10 +217,11 @@ function logicalListeners(connections: NetworkConnection[]) {
 		const protocol = connection.protocol.toUpperCase() === "UDP" ? "UDP" : "TCP";
 		const bindScope = endpointBindScope(connection);
 		const key = `${protocol}:${connection.localPort}:${bindScope}`;
-		const current = grouped.get(key) || { key, protocol, port: connection.localPort, bindScope, addresses: [], processes: [], rawCount: 0, state: protocol === "UDP" ? "Bound" : "Listening" };
+		const current = grouped.get(key) || { key, protocol, port: connection.localPort, bindScope, addresses: [], processes: [], systemdUnits: [], rawCount: 0, state: protocol === "UDP" ? "Bound" : "Listening" };
 		const address = normalizeAddress(connection.localAddress);
 		if (address && !current.addresses.includes(address)) current.addresses.push(address);
 		if (connection.processName && !current.processes.includes(connection.processName)) current.processes.push(connection.processName);
+		if (connection.systemdUnit && !current.systemdUnits.includes(connection.systemdUnit)) current.systemdUnits.push(connection.systemdUnit);
 		current.rawCount += 1;
 		grouped.set(key, current);
 	});
@@ -257,6 +259,11 @@ function expectedServiceMatches(listener: LogicalListener, service: ExpectedServ
 		const observedWorkloads = workloadAttribution(listener, inventory).map(({ workload }) => canonicalOwnerName(workload.name));
 		if (observedWorkloads.length === 0 || !observedWorkloads.every((workload) => expectedWorkloads.has(workload))) return false;
 	}
+	if (service.systemdUnits?.length) {
+		const expectedUnits = new Set(service.systemdUnits.map((unit) => canonicalOwnerName(unit)));
+		const observedUnits = listener.systemdUnits.map((unit) => canonicalOwnerName(unit));
+		if (observedUnits.length === 0 || !observedUnits.every((unit) => expectedUnits.has(unit))) return false;
+	}
 	return true;
 }
 
@@ -283,10 +290,16 @@ function readableIdentifier(value: string) {
 	return value.replace(/[_-]+/g, " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
 }
 
+function knownSystemdLabel(unit: string) {
+	if (unit === "systemd-resolved.service") return "systemd-resolved local DNS";
+	if (unit === "binderledger-localhost-proxy@8081.service") return "BinderLedger localhost proxy";
+	return "";
+}
+
 function suggestedBaseline(deviceId: string, operatingSystem: string, listeners: LogicalListener[], inventory: WorkloadInventory | null, expectedServices: ExpectedService[]) {
 	const suggestions: BaselineSuggestion[] = [];
 	const isWindows = /windows/i.test(operatingSystem);
-	const unreviewed = listeners.filter((listener) => listener.bindScope !== "local" && !expectedServices.some((service) => expectedServiceMatches(listener, service, inventory)));
+	const unreviewed = listeners.filter((listener) => !expectedServices.some((service) => expectedServiceMatches(listener, service, inventory)));
 	const exactLabels = isWindows ? new Map<string, string>([
 		["TCP:135", "Windows RPC Endpoint Mapper"],
 		["TCP:139", "Windows file sharing (NetBIOS)"],
@@ -312,18 +325,31 @@ function suggestedBaseline(deviceId: string, operatingSystem: string, listeners:
 				title,
 				description: `${listener.protocol} ${listener.port} · ${bindScopeLabel(listener.bindScope)} · currently published by Docker workload ${workload.name}.`,
 				listenerKeys: [listener.key],
-				services: [{ deviceId, label: title, protocol: listener.protocol, port: listener.port, portEnd: listener.port, bindScope: listener.bindScope, processNames: [], workloadNames: [workload.name] }],
+				services: [{ deviceId, label: title, protocol: listener.protocol, port: listener.port, portEnd: listener.port, bindScope: listener.bindScope, processNames: [], workloadNames: [workload.name], systemdUnits: [] }],
 			});
 			continue;
 		}
+		const knownUnitLabels = listener.systemdUnits.map(knownSystemdLabel);
+		if (knownUnitLabels.length > 0 && knownUnitLabels.every(Boolean) && new Set(knownUnitLabels).size === 1) {
+			const title = knownUnitLabels[0];
+			suggestions.push({
+				id: `systemd:${listener.key}:${listener.systemdUnits.join(",")}`,
+				title,
+				description: `${listener.protocol} ${listener.port} · ${bindScopeLabel(listener.bindScope)} · owned by ${listener.systemdUnits.join(", ")}.`,
+				listenerKeys: [listener.key],
+				services: [{ deviceId, label: title, protocol: listener.protocol, port: listener.port, portEnd: listener.port, bindScope: listener.bindScope, processNames: [], workloadNames: [], systemdUnits: listener.systemdUnits }],
+			});
+			continue;
+		}
+		if (listener.bindScope === "local") continue;
 		const title = exactLabels.get(`${listener.protocol}:${listener.port}`);
 		if (!title) continue;
 		suggestions.push({
 			id: `native:${listener.key}`,
 			title,
-			description: `${listener.protocol} ${listener.port} · ${bindScopeLabel(listener.bindScope)}${listener.processes.length ? ` · owned by ${listener.processes.join(", ")}` : ""}.`,
+			description: `${listener.protocol} ${listener.port} · ${bindScopeLabel(listener.bindScope)}${listener.processes.length ? ` · owned by ${listener.processes.join(", ")}` : listener.systemdUnits.length ? ` · owned by ${listener.systemdUnits.join(", ")}` : ""}.`,
 			listenerKeys: [listener.key],
-			services: [{ deviceId, label: title, protocol: listener.protocol, port: listener.port, portEnd: listener.port, bindScope: listener.bindScope, processNames: listener.processes, workloadNames: [] }],
+			services: [{ deviceId, label: title, protocol: listener.protocol, port: listener.port, portEnd: listener.port, bindScope: listener.bindScope, processNames: listener.processes, workloadNames: [], systemdUnits: listener.systemdUnits }],
 		});
 	}
 
@@ -343,7 +369,23 @@ function suggestedBaseline(deviceId: string, operatingSystem: string, listeners:
 				title: "Windows dynamic RPC services",
 				description: `Groups ${grouped.length} current listener${grouped.length === 1 ? "" : "s"} in TCP 49152–65535, but only while owned by reviewed Windows system processes: ${processes.join(", ")}.`,
 				listenerKeys: grouped.map((listener) => listener.key),
-				services: [{ deviceId, label: "Windows dynamic RPC services", protocol: "TCP", port: 49152, portEnd: 65535, bindScope: scope, processNames: processes, workloadNames: [] }],
+				services: [{ deviceId, label: "Windows dynamic RPC services", protocol: "TCP", port: 49152, portEnd: 65535, bindScope: scope, processNames: processes, workloadNames: [], systemdUnits: [] }],
+			});
+		}
+	} else {
+		const containerdByScope = new Map<LogicalListener["bindScope"], LogicalListener[]>();
+		for (const listener of unreviewed) {
+			const units = listener.systemdUnits.map((unit) => canonicalOwnerName(unit));
+			if (listener.protocol !== "TCP" || listener.port < 32768 || listener.port > 60999 || units.length === 0 || !units.every((unit) => unit === "containerd.service")) continue;
+			containerdByScope.set(listener.bindScope, [...(containerdByScope.get(listener.bindScope) || []), listener]);
+		}
+		for (const [scope, grouped] of containerdByScope) {
+			suggestions.push({
+				id: `containerd:${scope}`,
+				title: "containerd internal runtime listeners",
+				description: `Covers ${grouped.length} current TCP listener${grouped.length === 1 ? "" : "s"} in the Linux ephemeral range 32768–60999, but only while owned by containerd.service.`,
+				listenerKeys: grouped.map((listener) => listener.key),
+				services: [{ deviceId, label: "containerd internal runtime listeners", protocol: "TCP", port: 32768, portEnd: 60999, bindScope: scope, processNames: [], workloadNames: [], systemdUnits: ["containerd.service"] }],
 			});
 		}
 	}
@@ -588,17 +630,17 @@ function ConnectionsPanel({ deviceId, operatingSystem, connections, workloads, e
       || endpointScope(connection).toLowerCase().includes(query),
     );
   }, [connections, filter]);
-	const processAttributionAvailable = connections.some((connection) => connection.processName || connection.processId > 0);
+	const ownerAttributionAvailable = connections.some((connection) => connection.processName || connection.processId > 0 || connection.systemdUnit);
 	const markExpected = (listener: LogicalListener) => {
 		const entered = window.prompt(`Friendly name for ${listener.protocol} port ${listener.port} (for example, SSH or WireGuard).`, `${listener.protocol} ${listener.port}`);
 		if (entered === null || entered.trim() === "") return;
-		saveExpectation({ deviceId, label: entered.trim(), protocol: listener.protocol, port: listener.port, portEnd: listener.port, bindScope: listener.bindScope, processNames: [], workloadNames: [] });
+		saveExpectation({ deviceId, label: entered.trim(), protocol: listener.protocol, port: listener.port, portEnd: listener.port, bindScope: listener.bindScope, processNames: listener.processes, workloadNames: workloadAttribution(listener, workloads).map(({ workload }) => workload.name), systemdUnits: listener.systemdUnits });
 	};
 	const addManual = (event: React.FormEvent) => {
 		event.preventDefault();
 		const port = Number(manualPort);
 		if (!manualLabel.trim() || !Number.isInteger(port) || port < 1 || port > 65535) return;
-		saveExpectation({ deviceId, label: manualLabel.trim(), protocol: manualProtocol, port, portEnd: port, bindScope: manualScope, processNames: [], workloadNames: [] });
+		saveExpectation({ deviceId, label: manualLabel.trim(), protocol: manualProtocol, port, portEnd: port, bindScope: manualScope, processNames: [], workloadNames: [], systemdUnits: [] });
 		setManualLabel("");
 		setManualPort("");
 	};
@@ -613,7 +655,7 @@ function ConnectionsPanel({ deviceId, operatingSystem, connections, workloads, e
 	  <p className="service-explainer">HAVEN groups IPv4/IPv6 duplicates and asks you to classify intended services. “Unreviewed” means no expectation has been saved yet—it does not mean malicious or Internet-accessible.</p>
 	  {baselineSuggestions.length > 0 && <section className="baseline-review" aria-labelledby="baseline-review-title">
 		<div className="baseline-review-heading"><div><p className="eyebrow">ONE-TIME REVIEW</p><h3 id="baseline-review-title">Suggested service baseline</h3></div><StatusChip label={`${baselineSuggestions.length} suggestion${baselineSuggestions.length === 1 ? "" : "s"}`} tone="configured" /></div>
-		<p>These are high-confidence suggestions derived from platform roles, current process ownership, and Docker workload mappings. Nothing becomes trusted until you approve it; unchecked listeners remain visible for individual review.</p>
+		<p>These are high-confidence suggestions derived from platform roles, current process or system-service ownership, and Docker workload mappings. Nothing becomes trusted until you approve it; unchecked listeners remain visible for individual review.</p>
 		<div className="baseline-suggestion-list">
 		  {baselineSuggestions.map((suggestion) => <label className="baseline-suggestion" key={suggestion.id}><input type="checkbox" checked={selectedSuggestions.has(suggestion.id)} disabled={busy} onChange={(event) => setSelectedSuggestions((current) => { const next = new Set(current); if (event.target.checked) next.add(suggestion.id); else next.delete(suggestion.id); return next; })} /><span><strong>{suggestion.title}</strong><small>{suggestion.description}</small></span><em>{suggestion.listenerKeys.length} listener{suggestion.listenerKeys.length === 1 ? "" : "s"}</em></label>)}
 		</div>
@@ -634,33 +676,33 @@ function ConnectionsPanel({ deviceId, operatingSystem, connections, workloads, e
 		  return <article className={`service-card ${expectation ? "expected" : listener.bindScope === "local" ? "local" : "review"}`} key={listener.key}>
 			<div className="service-card-heading"><div><span className="protocol">{listener.protocol}</span><strong>Port {listener.port}</strong></div><StatusChip label={expectation ? "expected" : recentlyAppeared ? "new · unreviewed" : listener.bindScope === "local" ? "local only" : "unreviewed"} tone={expectation ? "healthy" : listener.bindScope === "local" ? "configured" : "attention"} /></div>
 			<h3>{expectation?.label || (attributions.length === 1 ? attributions[0].workload.name : `${listener.protocol} service on port ${listener.port}`)}</h3>
-			<dl><div><dt>Bind scope</dt><dd>{bindScopeLabel(listener.bindScope)}</dd></div><div><dt>State</dt><dd>{listener.state}</dd></div><div><dt>Addresses</dt><dd className="endpoint">{listener.addresses.join(", ") || "Not reported"}</dd></div>{listener.processes.length > 0 && <div><dt>Host process</dt><dd>{listener.processes.join(", ")}</dd></div>}{attributions.length > 0 && <><div><dt>Runtime owner</dt><dd>{attributions.map(({ workload }) => workload.name).join(", ")}</dd></div><div><dt>Docker mapping</dt><dd className="endpoint">{attributions.flatMap(({ bindings }) => bindings).map(formatPortBinding).join(", ")}</dd></div></>}</dl>
+			<dl><div><dt>Bind scope</dt><dd>{bindScopeLabel(listener.bindScope)}</dd></div><div><dt>State</dt><dd>{listener.state}</dd></div><div><dt>Addresses</dt><dd className="endpoint">{listener.addresses.join(", ") || "Not reported"}</dd></div>{listener.processes.length > 0 && <div><dt>Host process</dt><dd>{listener.processes.join(", ")}</dd></div>}{listener.systemdUnits.length > 0 && <div><dt>System service</dt><dd>{listener.systemdUnits.join(", ")}</dd></div>}{attributions.length > 0 && <><div><dt>Runtime owner</dt><dd>{attributions.map(({ workload }) => workload.name).join(", ")}</dd></div><div><dt>Docker mapping</dt><dd className="endpoint">{attributions.flatMap(({ bindings }) => bindings).map(formatPortBinding).join(", ")}</dd></div></>}</dl>
 			<p>{observation ? `First observed ${formatDate(observation.firstSeenAt)} · continuously present since ${formatDate(observation.appearedAt)} · last confirmed ${formatRelativeTime(observation.lastSeenAt)}` : "Appearance history will begin with the next agent report."}{listener.rawCount > 1 ? ` · ${listener.rawCount} raw sockets grouped` : ""}</p>
 			{expectation ? <button className="secondary-action" type="button" disabled={busy} onClick={() => removeExpectation(expectation)}>Remove expectation</button> : <button className="secondary-action" type="button" disabled={busy} onClick={() => markExpected(listener)}>Mark expected…</button>}
 		  </article>;
 		})}
 	  </div>}
-	  {view === "active" && <div className="table-wrap compact-table"><table><thead><tr><th>Protocol</th><th>Local endpoint</th><th>Remote endpoint</th><th>Process</th><th>State</th></tr></thead><tbody>{active.length === 0 ? <tr><td colSpan={5} className="empty-state">No established TCP connections were returned.</td></tr> : active.map((connection) => <tr key={`${connection.protocol}-${connection.processId}-${connection.localAddress}-${connection.localPort}-${connection.remoteAddress}-${connection.remotePort}`}><td className="protocol">{connection.protocol}</td><td className="endpoint">{endpoint(connection.localAddress, connection.localPort)}</td><td className="endpoint">{endpoint(connection.remoteAddress, connection.remotePort)}</td><td>{connection.processName || "Not attributed"}{connection.processId > 0 ? ` · PID ${connection.processId}` : ""}</td><td className="state">{connection.state}</td></tr>)}</tbody></table></div>}
+	  {view === "active" && <div className="table-wrap compact-table"><table><thead><tr><th>Protocol</th><th>Local endpoint</th><th>Remote endpoint</th><th>Owner</th><th>State</th></tr></thead><tbody>{active.length === 0 ? <tr><td colSpan={5} className="empty-state">No established TCP connections were returned.</td></tr> : active.map((connection) => <tr key={`${connection.protocol}-${connection.processId}-${connection.localAddress}-${connection.localPort}-${connection.remoteAddress}-${connection.remotePort}`}><td className="protocol">{connection.protocol}</td><td className="endpoint">{endpoint(connection.localAddress, connection.localPort)}</td><td className="endpoint">{endpoint(connection.remoteAddress, connection.remotePort)}</td><td>{connection.processName || connection.systemdUnit || "Not attributed"}{connection.processId > 0 ? ` · PID ${connection.processId}` : ""}</td><td className="state">{connection.state}</td></tr>)}</tbody></table></div>}
 	  <details className="expectation-registry">
 		<summary>Manage expected-service registry ({expectedServices.length})</summary>
 		<p>Expectations are local HAVEN metadata. They do not open ports or change firewall rules.</p>
 		<form className="expectation-form" onSubmit={addManual}><label><span>Friendly label</span><input maxLength={80} value={manualLabel} onChange={(event) => setManualLabel(event.target.value)} placeholder="SSH" /></label><label><span>Protocol</span><select value={manualProtocol} onChange={(event) => setManualProtocol(event.target.value as "TCP" | "UDP")}><option>TCP</option><option>UDP</option></select></label><label><span>Port</span><input type="number" min={1} max={65535} value={manualPort} onChange={(event) => setManualPort(event.target.value)} placeholder="22" /></label><label><span>Expected bind</span><select value={manualScope} onChange={(event) => setManualScope(event.target.value as BindScope)}><option value="any">Any bind</option><option value="local">This host only</option><option value="private">Private address</option><option value="wildcard">All interfaces</option><option value="specific">Specific address</option></select></label><button type="submit" disabled={busy || !manualLabel.trim() || !manualPort}>Add expectation</button></form>
-		{expectedServices.length > 0 && <ul className="registry-list">{expectedServices.map((service) => <li key={service.id}><span><strong>{service.label}</strong><small>{service.protocol} {service.portEnd > service.port ? `${service.port}–${service.portEnd}` : service.port} · {bindScopeLabel(service.bindScope)}{service.processNames?.length ? ` · processes: ${service.processNames.join(", ")}` : ""}{service.workloadNames?.length ? ` · workloads: ${service.workloadNames.join(", ")}` : ""}</small></span><button type="button" disabled={busy} onClick={() => removeExpectation(service)}>Remove</button></li>)}</ul>}
+		{expectedServices.length > 0 && <ul className="registry-list">{expectedServices.map((service) => <li key={service.id}><span><strong>{service.label}</strong><small>{service.protocol} {service.portEnd > service.port ? `${service.port}–${service.portEnd}` : service.port} · {bindScopeLabel(service.bindScope)}{service.processNames?.length ? ` · processes: ${service.processNames.join(", ")}` : ""}{service.workloadNames?.length ? ` · workloads: ${service.workloadNames.join(", ")}` : ""}{service.systemdUnits?.length ? ` · services: ${service.systemdUnits.join(", ")}` : ""}</small></span><button type="button" disabled={busy} onClick={() => removeExpectation(service)}>Remove</button></li>)}</ul>}
 	  </details>
 	  <details className="raw-endpoints">
 		<summary>Raw technical details ({connections.length})</summary>
 		<label className="search-field"><span className="sr-only">Filter raw endpoints</span><input type="search" placeholder="Filter protocol, scope, address, or state" autoComplete="off" value={filter} onChange={(event) => setFilter(event.target.value)} /></label>
-		{!processAttributionAvailable && connections.length > 0 && <p className="footnote">Process attribution is unavailable to this least-privilege agent, so HAVEN omits the repetitive empty owner column.</p>}
+		{!ownerAttributionAvailable && connections.length > 0 && <p className="footnote">Process and system-service attribution are unavailable to this least-privilege agent, so HAVEN omits the repetitive empty owner column.</p>}
 		<div className="table-wrap">
         <table>
-		  <thead><tr><th>Protocol</th>{processAttributionAvailable && <th>Process</th>}<th>Local endpoint</th><th>Remote endpoint</th><th>Bind scope</th><th>State</th></tr></thead>
+		  <thead><tr><th>Protocol</th>{ownerAttributionAvailable && <th>Owner</th>}<th>Local endpoint</th><th>Remote endpoint</th><th>Bind scope</th><th>State</th></tr></thead>
           <tbody>
             {filtered.length === 0 ? (
-			  <tr><td colSpan={processAttributionAvailable ? 6 : 5} className="empty-state">{connections.length ? "No endpoints match this filter." : "No network endpoints were returned."}</td></tr>
+			  <tr><td colSpan={ownerAttributionAvailable ? 6 : 5} className="empty-state">{connections.length ? "No endpoints match this filter." : "No network endpoints were returned."}</td></tr>
             ) : filtered.map((connection) => (
               <tr key={`${connection.protocol}-${connection.processId}-${connection.localAddress}-${connection.localPort}-${connection.remoteAddress}-${connection.remotePort}-${connection.state}`}>
                 <td className="protocol">{connection.protocol}</td>
-				{processAttributionAvailable && <td><div className="process-name">{connection.processName || "Not attributed"}</div>{connection.processId > 0 && <div className="process-id">PID {connection.processId}</div>}</td>}
+				{ownerAttributionAvailable && <td><div className="process-name">{connection.processName || connection.systemdUnit || "Not attributed"}</div>{connection.processName && connection.systemdUnit && <div className="process-id">{connection.systemdUnit}</div>}{connection.processId > 0 && <div className="process-id">PID {connection.processId}</div>}</td>}
                 <td className="endpoint">{endpoint(connection.localAddress, connection.localPort)}</td>
 				<td className="endpoint">{["listen", "open", "bound"].includes(connection.state.toLowerCase()) ? "—" : endpoint(connection.remoteAddress, connection.remotePort)}</td>
                 <td className="scope">{endpointScope(connection)}</td>
@@ -898,7 +940,7 @@ function Application({ snapshot, devices, events, runtime, selectedDevice, selec
 		<FirewallPanel profiles={snapshot.firewallProfiles} isLinux={isLinux} />
 		<ConnectionsPanel deviceId={selectedDevice?.id || snapshot.device.deviceId || ""} operatingSystem={snapshot.device.operatingSystem} connections={snapshot.connections} workloads={workloadInventory} expectedServices={expectedServices} observations={listenerObservations} saveExpectation={saveServiceExpectation} saveExpectations={saveServiceExpectations} removeExpectation={removeServiceExpectation} busy={actionBusy} />
       </main>
-	  <footer><span>HAVEN milestone 0.7.4 · Baseline review</span><span>Observe continuously. Act deliberately.</span></footer>
+	  <footer><span>HAVEN milestone 0.7.5 · Linux service attribution</span><span>Observe continuously. Act deliberately.</span></footer>
     </>
   );
 }
@@ -1155,17 +1197,17 @@ export function App() {
     return () => controller.abort();
   }, [authentication?.authenticated, refresh]);
 
-  useEffect(() => {
-    if (!authentication?.authenticated || demoMode) return;
+	useEffect(() => {
+		if (!authentication?.authenticated || !inventoryLoaded || demoMode) return;
     const controller = new AbortController();
     void loadControls(selectedId, controller.signal).catch((reason) => {
       if (!(reason instanceof DOMException && reason.name === "AbortError")) setError(reason instanceof Error ? reason.message : "The action center could not be loaded.");
     });
     return () => controller.abort();
-  }, [authentication?.authenticated, demoMode, loadControls, selectedId]);
+	}, [authentication?.authenticated, demoMode, inventoryLoaded, loadControls, selectedId]);
 
-  useEffect(() => {
-    if (!authentication?.authenticated || demoMode) return;
+	useEffect(() => {
+		if (!authentication?.authenticated || !inventoryLoaded || demoMode) return;
     const controller = new AbortController();
     const pollControls = async () => {
       try {
@@ -1178,7 +1220,7 @@ export function App() {
     };
     const interval = window.setInterval(() => void pollControls(), 10_000);
     return () => { controller.abort(); window.clearInterval(interval); };
-  }, [authentication?.authenticated, demoMode]);
+	}, [authentication?.authenticated, demoMode, inventoryLoaded]);
 
   useEffect(() => {
     if (!authentication?.authenticated) return;

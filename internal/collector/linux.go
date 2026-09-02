@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"context"
 	"errors"
+	"fmt"
 	"net"
 	"os"
 	"path/filepath"
@@ -344,8 +345,8 @@ func (collector *LinuxCollector) connections(ctx context.Context, notices *[]mod
 		protocol  string
 		arguments []string
 	}{
-		{protocol: "TCP", arguments: []string{"-H", "-tanp"}},
-		{protocol: "UDP", arguments: []string{"-H", "-uanp"}},
+		{protocol: "TCP", arguments: []string{"-H", "-tanpe"}},
+		{protocol: "UDP", arguments: []string{"-H", "-uanpe"}},
 	}
 	for _, query := range queries {
 		output, err := collector.runner.Run(ctx, "ss", query.arguments...)
@@ -355,6 +356,11 @@ func (collector *LinuxCollector) connections(ctx context.Context, notices *[]mod
 		}
 		for _, line := range strings.Split(string(output), "\n") {
 			if connection, ok := parseSSLine(line, query.protocol); ok {
+				if connection.SystemdUnit == "" && connection.ProcessID > 0 {
+					if cgroup, readErr := collector.readFile(fmt.Sprintf("/proc/%d/cgroup", connection.ProcessID)); readErr == nil {
+						connection.SystemdUnit = parseProcSystemdUnit(string(cgroup))
+					}
+				}
 				connections = append(connections, connection)
 				if len(connections) == 250 {
 					return connections
@@ -445,7 +451,51 @@ func parseSSLine(line, protocol string) (model.NetworkConnection, bool) {
 		}
 		connection.ProcessID, _ = strconv.Atoi(value)
 	}
+	connection.SystemdUnit = parseSystemdUnit(processFields)
 	return connection, true
+}
+
+func parseSystemdUnit(value string) string {
+	for _, field := range strings.Fields(value) {
+		path, found := strings.CutPrefix(field, "cgroup:")
+		if !found {
+			continue
+		}
+		if unit := parseSystemdPath(path); unit != "" {
+			return unit
+		}
+	}
+	return ""
+}
+
+func parseProcSystemdUnit(value string) string {
+	for _, line := range strings.Split(value, "\n") {
+		fields := strings.SplitN(line, ":", 3)
+		if len(fields) == 3 {
+			if unit := parseSystemdPath(fields[2]); unit != "" {
+				return unit
+			}
+		}
+	}
+	return ""
+}
+
+func parseSystemdPath(path string) string {
+	segments := strings.Split(strings.Trim(path, " /"), "/")
+	for index := len(segments) - 1; index >= 0; index-- {
+		unit := sanitizeSystemdUnitName(segments[index])
+		if isGenericUserManagerUnit(unit) {
+			continue
+		}
+		if strings.HasSuffix(unit, ".service") || strings.HasSuffix(unit, ".socket") {
+			return unit
+		}
+	}
+	return ""
+}
+
+func isGenericUserManagerUnit(unit string) bool {
+	return strings.HasPrefix(unit, "user@") && strings.HasSuffix(unit, ".service")
 }
 
 func sanitizeSystemdUnitName(value string) string {

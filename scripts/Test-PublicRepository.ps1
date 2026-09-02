@@ -89,8 +89,15 @@ try {
                 continue
             }
 
+			# A systemd template instance such as worker@8081.service resembles an
+			# email address. Remove only validated unit-name tokens before applying
+			# the email check; every other secret and address check still sees the
+			# original line.
+			$emailCheckLine = $line -replace '(?i)\b[A-Z0-9_.-]+@[A-Z0-9_.:-]+\.(?:service|socket)\b', ''
+
             foreach ($check in $checks) {
-                if ($line -match $check.Pattern) {
+				$checkedLine = if ($check.Name -eq 'non-example email address') { $emailCheckLine } else { $line }
+				if ($checkedLine -match $check.Pattern) {
                     $findings.Add("$relativePath`:$lineNumber`: $($check.Name)")
                 }
             }

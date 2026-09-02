@@ -125,6 +125,7 @@ export interface NetworkConnection {
   state: string;
   processId: number;
   processName: string;
+  systemdUnit?: string;
 }
 
 export type BindScope = "any" | "local" | "private" | "wildcard" | "specific";
@@ -138,6 +139,7 @@ export interface ExpectedServiceInput {
   bindScope: BindScope;
   processNames: string[];
   workloadNames: string[];
+  systemdUnits: string[];
 }
 
 export interface ExpectedService {
@@ -150,6 +152,7 @@ export interface ExpectedService {
   bindScope: BindScope;
   processNames: string[];
   workloadNames: string[];
+  systemdUnits: string[];
   createdAt: string;
   updatedAt: string;
 }

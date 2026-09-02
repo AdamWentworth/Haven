@@ -245,6 +245,7 @@ type NetworkConnection struct {
 	State         string `json:"state"`
 	ProcessID     int    `json:"processId"`
 	ProcessName   string `json:"processName"`
+	SystemdUnit   string `json:"systemdUnit,omitempty"`
 }
 
 type CollectorNotice struct {

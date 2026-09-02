@@ -334,7 +334,7 @@ func TestServiceInventoryGroupsListenersAndTracksExpectations(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if updated.ID != expected.ID || updated.Label != "Web proxy" || updated.PortEnd != 443 || len(updated.ProcessNames) != 0 || len(updated.WorkloadNames) != 0 {
+	if updated.ID != expected.ID || updated.Label != "Web proxy" || updated.PortEnd != 443 || len(updated.ProcessNames) != 0 || len(updated.WorkloadNames) != 0 || len(updated.SystemdUnits) != 0 {
 		t.Fatalf("expected the same endpoint classification to update in place, got %#v", updated)
 	}
 
@@ -388,7 +388,7 @@ func TestExpectedServiceBatchSupportsOwnerConstrainedRanges(t *testing.T) {
 
 	services, err := store.UpsertExpectedServices(ctx, []ExpectedService{
 		{DeviceID: "baseline-test", Label: "Windows dynamic RPC services", Protocol: "tcp", Port: 49152, PortEnd: 65535, BindScope: BindScopeWildcard, ProcessNames: []string{"svchost.exe", "SYSTEM", "svchost"}, UpdatedAt: now},
-		{DeviceID: "baseline-test", Label: "HAVEN HTTPS console", Protocol: "TCP", Port: 8443, BindScope: BindScopePrivate, WorkloadNames: []string{"HAVEN_PROXY", "haven_proxy"}, UpdatedAt: now},
+		{DeviceID: "baseline-test", Label: "HAVEN HTTPS console", Protocol: "TCP", Port: 8443, BindScope: BindScopePrivate, WorkloadNames: []string{"HAVEN_PROXY", "haven_proxy"}, SystemdUnits: []string{"HAVEN-PROXY.SERVICE", "haven-proxy.service"}, UpdatedAt: now},
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -396,7 +396,7 @@ func TestExpectedServiceBatchSupportsOwnerConstrainedRanges(t *testing.T) {
 	if len(services) != 2 {
 		t.Fatalf("expected two baseline classifications, got %#v", services)
 	}
-	if services[0].Port != 8443 || services[0].PortEnd != 8443 || len(services[0].WorkloadNames) != 1 || services[0].WorkloadNames[0] != "haven_proxy" {
+	if services[0].Port != 8443 || services[0].PortEnd != 8443 || len(services[0].WorkloadNames) != 1 || services[0].WorkloadNames[0] != "haven_proxy" || len(services[0].SystemdUnits) != 1 || services[0].SystemdUnits[0] != "haven-proxy.service" {
 		t.Fatalf("expected a canonical workload-owned exact service, got %#v", services[0])
 	}
 	if services[1].Port != 49152 || services[1].PortEnd != 65535 || len(services[1].ProcessNames) != 2 || services[1].ProcessNames[0] != "svchost" || services[1].ProcessNames[1] != "system" {
@@ -458,7 +458,7 @@ func TestExpectedServiceMigrationPreservesVersionSevenRows(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(services) != 1 || services[0].ID != "svc_existing" || services[0].Port != 443 || services[0].PortEnd != 443 || len(services[0].ProcessNames) != 0 || len(services[0].WorkloadNames) != 0 {
+	if len(services) != 1 || services[0].ID != "svc_existing" || services[0].Port != 443 || services[0].PortEnd != 443 || len(services[0].ProcessNames) != 0 || len(services[0].WorkloadNames) != 0 || len(services[0].SystemdUnits) != 0 {
 		t.Fatalf("expected the version-seven classification to survive migration, got %#v", services)
 	}
 }

@@ -284,6 +284,37 @@ var migrations = []migration{
 				ON expected_services (device_id, protocol, port, port_end)`,
 		},
 	},
+	{
+		version: 9,
+		statements: []string{
+			`CREATE TABLE expected_services_v3 (
+				id TEXT PRIMARY KEY,
+				device_id TEXT NOT NULL REFERENCES devices(id) ON DELETE CASCADE,
+				label TEXT NOT NULL,
+				protocol TEXT NOT NULL,
+				port INTEGER NOT NULL,
+				port_end INTEGER NOT NULL,
+				bind_scope TEXT NOT NULL,
+				process_names TEXT NOT NULL DEFAULT '[]',
+				workload_names TEXT NOT NULL DEFAULT '[]',
+				systemd_units TEXT NOT NULL DEFAULT '[]',
+				created_at TEXT NOT NULL,
+				updated_at TEXT NOT NULL,
+				UNIQUE (device_id, protocol, port, port_end, bind_scope, process_names, workload_names, systemd_units)
+			)`,
+			`INSERT INTO expected_services_v3 (
+				id, device_id, label, protocol, port, port_end, bind_scope,
+				process_names, workload_names, systemd_units, created_at, updated_at
+			 )
+			 SELECT id, device_id, label, protocol, port, port_end, bind_scope,
+				process_names, workload_names, '[]', created_at, updated_at
+			 FROM expected_services`,
+			`DROP TABLE expected_services`,
+			`ALTER TABLE expected_services_v3 RENAME TO expected_services`,
+			`CREATE INDEX expected_services_device
+				ON expected_services (device_id, protocol, port, port_end)`,
+		},
+	},
 }
 
 func Open(ctx context.Context, path string) (*Store, error) {
@@ -888,11 +919,15 @@ func (store *Store) SeedSyntheticDevices(ctx context.Context, count int, now tim
 			}
 			if strings.Contains(platform.operatingSystem, "Server") {
 				snapshot.Connections = []model.NetworkConnection{
-					{Protocol: "TCP", LocalAddress: "0.0.0.0", LocalPort: 22, State: "Listen", ProcessID: 992, ProcessName: "sshd"},
+					{Protocol: "TCP", LocalAddress: "0.0.0.0", LocalPort: 22, State: "Listen", ProcessID: 992, ProcessName: "sshd", SystemdUnit: "ssh.service"},
+					{Protocol: "TCP", LocalAddress: "127.0.0.53", LocalPort: 53, State: "Listen", SystemdUnit: "systemd-resolved.service"},
 					{Protocol: "TCP", LocalAddress: "0.0.0.0", LocalPort: 8081, State: "Listen", ProcessID: 0, ProcessName: ""},
+					{Protocol: "TCP", LocalAddress: "127.0.0.1", LocalPort: 8081, State: "Listen", SystemdUnit: "binderledger-localhost-proxy@8081.service"},
 					{Protocol: "TCP", LocalAddress: "0.0.0.0", LocalPort: 8443, State: "Listen", ProcessID: 0, ProcessName: ""},
 					{Protocol: "TCP", LocalAddress: "127.0.0.1", LocalPort: 5432, State: "Listen", ProcessID: 1440, ProcessName: "postgres"},
-					{Protocol: "UDP", LocalAddress: "0.0.0.0", LocalPort: 5353, State: "Bound", ProcessID: 847, ProcessName: "avahi-daemon"},
+					{Protocol: "TCP", LocalAddress: "127.0.0.1", LocalPort: 33509, State: "Listen", SystemdUnit: "containerd.service"},
+					{Protocol: "UDP", LocalAddress: "127.0.0.53", LocalPort: 53, State: "Bound", SystemdUnit: "systemd-resolved.service"},
+					{Protocol: "UDP", LocalAddress: "0.0.0.0", LocalPort: 5353, State: "Bound", ProcessID: 847, ProcessName: "avahi-daemon", SystemdUnit: "avahi-daemon.service"},
 					{Protocol: "UDP", LocalAddress: "0.0.0.0", LocalPort: 51822, State: "Bound", ProcessID: 0, ProcessName: ""},
 				}
 				snapshot.LinuxBaseline.Workloads = &model.WorkloadInventory{

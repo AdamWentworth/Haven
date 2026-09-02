@@ -312,9 +312,9 @@ func TestExpectedServiceBatchEndpoint(t *testing.T) {
 	}
 
 	request := httptest.NewRecorder()
-	body := strings.NewReader(`{"deviceId":"test-device","services":[{"label":"Windows dynamic RPC services","protocol":"TCP","port":49152,"portEnd":65535,"bindScope":"wildcard","processNames":["svchost.exe","SYSTEM"],"workloadNames":[]},{"label":"HAVEN HTTPS console","protocol":"TCP","port":8443,"portEnd":8443,"bindScope":"private","processNames":[],"workloadNames":["haven_proxy"]}]}`)
+	body := strings.NewReader(`{"deviceId":"test-device","services":[{"label":"Windows dynamic RPC services","protocol":"TCP","port":49152,"portEnd":65535,"bindScope":"wildcard","processNames":["svchost.exe","SYSTEM"],"workloadNames":[],"systemdUnits":[]},{"label":"HAVEN HTTPS console","protocol":"TCP","port":8443,"portEnd":8443,"bindScope":"private","processNames":[],"workloadNames":["haven_proxy"],"systemdUnits":["haven-proxy.service"]}]}`)
 	server.Handler().ServeHTTP(request, httptest.NewRequest(http.MethodPost, "/api/expected-services/batch", body))
-	if request.Code != http.StatusOK || !strings.Contains(request.Body.String(), `"portEnd":65535`) || !strings.Contains(request.Body.String(), `"workloadNames":["haven_proxy"]`) {
+	if request.Code != http.StatusOK || !strings.Contains(request.Body.String(), `"portEnd":65535`) || !strings.Contains(request.Body.String(), `"workloadNames":["haven_proxy"]`) || !strings.Contains(request.Body.String(), `"systemdUnits":["haven-proxy.service"]`) {
 		t.Fatalf("unexpected expected-service batch response: %d %s", request.Code, request.Body.String())
 	}
 
