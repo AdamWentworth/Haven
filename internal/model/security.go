@@ -47,11 +47,12 @@ type LinuxFirewallStatus struct {
 }
 
 type LinuxSSHStatus struct {
-	ServerRunning           *bool  `json:"serverRunning"`
-	PasswordAuthentication  string `json:"passwordAuthentication,omitempty"`
-	PermitRootLogin         string `json:"permitRootLogin,omitempty"`
-	PublicKeyAuthentication string `json:"publicKeyAuthentication,omitempty"`
-	FailedLoginCount24Hours *int   `json:"failedLoginCount24Hours"`
+	ServerRunning                     *bool  `json:"serverRunning"`
+	PasswordAuthentication            string `json:"passwordAuthentication,omitempty"`
+	KeyboardInteractiveAuthentication string `json:"keyboardInteractiveAuthentication,omitempty"`
+	PermitRootLogin                   string `json:"permitRootLogin,omitempty"`
+	PublicKeyAuthentication           string `json:"publicKeyAuthentication,omitempty"`
+	FailedLoginCount24Hours           *int   `json:"failedLoginCount24Hours"`
 }
 
 type LinuxServiceStatus struct {

@@ -159,9 +159,11 @@ func (collector *LinuxCollector) ssh(ctx context.Context, notices *[]model.Colle
 
 	settings, effective := collector.effectiveSSHSettings(ctx)
 	status.PasswordAuthentication = settings["passwordauthentication"]
+	status.KeyboardInteractiveAuthentication = settings["kbdinteractiveauthentication"]
 	status.PermitRootLogin = settings["permitrootlogin"]
 	status.PublicKeyAuthentication = settings["pubkeyauthentication"]
-	if !effective && status.ServerRunning != nil && *status.ServerRunning {
+	if !effective && status.ServerRunning != nil && *status.ServerRunning &&
+		(status.PasswordAuthentication == "" || status.KeyboardInteractiveAuthentication == "" || status.PermitRootLogin == "" || status.PublicKeyAuthentication == "") {
 		addNotice(notices, "OpenSSH", "information", "HAVEN read explicit SSH configuration but could not calculate every effective default without privileged host-key access.")
 	}
 	return status
@@ -213,7 +215,7 @@ func (collector *LinuxCollector) readSSHConfig(path string, settings map[string]
 			}
 			continue
 		}
-		if key != "passwordauthentication" && key != "permitrootlogin" && key != "pubkeyauthentication" {
+		if key != "passwordauthentication" && key != "kbdinteractiveauthentication" && key != "permitrootlogin" && key != "pubkeyauthentication" {
 			continue
 		}
 		if _, exists := settings[key]; !exists {
@@ -380,7 +382,7 @@ func parseSSHOutput(output []byte) map[string]string {
 			continue
 		}
 		key := strings.ToLower(fields[0])
-		if key == "passwordauthentication" || key == "permitrootlogin" || key == "pubkeyauthentication" {
+		if key == "passwordauthentication" || key == "kbdinteractiveauthentication" || key == "permitrootlogin" || key == "pubkeyauthentication" {
 			values[key] = strings.ToLower(fields[1])
 		}
 	}

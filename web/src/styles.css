@@ -81,9 +81,10 @@ main, footer { width: min(1180px, 92vw); margin-inline: auto; }
 .device-detail, .section-heading > p, .summary-card p, .footnote { color: var(--muted); }
 .device-detail { margin-bottom: 0; }
 .collection-time { flex: 0 0 auto; padding-bottom: .25rem; text-align: right; }
-.collection-time span, .collection-time strong { display: block; }
+.collection-time span, .collection-time strong, .collection-time time { display: block; }
 .collection-time span { color: var(--muted); font-size: .72rem; letter-spacing: .1em; text-transform: uppercase; }
-.collection-time strong { margin-top: .28rem; font-size: .88rem; }
+.collection-time strong { margin-top: .28rem; color: var(--green); font-size: .94rem; }
+.collection-time time { margin-top: .2rem; color: var(--muted); font-size: .68rem; }
 
 .summary-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 1rem; }
 .summary-card, .panel { border: 1px solid var(--line); background: var(--surface); box-shadow: var(--shadow); backdrop-filter: blur(18px); }
@@ -170,11 +171,14 @@ main, footer { width: min(1180px, 92vw); margin-inline: auto; }
 .activity-marker { display: grid; width: 2.35rem; height: 2.35rem; place-items: center; border-radius: 50%; color: var(--amber); background: rgba(244, 191, 103, .09); }
 .activity-item.severity-high .activity-marker { color: var(--red); background: rgba(255, 139, 123, .09); }
 .activity-item.resolved .activity-marker { color: var(--green); background: rgba(115, 226, 167, .09); }
+.activity-item.resolved { opacity: .78; }
 .activity-copy { min-width: 0; }
 .activity-heading { display: flex; align-items: center; justify-content: space-between; gap: 1rem; }
 .activity-heading p { margin: 0 0 .18rem; color: var(--muted); font-size: .66rem; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
 .activity-heading h3 { margin: 0; font-size: .94rem; }
 .activity-copy > p { margin: .5rem 0 .35rem; color: #c4d2cb; font-size: .8rem; line-height: 1.5; }
+.activity-copy > p strong { color: #e6f2eb; }
+.activity-item.resolved .activity-copy > p strong { color: var(--green); }
 .activity-copy time { color: var(--muted); font-size: .68rem; }
 .activity-empty { display: grid; gap: .35rem; margin: 1rem 0 0; padding: 1rem; border: 1px dashed var(--line-bright); border-radius: .8rem; color: var(--muted); font-size: .82rem; line-height: 1.5; }
 .activity-empty strong { color: #dceae2; }

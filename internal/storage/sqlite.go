@@ -840,7 +840,7 @@ func (store *Store) SeedSyntheticDevices(ctx context.Context, count int, now tim
 			snapshot.LinuxBaseline = &model.LinuxBaseline{
 				Updates:          &model.LinuxUpdateStatus{PendingPackageCount: &pendingPackages, PendingSecurityPackageCount: &pendingSecurityPackages, PendingReboot: &pendingReboot},
 				Firewall:         &model.LinuxFirewallStatus{Provider: "ufw", Active: &enabled, DefaultInboundAction: "Block", DefaultOutboundAction: "Allow"},
-				SSH:              &model.LinuxSSHStatus{ServerRunning: &active, PasswordAuthentication: "no", PermitRootLogin: "prohibit-password", PublicKeyAuthentication: "yes"},
+				SSH:              &model.LinuxSSHStatus{ServerRunning: &active, PasswordAuthentication: "no", KeyboardInteractiveAuthentication: "no", PermitRootLogin: "prohibit-password", PublicKeyAuthentication: "yes"},
 				Services:         &model.LinuxServiceStatus{FailedUnitCount: &failedUnits},
 				AutomaticUpdates: &model.LinuxAutomaticUpdateStatus{Enabled: &active, Active: &active},
 				AppArmor:         &model.LinuxAppArmorStatus{Enabled: &active},
@@ -1258,6 +1258,8 @@ func scanDevice(row rowScanner, now time.Time) (model.DeviceRecord, error) {
 	return device, nil
 }
 
+const enrolledDeviceStaleAfter = 20 * time.Minute
+
 func deviceStatus(device model.DeviceRecord, now time.Time) string {
 	if device.RevokedAt != nil || device.TrustState == "revoked" {
 		return "revoked"
@@ -1265,7 +1267,7 @@ func deviceStatus(device model.DeviceRecord, now time.Time) string {
 	if device.LastSeenAt == nil {
 		return "awaiting-first-report"
 	}
-	if now.UTC().Sub(device.LastSeenAt.UTC()) > 15*time.Minute {
+	if now.UTC().Sub(device.LastSeenAt.UTC()) > enrolledDeviceStaleAfter {
 		return "stale"
 	}
 	return "current"

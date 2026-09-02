@@ -34,7 +34,7 @@ PostgreSQL becomes appropriate if HAVEN needs multiple hub writers, multiple hub
 
 ## Current milestone boundary
 
-Milestone 0.7.1 extends the authenticated native-agent hub with privacy-bounded service exposure review:
+Milestone 0.7.2 extends the authenticated native-agent hub with privacy-bounded service exposure review and explicit freshness/lifecycle presentation:
 
 - `haven-hub` serves a loopback dashboard, owns SQLite, and exposes a separate loopback TLS 1.3 agent listener. Native development may enable local collection; a containerized production hub disables it and never treats its ephemeral container hostname as a device.
 - Enrollment uses a short-lived, one-time 256-bit token plus an ECDSA P-256 certificate request. The trusted CA certificate is transferred out of band.

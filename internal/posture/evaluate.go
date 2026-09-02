@@ -108,21 +108,22 @@ func evaluateLinuxSSH(snapshot *model.SecuritySnapshot) {
 	}
 	rootLogin := strings.ToLower(ssh.PermitRootLogin)
 	passwordAuthentication := strings.ToLower(ssh.PasswordAuthentication)
+	keyboardInteractiveAuthentication := strings.ToLower(ssh.KeyboardInteractiveAuthentication)
 	if rootLogin == "yes" {
 		addCheck(snapshot, "linux-ssh", "Remote access", "OpenSSH", "attention", "SSH permits direct root login.", "permitrootlogin yes")
 		addFinding(snapshot, "linux-ssh-root-login", "Remote access", "SSH permits direct root login", "high", "The SSH daemon reports that direct root login is permitted.", "Disable direct root login, use an accountable non-root administrator, and elevate only when required.")
 		return
 	}
-	if passwordAuthentication == "yes" {
-		addCheck(snapshot, "linux-ssh", "Remote access", "OpenSSH", "attention", "SSH password authentication is enabled.", "Public-key authentication: "+fallback(ssh.PublicKeyAuthentication, "not verified"))
-		addFinding(snapshot, "linux-ssh-passwords", "Remote access", "SSH password authentication is enabled", "medium", "The SSH daemon accepts passwords in addition to any configured keys.", "Confirm that key-based access works, then disable SSH password authentication and retain a tested recovery path.")
+	if passwordAuthentication == "yes" || keyboardInteractiveAuthentication == "yes" {
+		addCheck(snapshot, "linux-ssh", "Remote access", "OpenSSH", "attention", "SSH password-capable authentication is enabled.", "Password authentication "+fallback(passwordAuthentication, "not verified")+"; keyboard-interactive "+fallback(keyboardInteractiveAuthentication, "not verified")+"; public-key authentication "+fallback(ssh.PublicKeyAuthentication, "not verified"))
+		addFinding(snapshot, "linux-ssh-passwords", "Remote access", "SSH password-capable authentication is enabled", "medium", "The SSH daemon accepts password or keyboard-interactive authentication in addition to any configured keys.", "Confirm that key-based access works, then disable password and keyboard-interactive authentication while retaining a tested recovery path.")
 		return
 	}
-	if passwordAuthentication == "" || rootLogin == "" {
+	if passwordAuthentication == "" || keyboardInteractiveAuthentication == "" || rootLogin == "" {
 		addCheck(snapshot, "linux-ssh", "Remote access", "OpenSSH", "unknown", "SSH is running, but all effective authentication settings could not be verified without additional read-only privilege.", "No usernames, keys, or login source addresses are collected")
 		return
 	}
-	evidence := "Password authentication " + passwordAuthentication + "; root login " + rootLogin
+	evidence := "Password authentication " + passwordAuthentication + "; keyboard-interactive " + keyboardInteractiveAuthentication + "; root login " + rootLogin
 	if ssh.FailedLoginCount24Hours != nil {
 		evidence += fmt.Sprintf("; %d failed login event(s) in 24h", *ssh.FailedLoginCount24Hours)
 	}

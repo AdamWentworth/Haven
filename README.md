@@ -4,9 +4,9 @@
 
 HAVEN is a personal security observatory for home devices and networks. It presents native operating-system protections in one understandable console without trying to replace Microsoft Defender, host firewalls, or other trusted security controls.
 
-HAVEN is pre-release software. The current milestone adds explainable service exposure review to the authenticated, resource-constrained Ubuntu hub deployment; it is not a replacement for native protection.
+HAVEN is pre-release software. The current milestone makes observation freshness and finding lifecycles explicit in the authenticated, resource-constrained Ubuntu hub deployment; it is not a replacement for native protection.
 
-## Milestone 0.7.1 — Service Exposure Review
+## Milestone 0.7.2 — Freshness and Lifecycle Clarity
 
 The current implementation provides:
 
@@ -164,6 +164,6 @@ Haven/
 
 ## Current and next security milestone
 
-Milestone 0.7 adds native Linux monitoring and boot-persistent endpoint-agent scheduling. Milestone 0.7.1 makes its network results explainable: duplicate sockets become logical listeners, bind scope is distinguished from proven reachability, and the owner can classify intended services without giving HAVEN Docker access. The production Ubuntu agent remains outside the hub container with an explicit device identity; it is denied access to the Docker socket and treats root-only signals as unknown instead of elevating the whole collector. The next milestone can add network-wide asset observation while keeping merely observed assets separate from explicitly enrolled devices. The Ubuntu hub does not execute Windows actions on another machine. GitHub Actions verifies the Go, frontend, dependency, image, and public-repository safety checks on each proposed change.
+Milestone 0.7 adds native Linux monitoring and boot-persistent endpoint-agent scheduling. Milestone 0.7.1 makes its network results explainable: duplicate sockets become logical listeners, bind scope is distinguished from proven reachability, and the owner can classify intended services without giving HAVEN Docker access. Milestone 0.7.2 makes the latest report age visible, separates current findings from resolved history, shows when listeners were last confirmed, tolerates normal agent scheduling jitter, and verifies explicit SSH hardening without claiming unavailable defaults. The production Ubuntu agent remains outside the hub container with an explicit device identity; it is denied access to the Docker socket and treats genuinely unavailable root-only signals as unknown instead of elevating the whole collector. The next milestone can add network-wide asset observation while keeping merely observed assets separate from explicitly enrolled devices. The Ubuntu hub does not execute Windows actions on another machine. GitHub Actions verifies the Go, frontend, dependency, image, and public-repository safety checks on each proposed change.
 
 Read the [architecture](docs/ARCHITECTURE.md), [threat model](docs/THREAT_MODEL.md), and [public repository policy](docs/PUBLIC_REPOSITORY.md) before expanding the trust boundary.

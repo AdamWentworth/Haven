@@ -180,13 +180,22 @@ func TestEvaluateActionableLinuxBaseline(t *testing.T) {
 	assertFinding(t, evaluated.Findings, "linux-storage-low", "medium")
 }
 
+func TestEvaluateLinuxFlagsKeyboardInteractiveAuthentication(t *testing.T) {
+	snapshot := healthyLinuxSnapshot()
+	snapshot.LinuxBaseline.SSH.PasswordAuthentication = "no"
+	snapshot.LinuxBaseline.SSH.KeyboardInteractiveAuthentication = "yes"
+
+	evaluated := Evaluate(snapshot, time.Now())
+	assertFinding(t, evaluated.Findings, "linux-ssh-passwords", "medium")
+}
+
 func healthyLinuxSnapshot() model.SecuritySnapshot {
 	return model.SecuritySnapshot{
 		Device: model.DeviceSummary{OperatingSystem: "Ubuntu 24.04 LTS"},
 		LinuxBaseline: &model.LinuxBaseline{
 			Updates:          &model.LinuxUpdateStatus{PendingPackageCount: intPointer(0), PendingSecurityPackageCount: intPointer(0), PendingReboot: boolPointer(false)},
 			Firewall:         &model.LinuxFirewallStatus{Provider: "ufw", Active: boolPointer(true), DefaultInboundAction: "Block"},
-			SSH:              &model.LinuxSSHStatus{ServerRunning: boolPointer(true), PasswordAuthentication: "no", PermitRootLogin: "prohibit-password", PublicKeyAuthentication: "yes"},
+			SSH:              &model.LinuxSSHStatus{ServerRunning: boolPointer(true), PasswordAuthentication: "no", KeyboardInteractiveAuthentication: "no", PermitRootLogin: "prohibit-password", PublicKeyAuthentication: "yes"},
 			Services:         &model.LinuxServiceStatus{FailedUnitCount: intPointer(0)},
 			AutomaticUpdates: &model.LinuxAutomaticUpdateStatus{Enabled: boolPointer(true), Active: boolPointer(true)},
 			AppArmor:         &model.LinuxAppArmorStatus{Enabled: boolPointer(true)},

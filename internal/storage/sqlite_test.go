@@ -422,3 +422,16 @@ func TestEnrollmentReplayRevocationAndBackup(t *testing.T) {
 		t.Fatal("backup must not contain live connection metadata")
 	}
 }
+
+func TestDeviceStatusAllowsAgentScheduleJitter(t *testing.T) {
+	now := time.Date(2026, time.September, 2, 12, 0, 0, 0, time.UTC)
+	lastSeen := now.Add(-16 * time.Minute)
+	device := model.DeviceRecord{TrustState: "enrolled", LastSeenAt: &lastSeen}
+	if status := deviceStatus(device, now); status != "current" {
+		t.Fatalf("a healthy 15-minute agent with small scheduling jitter must remain current, got %q", status)
+	}
+	lastSeen = now.Add(-21 * time.Minute)
+	if status := deviceStatus(device, now); status != "stale" {
+		t.Fatalf("an agent more than 20 minutes late must be stale, got %q", status)
+	}
+}

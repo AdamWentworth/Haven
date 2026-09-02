@@ -4,8 +4,11 @@ import (
 	"context"
 	"errors"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/AdamWentworth/haven/internal/model"
 )
 
 type fakeCommandRunner struct {
@@ -25,7 +28,7 @@ func TestLinuxCollectorBuildsPrivacyBoundedHostSnapshot(t *testing.T) {
 	runner := fakeCommandRunner{outputs: map[string][]byte{
 		command("/usr/lib/update-notifier/apt-check"):                                    []byte("13;0"),
 		command("systemctl", "is-active", "ssh.service"):                                 []byte("active\n"),
-		command("/usr/sbin/sshd", "-T", "-C", "user=root,host=localhost,addr=127.0.0.1"): []byte("passwordauthentication no\npermitrootlogin prohibit-password\npubkeyauthentication yes\n"),
+		command("/usr/sbin/sshd", "-T", "-C", "user=root,host=localhost,addr=127.0.0.1"): []byte("passwordauthentication no\nkbdinteractiveauthentication no\npermitrootlogin prohibit-password\npubkeyauthentication yes\n"),
 		command("systemctl", "--failed", "--no-legend", "--plain"):                       []byte("certbot.service loaded failed failed Certbot\n"),
 		command("systemctl", "is-enabled", "unattended-upgrades.service"):                []byte("enabled\n"),
 		command("systemctl", "is-active", "unattended-upgrades.service"):                 []byte("active\n"),
@@ -61,7 +64,7 @@ func TestLinuxCollectorBuildsPrivacyBoundedHostSnapshot(t *testing.T) {
 	if snapshot.LinuxBaseline.Firewall == nil || snapshot.LinuxBaseline.Firewall.Active == nil || !*snapshot.LinuxBaseline.Firewall.Active {
 		t.Fatalf("firewall status was not collected: %#v", snapshot.LinuxBaseline.Firewall)
 	}
-	if snapshot.LinuxBaseline.SSH.PasswordAuthentication != "no" || snapshot.LinuxBaseline.SSH.PermitRootLogin != "prohibit-password" {
+	if snapshot.LinuxBaseline.SSH.PasswordAuthentication != "no" || snapshot.LinuxBaseline.SSH.KeyboardInteractiveAuthentication != "no" || snapshot.LinuxBaseline.SSH.PermitRootLogin != "prohibit-password" {
 		t.Fatalf("SSH posture was not collected: %#v", snapshot.LinuxBaseline.SSH)
 	}
 	if len(snapshot.Connections) != 3 || snapshot.Connections[0].ProcessName != "caddy" || snapshot.Connections[1].State != "Established" || snapshot.Connections[2].Protocol != "UDP" || snapshot.Connections[2].State != "Bound" {
@@ -72,6 +75,39 @@ func TestLinuxCollectorBuildsPrivacyBoundedHostSnapshot(t *testing.T) {
 	}
 	if len(snapshot.Notices) != 0 {
 		t.Fatalf("healthy fake collection returned notices: %#v", snapshot.Notices)
+	}
+}
+
+func TestLinuxCollectorTrustsCompleteExplicitGlobalSSHSettings(t *testing.T) {
+	command := func(name string, arguments ...string) string {
+		return strings.Join(append([]string{name}, arguments...), "\x00")
+	}
+	runner := fakeCommandRunner{
+		outputs: map[string][]byte{command("systemctl", "is-active", "ssh.service"): []byte("active\n")},
+		errors:  map[string]error{command("/usr/sbin/sshd", "-T", "-C", "user=root,host=localhost,addr=127.0.0.1"): errors.New("host keys unavailable")},
+	}
+	files := map[string][]byte{
+		"/etc/ssh/sshd_config":                           []byte("Include /etc/ssh/sshd_config.d/*.conf\n"),
+		"/etc/ssh/sshd_config.d/00-haven-hardening.conf": []byte("PasswordAuthentication no\nKbdInteractiveAuthentication no\nPermitRootLogin no\nPubkeyAuthentication yes\n"),
+	}
+	collector := NewLinuxCollector(runner)
+	collector.readFile = func(path string) ([]byte, error) {
+		if contents, ok := files[filepath.ToSlash(path)]; ok {
+			return contents, nil
+		}
+		return nil, os.ErrNotExist
+	}
+	collector.glob = func(string) ([]string, error) {
+		return []string{"/etc/ssh/sshd_config.d/00-haven-hardening.conf"}, nil
+	}
+
+	notices := []model.CollectorNotice{}
+	status := collector.ssh(context.Background(), &notices)
+	if status.PasswordAuthentication != "no" || status.KeyboardInteractiveAuthentication != "no" || status.PermitRootLogin != "no" || status.PublicKeyAuthentication != "yes" {
+		t.Fatalf("explicit SSH hardening was not collected: %#v", status)
+	}
+	if len(notices) != 0 {
+		t.Fatalf("complete explicit SSH settings should not be described as unverified: %#v", notices)
 	}
 }
 

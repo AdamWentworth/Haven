@@ -97,7 +97,7 @@ function DeviceInventory({ devices, selectedId, select, demoMode }: { devices: D
           const tone: Tone = device.status === "current" ? "healthy" : device.status === "revoked" ? "danger" : "attention";
           return (
             <button className={`device-button ${selectedId === device.id ? "selected" : ""}`} type="button" key={device.id} onClick={() => select(device.id)} aria-pressed={selectedId === device.id}>
-              <span className="device-identity"><span className="device-icon">{device.operatingSystem.toLowerCase().includes("server") ? <ServerIcon /> : device.displayName.toLowerCase().includes("laptop") ? <LaptopIcon /> : <MonitorIcon />}</span><span><strong>{device.displayName}</strong><small>{device.operatingSystem || "Awaiting first report"}</small></span></span>
+              <span className="device-identity"><span className="device-icon">{device.operatingSystem.toLowerCase().includes("server") ? <ServerIcon /> : device.displayName.toLowerCase().includes("laptop") ? <LaptopIcon /> : <MonitorIcon />}</span><span><strong>{device.displayName}</strong><small>{device.operatingSystem || "Awaiting first report"}{device.lastCollectedAt ? ` · reported ${formatRelativeTime(device.lastCollectedAt)}` : ""}</small></span></span>
               <StatusChip label={device.status.replaceAll("-", " ")} tone={tone} />
             </button>
           );
@@ -115,6 +115,20 @@ function formatDate(value: string | null | undefined, fallback = "Not reported")
   if (!value) return fallback;
   const date = new Date(value);
   return Number.isNaN(date.valueOf()) ? fallback : date.toLocaleString();
+}
+
+function formatRelativeTime(value: string | null | undefined, fallback = "not reported") {
+  if (!value) return fallback;
+  const timestamp = new Date(value).valueOf();
+  if (!Number.isFinite(timestamp)) return fallback;
+  const elapsedSeconds = Math.max(0, Math.floor((Date.now() - timestamp) / 1000));
+  if (elapsedSeconds < 10) return "just now";
+  if (elapsedSeconds < 60) return `${elapsedSeconds}s ago`;
+  const elapsedMinutes = Math.floor(elapsedSeconds / 60);
+  if (elapsedMinutes < 60) return `${elapsedMinutes} min ago`;
+  const elapsedHours = Math.floor(elapsedMinutes / 60);
+  if (elapsedHours < 48) return `${elapsedHours} hr ago`;
+  return `${Math.floor(elapsedHours / 24)} days ago`;
 }
 
 function formatDuration(value: number | null) {
@@ -298,6 +312,7 @@ function LinuxPanel({ baseline }: { baseline: LinuxBaseline }) {
     ["Clock synchronized", booleanValue(baseline.timeSync?.synchronized ?? null).label],
     ["OpenSSH server", booleanValue(ssh?.serverRunning ?? null).label],
     ["SSH password authentication", ssh?.passwordAuthentication || "Not fully verified"],
+    ["SSH keyboard-interactive", ssh?.keyboardInteractiveAuthentication || "Not fully verified"],
     ["SSH root login", ssh?.permitRootLogin || "Not fully verified"],
     ["Failed systemd units", baseline.services?.failedUnitCount === null || baseline.services?.failedUnitCount === undefined ? "Not verified" : String(baseline.services.failedUnitCount)],
     ["Failed unit names", baseline.services?.failedUnits?.length ? baseline.services.failedUnits.join(", ") : "None reported"],
@@ -430,7 +445,7 @@ function ConnectionsPanel({ deviceId, connections, expectedServices, observation
 			<div className="service-card-heading"><div><span className="protocol">{listener.protocol}</span><strong>Port {listener.port}</strong></div><StatusChip label={expectation ? "expected" : recentlyAppeared ? "new · unreviewed" : listener.bindScope === "local" ? "local only" : "unreviewed"} tone={expectation ? "healthy" : listener.bindScope === "local" ? "configured" : "attention"} /></div>
 			<h3>{expectation?.label || `${listener.protocol} service on port ${listener.port}`}</h3>
 			<dl><div><dt>Bind scope</dt><dd>{bindScopeLabel(listener.bindScope)}</dd></div><div><dt>State</dt><dd>{listener.state}</dd></div><div><dt>Addresses</dt><dd className="endpoint">{listener.addresses.join(", ") || "Not reported"}</dd></div>{listener.processes.length > 0 && <div><dt>Process</dt><dd>{listener.processes.join(", ")}</dd></div>}</dl>
-			<p>{observation ? `First observed ${formatDate(observation.firstSeenAt)} · latest appearance ${formatDate(observation.appearedAt)}` : "Appearance history will begin with the next agent report."}{listener.rawCount > 1 ? ` · ${listener.rawCount} raw sockets grouped` : ""}</p>
+			<p>{observation ? `First observed ${formatDate(observation.firstSeenAt)} · continuously present since ${formatDate(observation.appearedAt)} · last confirmed ${formatRelativeTime(observation.lastSeenAt)}` : "Appearance history will begin with the next agent report."}{listener.rawCount > 1 ? ` · ${listener.rawCount} raw sockets grouped` : ""}</p>
 			{expectation ? <button className="secondary-action" type="button" disabled={busy} onClick={() => removeExpectation(expectation)}>Remove expectation</button> : <button className="secondary-action" type="button" disabled={busy} onClick={() => markExpected(listener)}>Mark expected…</button>}
 		  </article>;
 		})}
@@ -562,27 +577,48 @@ function AwaitingAgents({ devices, runtime, passkeys, actions, audit, error, sel
   </>;
 }
 
+interface FindingLifecycle {
+  event: SecurityEvent;
+  openedAt: string | null;
+}
+
+function latestFindingLifecycles(events: SecurityEvent[]) {
+  const ordered = [...events].sort((left, right) => new Date(right.occurredAt).valueOf() - new Date(left.occurredAt).valueOf() || right.id - left.id);
+  const seen = new Set<string>();
+  const lifecycles: FindingLifecycle[] = [];
+  for (const event of ordered) {
+    const key = `${event.deviceId}:${event.findingId}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    const opened = event.kind === "opened" ? event : ordered.find((candidate) => candidate.deviceId === event.deviceId && candidate.findingId === event.findingId && candidate.kind === "opened" && new Date(candidate.occurredAt) <= new Date(event.occurredAt));
+    lifecycles.push({ event, openedAt: opened?.occurredAt || null });
+  }
+  return lifecycles.sort((left, right) => Number(left.event.kind === "resolved") - Number(right.event.kind === "resolved") || new Date(right.event.occurredAt).valueOf() - new Date(left.event.occurredAt).valueOf());
+}
+
 function ActivityPanel({ events }: { events: SecurityEvent[] }) {
-  const recent = events.slice(0, 12);
+  const recent = useMemo(() => latestFindingLifecycles(events).slice(0, 12), [events]);
+  const activeCount = recent.filter((item) => item.event.kind === "opened").length;
+  const resolvedCount = recent.filter((item) => item.event.kind === "resolved").length;
   return (
     <section className="panel activity-panel" aria-labelledby="activity-title">
-      <PanelHeading eyebrow="WHAT CHANGED" title="Security activity" id="activity-title" icon={<ActivityIcon />} accent="cyan">
-		Historical finding transitions; wording reflects what HAVEN knew when each event was recorded
+      <PanelHeading eyebrow="WHAT CHANGED" title="Current findings and resolved history" id="activity-title" icon={<ActivityIcon />} accent="cyan">
+		{recent.length > 0 ? `${activeCount} current · ${resolvedCount} resolved` : "Latest lifecycle only; superseded historical entries stay out of the active-looking list"}
       </PanelHeading>
       {recent.length === 0 ? (
         <p className="activity-empty"><strong>No posture changes recorded yet.</strong><span>HAVEN will add an event when a finding appears or resolves; routine unchanged observations stay quiet.</span></p>
       ) : (
         <ol className="activity-list">
-          {recent.map((event) => {
+          {recent.map(({ event, openedAt }) => {
             const resolved = event.kind === "resolved";
             const tone: Tone = resolved ? "healthy" : event.severity === "high" ? "danger" : event.severity === "medium" ? "attention" : "configured";
             return (
               <li className={`activity-item ${resolved ? "resolved" : `severity-${event.severity}`}`} key={event.id}>
                 <span className="activity-marker">{resolved ? <CheckIcon size={17} /> : <AlertIcon size={17} />}</span>
                 <div className="activity-copy">
-                  <div className="activity-heading"><div><p>{event.category} · {event.deviceName}</p><h3>{event.title}</h3></div><StatusChip label={resolved ? "resolved" : event.severity} tone={tone} /></div>
-                  <p>{resolved ? "HAVEN no longer derives this finding from the latest observation." : event.summary}</p>
-                  <time dateTime={event.occurredAt}>{formatDate(event.occurredAt)}</time>
+                  <div className="activity-heading"><div><p>{event.category} · {event.deviceName}</p><h3>{resolved ? `Resolved: ${event.title}` : event.title}</h3></div><StatusChip label={resolved ? "resolved" : `active · ${event.severity}`} tone={tone} /></div>
+                  <p><strong>{resolved ? "Resolved." : "Currently active."}</strong> {resolved ? "The latest observation no longer derives this finding." : event.summary}</p>
+                  <time dateTime={event.occurredAt}>{resolved ? `${openedAt ? `Opened ${formatDate(openedAt)} · ` : ""}Resolved ${formatDate(event.occurredAt)}` : `Active since ${formatDate(event.occurredAt)}`}</time>
                 </div>
               </li>
             );
@@ -643,24 +679,24 @@ function Application({ snapshot, devices, events, runtime, selectedDevice, selec
         <div className="topbar-actions">
           <span className={`local-pill ${demoMode ? "demo-pill" : ""}`}><span className="local-dot" />{demoMode ? "Synthetic demo" : runtime?.localCollection ? "Local monitor" : "Agent hub"}</span>
           {!demoMode && alertsSupported && <button className={`desktop-alert-button ${alertsEnabled ? "enabled" : ""}`} type="button" onClick={enableAlerts} disabled={alertsEnabled} aria-label={alertsEnabled ? "Desktop alerts enabled" : "Enable desktop alerts"}><BellIcon size={15} /><span>{alertsEnabled ? "Alerts on" : "Enable alerts"}</span></button>}
-          {selectedDevice?.trustState === "local" && <button className="refresh-button" type="button" onClick={refresh} disabled={refreshing}>{refreshing ? "Collecting…" : <><RefreshIcon size={15} />Refresh now</>}</button>}
+          {!demoMode && <button className="refresh-button" type="button" onClick={refresh} disabled={refreshing}>{refreshing ? (runtime?.localCollection ? "Collecting…" : "Refreshing…") : <><RefreshIcon size={15} />{runtime?.localCollection ? "Collect now" : "Refresh view"}</>}</button>}
           {!demoMode && <button className="signout-button" type="button" onClick={signOut}>Lock</button>}
         </div>
       </header>
       <main>
         <DeviceInventory devices={devices} selectedId={selectedDevice?.id || snapshot.device.deviceId || ""} select={selectDevice} demoMode={demoMode} />
         {demoMode && <p className="demo-banner" role="status"><strong>Synthetic demo mode.</strong> Every device and observation on this page is invented. HAVEN is not showing or collecting data from this computer.</p>}
-        {!demoMode && <p className="context-banner"><strong>Continuous, read-only monitoring.</strong> {runtime?.localCollection ? `HAVEN observes this computer every ${runtime.monitor.enabled ? formatInterval(runtime.monitor.intervalSeconds) : "configured interval"}.` : "A native agent reports this endpoint's security posture to the private HAVEN hub."} HAVEN records only meaningful finding transitions. This inventory contains explicitly enrolled devices—not every device on the network—and an event does not by itself prove an attack.</p>}
+        {!demoMode && <p className="context-banner"><strong>Continuous, read-only monitoring.</strong> {runtime?.localCollection ? `HAVEN observes this computer every ${runtime.monitor.enabled ? formatInterval(runtime.monitor.intervalSeconds) : "configured interval"}.` : "A native agent reports this endpoint's security posture to the private HAVEN hub on its own schedule; this page checks the hub for a newer report every minute."} The current-posture sections always come from the latest observation. The activity section retains only the latest lifecycle for each finding, while routine unchanged observations stay quiet.</p>}
         {error && <p className="inline-error" role="alert">{error}</p>}
         <section className="hero" aria-labelledby="device-name">
           <div className="hero-identity"><span className="hero-device-icon">{snapshot.device.operatingSystem.toLowerCase().includes("server") ? <ServerIcon size={28} /> : selectedDevice?.displayName.toLowerCase().includes("laptop") ? <LaptopIcon size={28} /> : <MonitorIcon size={28} />}</span><div><p className="eyebrow">{selectedDevice?.trustState === "local" ? "THIS DEVICE" : "DEVICE OBSERVATION"}</p><h1 id="device-name">{selectedDevice?.displayName || snapshot.device.hostName}</h1><p className="device-detail">{snapshot.device.hostName} · {snapshot.device.operatingSystem} · {snapshot.device.architecture} · {formatDuration(snapshot.device.uptimeSeconds)}</p></div></div>
-          <div className="collection-time"><span>Last observation</span><strong>{formatDate(snapshot.collectedAt)}</strong></div>
+          <div className="collection-time"><span>Last observation</span><strong>{formatRelativeTime(snapshot.collectedAt)}</strong><time dateTime={snapshot.collectedAt}>{formatDate(snapshot.collectedAt)}</time></div>
         </section>
         <section className="summary-grid" aria-label="Security summary">
 		  <SummaryCard icon={isLinux ? <ChipIcon /> : <DefenderIcon />} accent="blue" title={isLinux ? "Host posture" : "Protection"} label={isLinux ? (findingCount > 0 ? `${findingCount} to review` : unknownChecks > 0 ? `${unknownChecks} unverified` : "No findings") : snapshot.defender ? (defenderHealthy ? "Protected" : "Attention") : "Unavailable"} tone={isLinux ? (findingCount > 0 ? "attention" : unknownChecks > 0 ? "unknown" : "healthy") : snapshot.defender ? (defenderHealthy ? "healthy" : "attention") : "unknown"}>{isLinux ? (findingCount > 0 ? `AppArmor and automatic updates are platform protections, but ${findingCount} current finding${findingCount === 1 ? " still needs" : "s still need"} review.` : unknownChecks > 0 ? "No action is derived from the verified signals, but some checks remain unknown." : "No actionable finding was derived from the latest verified Linux signals.") : snapshot.defender ? (defenderHealthy ? "Antivirus and real-time monitoring are active." : "One or more protection signals are off or unavailable.") : "Defender status was not returned."}</SummaryCard>
           <SummaryCard icon={<FirewallIcon />} accent="amber" title="Firewall" label={firewallsKnown ? (firewallsEnabled ? "Enabled" : "Attention") : "Unavailable"} tone={firewallsKnown ? (firewallsEnabled ? "healthy" : "danger") : "unknown"}>{firewallsKnown ? (isLinux ? `${snapshot.firewallProfiles[0].name} is ${firewallsEnabled ? "enabled" : "disabled"} as the host firewall provider.` : firewallsEnabled ? `All ${snapshot.firewallProfiles.length} Windows Firewall profiles are enabled.` : "At least one Windows Firewall profile is disabled.") : "Firewall status was not returned."}</SummaryCard>
 		  <SummaryCard icon={<NetworkIcon />} accent="cyan" title="Network" label={unreviewedListeners > 0 ? `${unreviewedListeners} unreviewed` : `${listeners.length} classified/local`} tone={unreviewedListeners > 0 ? "attention" : "healthy"}>{listeners.length} logical listener{listeners.length === 1 ? "" : "s"} ({broadListeners} on all interfaces) and {established} active connection{established === 1 ? "" : "s"}. Bind scope is not proof of Internet reachability.</SummaryCard>
-          <SummaryCard icon={<ActivityIcon />} accent="green" title="Monitor" label={runtime?.localCollection && runtime.monitor.enabled ? `Every ${formatInterval(runtime.monitor.intervalSeconds)}` : "Agent reported"} tone={runtime?.monitor.lastCollectionError ? "attention" : "healthy"}>{runtime?.localCollection ? (runtime.monitor.lastCollectionError || (runtime.monitor.lastSuccessfulAt ? `Last automatic observation succeeded ${formatDate(runtime.monitor.lastSuccessfulAt)}.` : "Automatic monitoring is starting.")) : `Latest authenticated agent observation arrived ${formatDate(snapshot.collectedAt)}.`}</SummaryCard>
+          <SummaryCard icon={<ActivityIcon />} accent="green" title="Monitor" label={runtime?.localCollection && runtime.monitor.enabled ? `Every ${formatInterval(runtime.monitor.intervalSeconds)}` : formatRelativeTime(snapshot.collectedAt)} tone={selectedDevice?.status === "stale" || runtime?.monitor.lastCollectionError ? "attention" : "healthy"}>{runtime?.localCollection ? (runtime.monitor.lastCollectionError || (runtime.monitor.lastSuccessfulAt ? `Last automatic observation succeeded ${formatDate(runtime.monitor.lastSuccessfulAt)}.` : "Automatic monitoring is starting.")) : `Latest authenticated report was collected ${formatDate(snapshot.collectedAt)}. The view checks for newer hub data every minute.`}</SummaryCard>
         </section>
         {!demoMode && <><PasskeyPanel passkeys={passkeys} add={addOwnerPasskey} remove={removeOwnerPasskey} busy={actionBusy} /><ActionCenter actions={actions} audit={audit} capabilities={runtime?.actionCapabilities || []} run={runAction} busy={actionBusy} /></>}
         <ActivityPanel events={events} />
@@ -670,7 +706,7 @@ function Application({ snapshot, devices, events, runtime, selectedDevice, selec
 		<FirewallPanel profiles={snapshot.firewallProfiles} isLinux={isLinux} />
 		<ConnectionsPanel deviceId={selectedDevice?.id || snapshot.device.deviceId || ""} connections={snapshot.connections} expectedServices={expectedServices} observations={listenerObservations} saveExpectation={saveServiceExpectation} removeExpectation={removeServiceExpectation} busy={actionBusy} />
       </main>
-	  <footer><span>HAVEN milestone 0.7.1 · Service exposure review</span><span>Observe continuously. Act deliberately.</span></footer>
+	  <footer><span>HAVEN milestone 0.7.2 · Freshness and lifecycle clarity</span><span>Observe continuously. Act deliberately.</span></footer>
     </>
   );
 }
