@@ -95,6 +95,29 @@ var migrations = []migration{
 				ON device_observations (device_id, collected_at DESC)`,
 		},
 	},
+	{
+		version: 3,
+		statements: []string{
+			`DELETE FROM devices
+			 WHERE trust_state = 'local'
+			   AND trim(host_name) <> ''
+			   AND EXISTS (
+				SELECT 1
+				  FROM devices AS keeper
+				 WHERE keeper.trust_state = 'local'
+				   AND lower(trim(keeper.host_name)) = lower(trim(devices.host_name))
+				   AND (
+					COALESCE(keeper.last_collected_at, keeper.last_seen_at, keeper.enrolled_at) >
+						COALESCE(devices.last_collected_at, devices.last_seen_at, devices.enrolled_at)
+					OR (
+						COALESCE(keeper.last_collected_at, keeper.last_seen_at, keeper.enrolled_at) =
+							COALESCE(devices.last_collected_at, devices.last_seen_at, devices.enrolled_at)
+						AND keeper.id < devices.id
+					)
+				   )
+			   )`,
+		},
+	},
 }
 
 func Open(ctx context.Context, path string) (*Store, error) {
@@ -184,7 +207,11 @@ func (store *Store) Close() error {
 func (store *Store) SaveSnapshot(ctx context.Context, snapshot model.SecuritySnapshot) error {
 	deviceID := snapshot.Device.DeviceID
 	if deviceID == "" {
-		deviceID = localDeviceID(snapshot.Device.HostName)
+		resolvedDeviceID, err := store.resolveLocalDeviceID(ctx, snapshot.Device.HostName)
+		if err != nil {
+			return err
+		}
+		deviceID = resolvedDeviceID
 	}
 	snapshot.Device.DeviceID = deviceID
 	payload, err := historicalPayload(snapshot)
@@ -851,8 +878,31 @@ func normalizeDisplayName(value string) string {
 }
 
 func localDeviceID(hostName string) string {
-	digest := sha256.Sum256([]byte("HAVEN local device\x00" + hostName))
+	canonicalHostName := strings.ToLower(strings.TrimSpace(hostName))
+	digest := sha256.Sum256([]byte("HAVEN local device\x00" + canonicalHostName))
 	return "local_" + hex.EncodeToString(digest[:8])
+}
+
+func (store *Store) resolveLocalDeviceID(ctx context.Context, hostName string) (string, error) {
+	var deviceID string
+	err := store.database.QueryRowContext(
+		ctx,
+		`SELECT id
+		   FROM devices
+		  WHERE trust_state = 'local'
+		    AND trim(host_name) <> ''
+		    AND lower(trim(host_name)) = lower(trim(?))
+		  ORDER BY COALESCE(last_collected_at, last_seen_at, enrolled_at) DESC, id
+		  LIMIT 1`,
+		hostName,
+	).Scan(&deviceID)
+	if err == nil {
+		return deviceID, nil
+	}
+	if !errors.Is(err, sql.ErrNoRows) {
+		return "", fmt.Errorf("resolve local device identity: %w", err)
+	}
+	return localDeviceID(hostName), nil
 }
 
 func randomID(prefix string) (string, error) {
