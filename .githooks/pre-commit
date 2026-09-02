@@ -1,0 +1,3 @@
+#!/bin/sh
+
+pwsh -NoLogo -NoProfile -File scripts/Test-PublicRepository.ps1 -Staged

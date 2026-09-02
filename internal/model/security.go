@@ -1,0 +1,136 @@
+package model
+
+import "time"
+
+// SecuritySnapshot is one point-in-time observation reported by a collector.
+// It contains posture metadata only, never credentials or packet payloads.
+type SecuritySnapshot struct {
+	CollectedAt      time.Time               `json:"collectedAt"`
+	Device           DeviceSummary           `json:"device"`
+	Defender         *DefenderStatus         `json:"defender"`
+	WindowsBaseline  *WindowsBaseline        `json:"windowsBaseline"`
+	BaselineChecks   []BaselineCheck         `json:"baselineChecks"`
+	Findings         []SecurityFinding       `json:"findings"`
+	FirewallProfiles []FirewallProfileStatus `json:"firewallProfiles"`
+	Connections      []NetworkConnection     `json:"connections"`
+	Notices          []CollectorNotice       `json:"notices"`
+}
+
+// WindowsBaseline contains privacy-bounded host posture. It records counts and
+// configuration state, never account names, threat resource paths, or update
+// titles.
+type WindowsBaseline struct {
+	Update           *WindowsUpdateStatus    `json:"update"`
+	SystemEncryption *DiskEncryptionStatus   `json:"systemEncryption"`
+	PlatformSecurity *PlatformSecurityStatus `json:"platformSecurity"`
+	RemoteAccess     *RemoteAccessStatus     `json:"remoteAccess"`
+	LocalAccounts    *LocalAccountStatus     `json:"localAccounts"`
+	Threats          *DefenderThreatStatus   `json:"threats"`
+}
+
+type WindowsUpdateStatus struct {
+	LastInstalledAt *time.Time `json:"lastInstalledAt"`
+	PendingReboot   *bool      `json:"pendingReboot"`
+	RebootReasons   []string   `json:"rebootReasons"`
+}
+
+type DiskEncryptionStatus struct {
+	SystemDrive          string   `json:"systemDrive"`
+	VolumeStatus         string   `json:"volumeStatus"`
+	ProtectionStatus     string   `json:"protectionStatus"`
+	EncryptionPercentage *float64 `json:"encryptionPercentage"`
+}
+
+type PlatformSecurityStatus struct {
+	SecureBootEnabled *bool  `json:"secureBootEnabled"`
+	TPMPresent        *bool  `json:"tpmPresent"`
+	TPMReady          *bool  `json:"tpmReady"`
+	TPMVersion        string `json:"tpmVersion,omitempty"`
+	TPMManufacturer   string `json:"tpmManufacturer,omitempty"`
+	TPMSource         string `json:"tpmSource,omitempty"`
+}
+
+type RemoteAccessStatus struct {
+	RemoteDesktopEnabled     *bool  `json:"remoteDesktopEnabled"`
+	NetworkLevelAuthRequired *bool  `json:"networkLevelAuthRequired"`
+	RDPFirewallScope         string `json:"rdpFirewallScope,omitempty"`
+	RDPFirewallRuleCount     *int   `json:"rdpFirewallRuleCount"`
+	RemoteAssistanceEnabled  *bool  `json:"remoteAssistanceEnabled"`
+	SMB1Enabled              *bool  `json:"smb1Enabled"`
+	OpenSSHServerRunning     *bool  `json:"openSshServerRunning"`
+}
+
+type LocalAccountStatus struct {
+	AdministratorCount        *int `json:"administratorCount"`
+	EnabledAdministratorCount *int `json:"enabledAdministratorCount"`
+}
+
+type DefenderThreatStatus struct {
+	ActiveThreatCount    *int       `json:"activeThreatCount"`
+	RecentDetectionCount *int       `json:"recentDetectionCount"`
+	LastDetectedAt       *time.Time `json:"lastDetectedAt"`
+}
+
+type BaselineCheck struct {
+	ID       string `json:"id"`
+	Category string `json:"category"`
+	Title    string `json:"title"`
+	Status   string `json:"status"`
+	Summary  string `json:"summary"`
+	Evidence string `json:"evidence,omitempty"`
+}
+
+type SecurityFinding struct {
+	ID             string `json:"id"`
+	Category       string `json:"category"`
+	Title          string `json:"title"`
+	Severity       string `json:"severity"`
+	Summary        string `json:"summary"`
+	Recommendation string `json:"recommendation"`
+}
+
+type DeviceSummary struct {
+	DeviceID        string `json:"deviceId,omitempty"`
+	HostName        string `json:"hostName"`
+	OperatingSystem string `json:"operatingSystem"`
+	Architecture    string `json:"architecture"`
+	UptimeSeconds   *int64 `json:"uptimeSeconds"`
+}
+
+type DefenderStatus struct {
+	AntivirusEnabled          *bool      `json:"antivirusEnabled"`
+	RealTimeProtectionEnabled *bool      `json:"realTimeProtectionEnabled"`
+	BehaviorMonitorEnabled    *bool      `json:"behaviorMonitorEnabled"`
+	DownloadProtectionEnabled *bool      `json:"downloadProtectionEnabled"`
+	TamperProtected           *bool      `json:"tamperProtected"`
+	TamperProtectionSource    string     `json:"tamperProtectionSource,omitempty"`
+	SignatureVersion          string     `json:"signatureVersion,omitempty"`
+	SignatureUpdatedAt        *time.Time `json:"signatureUpdatedAt"`
+	LastQuickScanAt           *time.Time `json:"lastQuickScanAt"`
+	LastFullScanAt            *time.Time `json:"lastFullScanAt"`
+}
+
+type FirewallProfileStatus struct {
+	Name                  string `json:"name"`
+	Enabled               *bool  `json:"enabled"`
+	DefaultInboundAction  string `json:"defaultInboundAction,omitempty"`
+	DefaultOutboundAction string `json:"defaultOutboundAction,omitempty"`
+	LogFileName           string `json:"logFileName,omitempty"`
+}
+
+type NetworkConnection struct {
+	Protocol      string `json:"protocol"`
+	LocalAddress  string `json:"localAddress"`
+	LocalPort     int    `json:"localPort"`
+	RemoteAddress string `json:"remoteAddress"`
+	RemotePort    int    `json:"remotePort"`
+	State         string `json:"state"`
+	ProcessID     int    `json:"processId"`
+	ProcessName   string `json:"processName"`
+}
+
+type CollectorNotice struct {
+	Source   string `json:"source"`
+	Severity string `json:"severity"`
+	Message  string `json:"message"`
+}

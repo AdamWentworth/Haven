@@ -1,0 +1,875 @@
+package storage
+
+import (
+	"context"
+	"crypto/rand"
+	"crypto/sha256"
+	"database/sql"
+	"encoding/hex"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"os"
+	"path/filepath"
+	"runtime"
+	"strings"
+	"time"
+
+	"github.com/AdamWentworth/haven/internal/model"
+	_ "modernc.org/sqlite"
+)
+
+var (
+	ErrEnrollmentInvalid = errors.New("enrollment token is invalid, expired, or already used")
+	ErrUnknownDevice     = errors.New("client certificate is not enrolled")
+	ErrRevokedDevice     = errors.New("device has been revoked")
+	ErrReplay            = errors.New("observation sequence has already been accepted")
+)
+
+type Store struct {
+	database *sql.DB
+}
+
+type EnrollmentDevice struct {
+	ID                   string
+	DisplayName          string
+	CertificateSerial    string
+	CertificateExpiresAt time.Time
+}
+
+type migration struct {
+	version    int
+	statements []string
+}
+
+var migrations = []migration{
+	{
+		version: 1,
+		statements: []string{
+			`CREATE TABLE IF NOT EXISTS observations (
+				id INTEGER PRIMARY KEY,
+				device_key TEXT NOT NULL,
+				collected_at TEXT NOT NULL,
+				payload_json BLOB NOT NULL,
+				created_at TEXT NOT NULL
+			)`,
+			`CREATE INDEX IF NOT EXISTS observations_device_collected
+				ON observations (device_key, collected_at DESC)`,
+		},
+	},
+	{
+		version: 2,
+		statements: []string{
+			`CREATE TABLE IF NOT EXISTS devices (
+				id TEXT PRIMARY KEY,
+				display_name TEXT NOT NULL,
+				host_name TEXT NOT NULL DEFAULT '',
+				operating_system TEXT NOT NULL DEFAULT '',
+				architecture TEXT NOT NULL DEFAULT '',
+				trust_state TEXT NOT NULL,
+				certificate_serial TEXT UNIQUE,
+				certificate_not_after TEXT,
+				enrolled_at TEXT NOT NULL,
+				last_seen_at TEXT,
+				last_collected_at TEXT,
+				last_sequence INTEGER NOT NULL DEFAULT 0,
+				revoked_at TEXT
+			)`,
+			`CREATE TABLE IF NOT EXISTS enrollment_tokens (
+				token_hash BLOB PRIMARY KEY,
+				display_name TEXT NOT NULL,
+				expires_at TEXT NOT NULL,
+				created_at TEXT NOT NULL,
+				used_at TEXT
+			)`,
+			`CREATE TABLE IF NOT EXISTS device_observations (
+				id INTEGER PRIMARY KEY,
+				observation_id TEXT NOT NULL UNIQUE,
+				device_id TEXT NOT NULL REFERENCES devices(id) ON DELETE CASCADE,
+				sequence INTEGER,
+				collected_at TEXT NOT NULL,
+				received_at TEXT NOT NULL,
+				payload_json BLOB NOT NULL
+			)`,
+			`CREATE INDEX IF NOT EXISTS device_observations_device_collected
+				ON device_observations (device_id, collected_at DESC)`,
+		},
+	},
+}
+
+func Open(ctx context.Context, path string) (*Store, error) {
+	if path == "" {
+		return nil, errors.New("database path is required")
+	}
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return nil, fmt.Errorf("create HAVEN data directory: %w", err)
+	}
+
+	database, err := sql.Open("sqlite", path)
+	if err != nil {
+		return nil, fmt.Errorf("open HAVEN database: %w", err)
+	}
+	database.SetMaxOpenConns(1)
+	database.SetMaxIdleConns(1)
+
+	store := &Store{database: database}
+	if err := store.initialize(ctx); err != nil {
+		_ = database.Close()
+		return nil, err
+	}
+	return store, nil
+}
+
+func (store *Store) initialize(ctx context.Context) error {
+	pragmas := []string{
+		`PRAGMA journal_mode = WAL`,
+		`PRAGMA foreign_keys = ON`,
+		`PRAGMA busy_timeout = 5000`,
+		`PRAGMA synchronous = NORMAL`,
+		`CREATE TABLE IF NOT EXISTS schema_migrations (
+			version INTEGER PRIMARY KEY,
+			applied_at TEXT NOT NULL
+		)`,
+	}
+	for _, statement := range pragmas {
+		if _, err := store.database.ExecContext(ctx, statement); err != nil {
+			return fmt.Errorf("initialize HAVEN database: %w", err)
+		}
+	}
+
+	for _, item := range migrations {
+		var applied int
+		err := store.database.QueryRowContext(
+			ctx,
+			`SELECT COUNT(*) FROM schema_migrations WHERE version = ?`,
+			item.version,
+		).Scan(&applied)
+		if err != nil {
+			return fmt.Errorf("read schema migration state: %w", err)
+		}
+		if applied > 0 {
+			continue
+		}
+
+		transaction, err := store.database.BeginTx(ctx, nil)
+		if err != nil {
+			return fmt.Errorf("begin schema migration: %w", err)
+		}
+		for _, statement := range item.statements {
+			if _, err := transaction.ExecContext(ctx, statement); err != nil {
+				_ = transaction.Rollback()
+				return fmt.Errorf("apply schema migration %d: %w", item.version, err)
+			}
+		}
+		if _, err := transaction.ExecContext(
+			ctx,
+			`INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)`,
+			item.version,
+			time.Now().UTC().Format(time.RFC3339Nano),
+		); err != nil {
+			_ = transaction.Rollback()
+			return fmt.Errorf("record schema migration %d: %w", item.version, err)
+		}
+		if err := transaction.Commit(); err != nil {
+			return fmt.Errorf("commit schema migration %d: %w", item.version, err)
+		}
+	}
+	return nil
+}
+
+func (store *Store) Close() error {
+	return store.database.Close()
+}
+
+func (store *Store) SaveSnapshot(ctx context.Context, snapshot model.SecuritySnapshot) error {
+	deviceID := snapshot.Device.DeviceID
+	if deviceID == "" {
+		deviceID = localDeviceID(snapshot.Device.HostName)
+	}
+	snapshot.Device.DeviceID = deviceID
+	payload, err := historicalPayload(snapshot)
+	if err != nil {
+		return err
+	}
+	observationID, err := randomID("local_")
+	if err != nil {
+		return err
+	}
+	now := time.Now().UTC()
+	collectedAt := snapshot.CollectedAt.UTC()
+	transaction, err := store.database.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin local observation: %w", err)
+	}
+	defer transaction.Rollback()
+
+	_, err = transaction.ExecContext(
+		ctx,
+		`INSERT INTO devices (
+			id, display_name, host_name, operating_system, architecture,
+			trust_state, enrolled_at, last_seen_at, last_collected_at
+		) VALUES (?, ?, ?, ?, ?, 'local', ?, ?, ?)
+		ON CONFLICT(id) DO UPDATE SET
+			display_name = excluded.display_name,
+			host_name = excluded.host_name,
+			operating_system = excluded.operating_system,
+			architecture = excluded.architecture,
+			last_seen_at = excluded.last_seen_at,
+			last_collected_at = excluded.last_collected_at`,
+		deviceID,
+		snapshot.Device.HostName,
+		snapshot.Device.HostName,
+		snapshot.Device.OperatingSystem,
+		snapshot.Device.Architecture,
+		now.Format(time.RFC3339Nano),
+		now.Format(time.RFC3339Nano),
+		collectedAt.Format(time.RFC3339Nano),
+	)
+	if err != nil {
+		return fmt.Errorf("save local device: %w", err)
+	}
+	if err := insertObservation(ctx, transaction, observationID, deviceID, nil, collectedAt, now, payload); err != nil {
+		return err
+	}
+	if err := transaction.Commit(); err != nil {
+		return fmt.Errorf("commit local observation: %w", err)
+	}
+	return nil
+}
+
+func (store *Store) CreateEnrollmentToken(
+	ctx context.Context,
+	tokenHash []byte,
+	displayName string,
+	expiresAt time.Time,
+	now time.Time,
+) error {
+	if len(tokenHash) != sha256.Size {
+		return errors.New("enrollment token hash is invalid")
+	}
+	displayName = normalizeDisplayName(displayName)
+	_, err := store.database.ExecContext(
+		ctx,
+		`INSERT INTO enrollment_tokens (token_hash, display_name, expires_at, created_at)
+		 VALUES (?, ?, ?, ?)`,
+		tokenHash,
+		displayName,
+		expiresAt.UTC().Format(time.RFC3339Nano),
+		now.UTC().Format(time.RFC3339Nano),
+	)
+	if err != nil {
+		return fmt.Errorf("create enrollment token: %w", err)
+	}
+	return nil
+}
+
+func (store *Store) ConsumeEnrollmentToken(
+	ctx context.Context,
+	tokenHash []byte,
+	device EnrollmentDevice,
+	now time.Time,
+) error {
+	transaction, err := store.database.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin device enrollment: %w", err)
+	}
+	defer transaction.Rollback()
+
+	var tokenName, expiresAtValue string
+	var usedAt sql.NullString
+	err = transaction.QueryRowContext(
+		ctx,
+		`SELECT display_name, expires_at, used_at
+		 FROM enrollment_tokens WHERE token_hash = ?`,
+		tokenHash,
+	).Scan(&tokenName, &expiresAtValue, &usedAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		return ErrEnrollmentInvalid
+	}
+	if err != nil {
+		return fmt.Errorf("read enrollment token: %w", err)
+	}
+	expiresAt, err := parseDatabaseTime(expiresAtValue)
+	if err != nil {
+		return err
+	}
+	if usedAt.Valid || !now.UTC().Before(expiresAt) {
+		return ErrEnrollmentInvalid
+	}
+	if device.DisplayName == "" {
+		device.DisplayName = tokenName
+	}
+
+	_, err = transaction.ExecContext(
+		ctx,
+		`INSERT INTO devices (
+			id, display_name, trust_state, certificate_serial,
+			certificate_not_after, enrolled_at
+		) VALUES (?, ?, 'enrolled', ?, ?, ?)`,
+		device.ID,
+		normalizeDisplayName(device.DisplayName),
+		device.CertificateSerial,
+		device.CertificateExpiresAt.UTC().Format(time.RFC3339Nano),
+		now.UTC().Format(time.RFC3339Nano),
+	)
+	if err != nil {
+		return fmt.Errorf("create enrolled device: %w", err)
+	}
+	result, err := transaction.ExecContext(
+		ctx,
+		`UPDATE enrollment_tokens SET used_at = ?
+		 WHERE token_hash = ? AND used_at IS NULL`,
+		now.UTC().Format(time.RFC3339Nano),
+		tokenHash,
+	)
+	if err != nil {
+		return fmt.Errorf("consume enrollment token: %w", err)
+	}
+	rows, err := result.RowsAffected()
+	if err != nil || rows != 1 {
+		return ErrEnrollmentInvalid
+	}
+	if err := transaction.Commit(); err != nil {
+		return fmt.Errorf("commit device enrollment: %w", err)
+	}
+	return nil
+}
+
+func (store *Store) AcceptObservation(
+	ctx context.Context,
+	certificateSerial string,
+	envelope model.ObservationEnvelope,
+	receivedAt time.Time,
+) error {
+	if envelope.Sequence < 1 {
+		return ErrReplay
+	}
+	transaction, err := store.database.BeginTx(ctx, nil)
+	if err != nil {
+		return fmt.Errorf("begin agent observation: %w", err)
+	}
+	defer transaction.Rollback()
+
+	var deviceID string
+	var lastSequence int64
+	var revokedAt sql.NullString
+	err = transaction.QueryRowContext(
+		ctx,
+		`SELECT id, last_sequence, revoked_at
+		 FROM devices WHERE certificate_serial = ?`,
+		certificateSerial,
+	).Scan(&deviceID, &lastSequence, &revokedAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		return ErrUnknownDevice
+	}
+	if err != nil {
+		return fmt.Errorf("read enrolled device: %w", err)
+	}
+	if revokedAt.Valid {
+		return ErrRevokedDevice
+	}
+	if envelope.DeviceID != deviceID {
+		return ErrUnknownDevice
+	}
+	if envelope.Sequence <= lastSequence {
+		return ErrReplay
+	}
+
+	envelope.Snapshot.Device.DeviceID = deviceID
+	payload, err := historicalPayload(envelope.Snapshot)
+	if err != nil {
+		return err
+	}
+	if err := insertObservation(
+		ctx,
+		transaction,
+		envelope.ObservationID,
+		deviceID,
+		&envelope.Sequence,
+		envelope.Snapshot.CollectedAt.UTC(),
+		receivedAt.UTC(),
+		payload,
+	); err != nil {
+		if isUniqueConstraint(err) {
+			return ErrReplay
+		}
+		return err
+	}
+	_, err = transaction.ExecContext(
+		ctx,
+		`UPDATE devices SET
+			host_name = ?, operating_system = ?, architecture = ?,
+			last_seen_at = ?, last_collected_at = ?, last_sequence = ?
+		 WHERE id = ?`,
+		envelope.Snapshot.Device.HostName,
+		envelope.Snapshot.Device.OperatingSystem,
+		envelope.Snapshot.Device.Architecture,
+		receivedAt.UTC().Format(time.RFC3339Nano),
+		envelope.Snapshot.CollectedAt.UTC().Format(time.RFC3339Nano),
+		envelope.Sequence,
+		deviceID,
+	)
+	if err != nil {
+		return fmt.Errorf("update enrolled device: %w", err)
+	}
+	if err := transaction.Commit(); err != nil {
+		return fmt.Errorf("commit agent observation: %w", err)
+	}
+	return nil
+}
+
+func (store *Store) ListDevices(ctx context.Context, now time.Time) ([]model.DeviceRecord, error) {
+	rows, err := store.database.QueryContext(
+		ctx,
+		`SELECT id, display_name, host_name, operating_system, architecture,
+			trust_state, enrolled_at, last_seen_at, last_collected_at,
+			certificate_not_after, revoked_at
+		 FROM devices
+		 ORDER BY display_name COLLATE NOCASE, id`,
+	)
+	if err != nil {
+		return nil, fmt.Errorf("list devices: %w", err)
+	}
+	defer rows.Close()
+
+	devices := []model.DeviceRecord{}
+	for rows.Next() {
+		device, err := scanDevice(rows, now)
+		if err != nil {
+			return nil, err
+		}
+		devices = append(devices, device)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("list devices: %w", err)
+	}
+	return devices, nil
+}
+
+func (store *Store) DeviceDetail(ctx context.Context, deviceID string, now time.Time) (model.DeviceDetail, error) {
+	row := store.database.QueryRowContext(
+		ctx,
+		`SELECT id, display_name, host_name, operating_system, architecture,
+			trust_state, enrolled_at, last_seen_at, last_collected_at,
+			certificate_not_after, revoked_at
+		 FROM devices WHERE id = ?`,
+		deviceID,
+	)
+	device, err := scanDevice(row, now)
+	if err != nil {
+		return model.DeviceDetail{}, err
+	}
+
+	var payload []byte
+	err = store.database.QueryRowContext(
+		ctx,
+		`SELECT payload_json FROM device_observations
+		 WHERE device_id = ? ORDER BY collected_at DESC LIMIT 1`,
+		deviceID,
+	).Scan(&payload)
+	if errors.Is(err, sql.ErrNoRows) {
+		return model.DeviceDetail{Device: device}, nil
+	}
+	if err != nil {
+		return model.DeviceDetail{}, fmt.Errorf("load device observation: %w", err)
+	}
+	var snapshot model.SecuritySnapshot
+	if err := json.Unmarshal(payload, &snapshot); err != nil {
+		return model.DeviceDetail{}, fmt.Errorf("decode device observation: %w", err)
+	}
+	return model.DeviceDetail{Device: device, Snapshot: &snapshot}, nil
+}
+
+func (store *Store) RevokeDevice(ctx context.Context, deviceID string, now time.Time) error {
+	result, err := store.database.ExecContext(
+		ctx,
+		`UPDATE devices SET revoked_at = ?, trust_state = 'revoked'
+		 WHERE id = ? AND trust_state = 'enrolled' AND revoked_at IS NULL`,
+		now.UTC().Format(time.RFC3339Nano),
+		deviceID,
+	)
+	if err != nil {
+		return fmt.Errorf("revoke device: %w", err)
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("read revoked device count: %w", err)
+	}
+	if rows != 1 {
+		return sql.ErrNoRows
+	}
+	return nil
+}
+
+func (store *Store) SeedSyntheticDevices(ctx context.Context, count int, now time.Time) error {
+	if count < 1 || count > 25 {
+		return errors.New("synthetic device count must be from 1 through 25")
+	}
+	platforms := []struct {
+		name, host, operatingSystem, architecture string
+	}{
+		{"Demo Windows workstation", "demo-windows", "Windows 11 Pro", "amd64"},
+		{"Demo Ubuntu server", "demo-server", "Ubuntu Server", "amd64"},
+		{"Demo Linux laptop", "demo-linux-laptop", "Ubuntu Desktop", "amd64"},
+		{"Demo macOS laptop", "demo-macbook", "macOS", "arm64"},
+		{"Demo macOS workstation", "demo-mac", "macOS", "arm64"},
+	}
+	for index := 0; index < count; index++ {
+		platform := platforms[index%len(platforms)]
+		deviceID := fmt.Sprintf("demo-%02d", index+1)
+		collectedAt := now.UTC().Add(-time.Duration(index*4) * time.Minute)
+		enabled := index%4 != 3
+		snapshot := model.SecuritySnapshot{
+			CollectedAt: collectedAt,
+			Device: model.DeviceSummary{
+				DeviceID:        deviceID,
+				HostName:        platform.host,
+				OperatingSystem: platform.operatingSystem,
+				Architecture:    platform.architecture,
+			},
+			FirewallProfiles: []model.FirewallProfileStatus{{Name: "Default", Enabled: &enabled}},
+			Connections:      []model.NetworkConnection{},
+			Notices:          []model.CollectorNotice{},
+		}
+		if strings.Contains(platform.operatingSystem, "Windows") {
+			healthy := true
+			disabled := false
+			administratorCount := 2
+			enabledAdministratorCount := 2
+			threatCount := 0
+			encryptionPercentage := 100.0
+			lastUpdate := collectedAt.Add(-9 * 24 * time.Hour)
+			signatureUpdate := collectedAt.Add(-4 * time.Hour)
+			snapshot.Defender = &model.DefenderStatus{
+				AntivirusEnabled:          &healthy,
+				RealTimeProtectionEnabled: &healthy,
+				BehaviorMonitorEnabled:    &healthy,
+				DownloadProtectionEnabled: &healthy,
+				TamperProtected:           &healthy,
+				SignatureVersion:          "1.0.demo.0",
+				SignatureUpdatedAt:        &signatureUpdate,
+			}
+			snapshot.WindowsBaseline = &model.WindowsBaseline{
+				Update:           &model.WindowsUpdateStatus{LastInstalledAt: &lastUpdate, PendingReboot: &disabled, RebootReasons: []string{}},
+				SystemEncryption: &model.DiskEncryptionStatus{SystemDrive: "C:", VolumeStatus: "FullyEncrypted", ProtectionStatus: "On", EncryptionPercentage: &encryptionPercentage},
+				PlatformSecurity: &model.PlatformSecurityStatus{SecureBootEnabled: &healthy, TPMPresent: &healthy, TPMReady: &healthy},
+				RemoteAccess:     &model.RemoteAccessStatus{RemoteDesktopEnabled: &disabled, NetworkLevelAuthRequired: &healthy, RemoteAssistanceEnabled: &disabled, SMB1Enabled: &disabled, OpenSSHServerRunning: &disabled},
+				LocalAccounts:    &model.LocalAccountStatus{AdministratorCount: &administratorCount, EnabledAdministratorCount: &enabledAdministratorCount},
+				Threats:          &model.DefenderThreatStatus{ActiveThreatCount: &threatCount, RecentDetectionCount: &threatCount},
+			}
+		}
+		if !enabled {
+			snapshot.Notices = append(snapshot.Notices, model.CollectorNotice{
+				Source: "Synthetic firewall", Severity: "warning", Message: "A demo protection signal needs attention.",
+			})
+		}
+		if err := store.saveSyntheticSnapshot(ctx, platform.name, snapshot, now.UTC()); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (store *Store) saveSyntheticSnapshot(
+	ctx context.Context,
+	displayName string,
+	snapshot model.SecuritySnapshot,
+	now time.Time,
+) error {
+	payload, err := historicalPayload(snapshot)
+	if err != nil {
+		return err
+	}
+	observationID, err := randomID("demo_")
+	if err != nil {
+		return err
+	}
+	transaction, err := store.database.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer transaction.Rollback()
+	_, err = transaction.ExecContext(
+		ctx,
+		`INSERT INTO devices (
+			id, display_name, host_name, operating_system, architecture,
+			trust_state, enrolled_at, last_seen_at, last_collected_at
+		) VALUES (?, ?, ?, ?, ?, 'synthetic', ?, ?, ?)
+		ON CONFLICT(id) DO UPDATE SET
+			display_name = excluded.display_name,
+			host_name = excluded.host_name,
+			operating_system = excluded.operating_system,
+			architecture = excluded.architecture,
+			last_seen_at = excluded.last_seen_at,
+			last_collected_at = excluded.last_collected_at`,
+		snapshot.Device.DeviceID,
+		displayName,
+		snapshot.Device.HostName,
+		snapshot.Device.OperatingSystem,
+		snapshot.Device.Architecture,
+		now.Format(time.RFC3339Nano),
+		snapshot.CollectedAt.UTC().Format(time.RFC3339Nano),
+		snapshot.CollectedAt.UTC().Format(time.RFC3339Nano),
+	)
+	if err != nil {
+		return fmt.Errorf("save synthetic device: %w", err)
+	}
+	if err := insertObservation(
+		ctx,
+		transaction,
+		observationID,
+		snapshot.Device.DeviceID,
+		nil,
+		snapshot.CollectedAt,
+		now,
+		payload,
+	); err != nil {
+		return err
+	}
+	return transaction.Commit()
+}
+
+func (store *Store) Backup(ctx context.Context, destination string) error {
+	if destination == "" {
+		return errors.New("backup destination is required")
+	}
+	if _, err := os.Stat(destination); err == nil {
+		return errors.New("backup destination already exists")
+	} else if !errors.Is(err, os.ErrNotExist) {
+		return fmt.Errorf("inspect backup destination: %w", err)
+	}
+	if err := os.MkdirAll(filepath.Dir(destination), 0o700); err != nil {
+		return fmt.Errorf("create backup directory: %w", err)
+	}
+	if _, err := store.database.ExecContext(ctx, `VACUUM INTO ?`, destination); err != nil {
+		return fmt.Errorf("create SQLite backup: %w", err)
+	}
+	if err := os.Chmod(destination, 0o600); err != nil {
+		return fmt.Errorf("protect SQLite backup: %w", err)
+	}
+	return nil
+}
+
+func (store *Store) DeleteBefore(ctx context.Context, cutoff time.Time) (int64, error) {
+	transaction, err := store.database.BeginTx(ctx, nil)
+	if err != nil {
+		return 0, fmt.Errorf("begin observation retention: %w", err)
+	}
+	defer transaction.Rollback()
+	result, err := transaction.ExecContext(
+		ctx,
+		`DELETE FROM device_observations WHERE collected_at < ?`,
+		cutoff.UTC().Format(time.RFC3339Nano),
+	)
+	if err != nil {
+		return 0, fmt.Errorf("expire device observations: %w", err)
+	}
+	deleted, err := result.RowsAffected()
+	if err != nil {
+		return 0, fmt.Errorf("read expired observation count: %w", err)
+	}
+	if _, err := transaction.ExecContext(
+		ctx,
+		`DELETE FROM observations WHERE collected_at < ?`,
+		cutoff.UTC().Format(time.RFC3339Nano),
+	); err != nil {
+		return 0, fmt.Errorf("expire legacy observations: %w", err)
+	}
+	if err := transaction.Commit(); err != nil {
+		return 0, fmt.Errorf("commit observation retention: %w", err)
+	}
+	return deleted, nil
+}
+
+func (store *Store) LatestSnapshot(ctx context.Context, deviceID string) (model.SecuritySnapshot, error) {
+	detail, err := store.DeviceDetail(ctx, deviceID, time.Now().UTC())
+	if err != nil {
+		return model.SecuritySnapshot{}, err
+	}
+	if detail.Snapshot == nil {
+		return model.SecuritySnapshot{}, sql.ErrNoRows
+	}
+	return *detail.Snapshot, nil
+}
+
+func DefaultPath() (string, error) {
+	if configured := os.Getenv("HAVEN_DATA_PATH"); configured != "" {
+		return configured, nil
+	}
+	stateDirectory, err := DefaultStateDirectory()
+	if err != nil {
+		return "", err
+	}
+	return filepath.Join(stateDirectory, "haven.db"), nil
+}
+
+func DefaultStateDirectory() (string, error) {
+	if configured := os.Getenv("HAVEN_STATE_DIRECTORY"); configured != "" {
+		return configured, nil
+	}
+	if runtime.GOOS == "windows" {
+		if localAppData := os.Getenv("LOCALAPPDATA"); localAppData != "" {
+			return filepath.Join(localAppData, "HAVEN"), nil
+		}
+	}
+	if dataHome := os.Getenv("XDG_DATA_HOME"); dataHome != "" {
+		return filepath.Join(dataHome, "haven"), nil
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", fmt.Errorf("find user data directory: %w", err)
+	}
+	if runtime.GOOS == "darwin" {
+		return filepath.Join(home, "Library", "Application Support", "HAVEN"), nil
+	}
+	return filepath.Join(home, ".local", "share", "haven"), nil
+}
+
+func insertObservation(
+	ctx context.Context,
+	transaction *sql.Tx,
+	observationID, deviceID string,
+	sequence *int64,
+	collectedAt, receivedAt time.Time,
+	payload []byte,
+) error {
+	_, err := transaction.ExecContext(
+		ctx,
+		`INSERT INTO device_observations (
+			observation_id, device_id, sequence, collected_at, received_at, payload_json
+		) VALUES (?, ?, ?, ?, ?, ?)`,
+		observationID,
+		deviceID,
+		nullableSequence(sequence),
+		collectedAt.UTC().Format(time.RFC3339Nano),
+		receivedAt.UTC().Format(time.RFC3339Nano),
+		payload,
+	)
+	if err != nil {
+		return fmt.Errorf("save device observation: %w", err)
+	}
+	return nil
+}
+
+func historicalPayload(snapshot model.SecuritySnapshot) ([]byte, error) {
+	// Connection metadata is intentionally live-only. Persisting it would
+	// create an unnecessary household activity trail.
+	persisted := snapshot
+	persisted.Connections = []model.NetworkConnection{}
+	payload, err := json.Marshal(persisted)
+	if err != nil {
+		return nil, fmt.Errorf("encode security observation: %w", err)
+	}
+	return payload, nil
+}
+
+type rowScanner interface {
+	Scan(...any) error
+}
+
+func scanDevice(row rowScanner, now time.Time) (model.DeviceRecord, error) {
+	var device model.DeviceRecord
+	var enrolledAt string
+	var lastSeenAt, lastCollectedAt, certificateExpiresAt, revokedAt sql.NullString
+	err := row.Scan(
+		&device.ID,
+		&device.DisplayName,
+		&device.HostName,
+		&device.OperatingSystem,
+		&device.Architecture,
+		&device.TrustState,
+		&enrolledAt,
+		&lastSeenAt,
+		&lastCollectedAt,
+		&certificateExpiresAt,
+		&revokedAt,
+	)
+	if err != nil {
+		return model.DeviceRecord{}, fmt.Errorf("read device: %w", err)
+	}
+	device.EnrolledAt, err = parseDatabaseTime(enrolledAt)
+	if err != nil {
+		return model.DeviceRecord{}, err
+	}
+	if device.LastSeenAt, err = optionalDatabaseTime(lastSeenAt); err != nil {
+		return model.DeviceRecord{}, err
+	}
+	if device.LastCollectedAt, err = optionalDatabaseTime(lastCollectedAt); err != nil {
+		return model.DeviceRecord{}, err
+	}
+	if device.CertificateExpiresAt, err = optionalDatabaseTime(certificateExpiresAt); err != nil {
+		return model.DeviceRecord{}, err
+	}
+	if device.RevokedAt, err = optionalDatabaseTime(revokedAt); err != nil {
+		return model.DeviceRecord{}, err
+	}
+	device.Status = deviceStatus(device, now)
+	return device, nil
+}
+
+func deviceStatus(device model.DeviceRecord, now time.Time) string {
+	if device.RevokedAt != nil || device.TrustState == "revoked" {
+		return "revoked"
+	}
+	if device.LastSeenAt == nil {
+		return "awaiting-first-report"
+	}
+	if now.UTC().Sub(device.LastSeenAt.UTC()) > 15*time.Minute {
+		return "stale"
+	}
+	return "current"
+}
+
+func optionalDatabaseTime(value sql.NullString) (*time.Time, error) {
+	if !value.Valid {
+		return nil, nil
+	}
+	parsed, err := parseDatabaseTime(value.String)
+	if err != nil {
+		return nil, err
+	}
+	return &parsed, nil
+}
+
+func parseDatabaseTime(value string) (time.Time, error) {
+	parsed, err := time.Parse(time.RFC3339Nano, value)
+	if err != nil {
+		return time.Time{}, fmt.Errorf("parse stored timestamp: %w", err)
+	}
+	return parsed, nil
+}
+
+func normalizeDisplayName(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return "Unnamed device"
+	}
+	if len(value) > 80 {
+		return value[:80]
+	}
+	return value
+}
+
+func localDeviceID(hostName string) string {
+	digest := sha256.Sum256([]byte("HAVEN local device\x00" + hostName))
+	return "local_" + hex.EncodeToString(digest[:8])
+}
+
+func randomID(prefix string) (string, error) {
+	value := make([]byte, 16)
+	if _, err := rand.Read(value); err != nil {
+		return "", fmt.Errorf("generate observation identity: %w", err)
+	}
+	return prefix + hex.EncodeToString(value), nil
+}
+
+func isUniqueConstraint(err error) bool {
+	return err != nil && (strings.Contains(err.Error(), "UNIQUE constraint failed") || strings.Contains(err.Error(), "constraint failed"))
+}
+
+func nullableSequence(sequence *int64) any {
+	if sequence == nil {
+		return nil
+	}
+	return *sequence
+}

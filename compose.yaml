@@ -1,0 +1,24 @@
+name: haven
+
+services:
+  hub:
+    build:
+      context: .
+    image: haven-hub:local
+    restart: unless-stopped
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=16m
+    environment:
+      HAVEN_RETENTION_DAYS: "${HAVEN_RETENTION_DAYS:-90}"
+    ports:
+      - "127.0.0.1:${HAVEN_PORT:-5080}:8080"
+    volumes:
+      - haven-data:/var/lib/haven
+
+volumes:
+  haven-data:
