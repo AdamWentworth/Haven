@@ -16,7 +16,12 @@ const updateFreshnessWindow = 45 * 24 * time.Hour
 func Evaluate(snapshot model.SecuritySnapshot, now time.Time) model.SecuritySnapshot {
 	snapshot.BaselineChecks = []model.BaselineCheck{}
 	snapshot.Findings = []model.SecurityFinding{}
-	if !strings.Contains(strings.ToLower(snapshot.Device.OperatingSystem), "windows") {
+	operatingSystem := strings.ToLower(snapshot.Device.OperatingSystem)
+	if snapshot.LinuxBaseline != nil || strings.Contains(operatingSystem, "linux") || strings.Contains(operatingSystem, "ubuntu") {
+		evaluateLinux(&snapshot)
+		return snapshot
+	}
+	if !strings.Contains(operatingSystem, "windows") {
 		return snapshot
 	}
 
@@ -29,6 +34,178 @@ func Evaluate(snapshot model.SecuritySnapshot, now time.Time) model.SecuritySnap
 	evaluateLocalAccounts(&snapshot)
 	evaluateThreats(&snapshot)
 	return snapshot
+}
+
+func evaluateLinux(snapshot *model.SecuritySnapshot) {
+	evaluateLinuxUpdates(snapshot)
+	evaluateLinuxFirewall(snapshot)
+	evaluateLinuxSSH(snapshot)
+	evaluateLinuxAutomaticUpdates(snapshot)
+	evaluateLinuxAppArmor(snapshot)
+	evaluateLinuxTimeSync(snapshot)
+	evaluateLinuxServices(snapshot)
+	evaluateLinuxStorage(snapshot)
+}
+
+func evaluateLinuxUpdates(snapshot *model.SecuritySnapshot) {
+	if snapshot.LinuxBaseline == nil || snapshot.LinuxBaseline.Updates == nil {
+		addCheck(snapshot, "linux-updates", "Maintenance", "Ubuntu updates", "unknown", "Available package updates could not be verified.", "")
+		addCheck(snapshot, "linux-reboot", "Maintenance", "Restart state", "unknown", "Pending-restart state could not be verified.", "")
+		return
+	}
+	updates := snapshot.LinuxBaseline.Updates
+	if updates.PendingSecurityPackageCount == nil || updates.PendingPackageCount == nil {
+		addCheck(snapshot, "linux-updates", "Maintenance", "Ubuntu updates", "unknown", "Available package updates could not be counted.", "")
+	} else if *updates.PendingSecurityPackageCount > 0 {
+		count := *updates.PendingSecurityPackageCount
+		addCheck(snapshot, "linux-updates", "Maintenance", "Ubuntu updates", "attention", fmt.Sprintf("%d security update(s) are available.", count), fmt.Sprintf("%d total package update(s); package names are intentionally not collected", *updates.PendingPackageCount))
+		addFinding(snapshot, "linux-security-updates", "Maintenance", "Ubuntu security updates are available", "medium", fmt.Sprintf("Ubuntu reports %d pending security update(s).", count), "Review and apply security updates through the server's normal maintenance process, then confirm that HAVEN reports no pending security packages.")
+	} else if *updates.PendingPackageCount > 0 {
+		count := *updates.PendingPackageCount
+		addCheck(snapshot, "linux-updates", "Maintenance", "Ubuntu updates", "configured", fmt.Sprintf("%d routine package update(s) are available and none are classified as security updates.", count), "Package names are intentionally not collected")
+	} else {
+		addCheck(snapshot, "linux-updates", "Maintenance", "Ubuntu updates", "pass", "Ubuntu reports no pending package updates.", "apt update-notifier")
+	}
+
+	if updates.PendingReboot == nil {
+		addCheck(snapshot, "linux-reboot", "Maintenance", "Restart state", "unknown", "Pending-restart state could not be verified.", "")
+	} else if *updates.PendingReboot {
+		addCheck(snapshot, "linux-reboot", "Maintenance", "Restart state", "attention", "Ubuntu reports that a restart is required to finish maintenance.", "/var/run/reboot-required is present")
+		addFinding(snapshot, "linux-pending-reboot", "Maintenance", "The Ubuntu server needs a restart", "low", "Ubuntu reports a pending restart after package maintenance.", "Restart the server during a planned maintenance window after confirming that its hosted applications can be interrupted safely.")
+	} else {
+		addCheck(snapshot, "linux-reboot", "Maintenance", "Restart state", "pass", "Ubuntu does not report a pending restart.", "No reboot-required marker")
+	}
+}
+
+func evaluateLinuxFirewall(snapshot *model.SecuritySnapshot) {
+	if snapshot.LinuxBaseline == nil || snapshot.LinuxBaseline.Firewall == nil || snapshot.LinuxBaseline.Firewall.Active == nil {
+		addCheck(snapshot, "linux-firewall", "Network", "Host firewall", "unknown", "The Linux host firewall state could not be verified.", "")
+		return
+	}
+	firewall := snapshot.LinuxBaseline.Firewall
+	provider := fallback(strings.ToUpper(firewall.Provider), "Linux firewall")
+	if !*firewall.Active {
+		addCheck(snapshot, "linux-firewall", "Network", "Host firewall", "attention", provider+" is not enabled on the host.", "A router boundary or container rules do not replace an explicit host policy")
+		addFinding(snapshot, "linux-firewall-disabled", "Network", "The Ubuntu host firewall is disabled", "medium", provider+" is installed but not enabled, so host-level inbound policy is not being enforced by that provider.", "Inventory the server's required LAN and VPN services, then enable a default-deny host firewall with explicit allow rules. Verify Docker networking separately before applying changes.")
+		return
+	}
+	evidence := provider + " active"
+	if firewall.DefaultInboundAction != "" {
+		evidence += "; inbound default " + strings.ToLower(firewall.DefaultInboundAction)
+	}
+	addCheck(snapshot, "linux-firewall", "Network", "Host firewall", "pass", provider+" is enabled.", evidence)
+}
+
+func evaluateLinuxSSH(snapshot *model.SecuritySnapshot) {
+	if snapshot.LinuxBaseline == nil || snapshot.LinuxBaseline.SSH == nil || snapshot.LinuxBaseline.SSH.ServerRunning == nil {
+		addCheck(snapshot, "linux-ssh", "Remote access", "OpenSSH", "unknown", "The OpenSSH service state could not be verified.", "")
+		return
+	}
+	ssh := snapshot.LinuxBaseline.SSH
+	if !*ssh.ServerRunning {
+		addCheck(snapshot, "linux-ssh", "Remote access", "OpenSSH", "pass", "The OpenSSH server is not running.", "No SSH listener expected")
+		return
+	}
+	rootLogin := strings.ToLower(ssh.PermitRootLogin)
+	passwordAuthentication := strings.ToLower(ssh.PasswordAuthentication)
+	if rootLogin == "yes" {
+		addCheck(snapshot, "linux-ssh", "Remote access", "OpenSSH", "attention", "SSH permits direct root login.", "permitrootlogin yes")
+		addFinding(snapshot, "linux-ssh-root-login", "Remote access", "SSH permits direct root login", "high", "The SSH daemon reports that direct root login is permitted.", "Disable direct root login, use an accountable non-root administrator, and elevate only when required.")
+		return
+	}
+	if passwordAuthentication == "yes" {
+		addCheck(snapshot, "linux-ssh", "Remote access", "OpenSSH", "attention", "SSH password authentication is enabled.", "Public-key authentication: "+fallback(ssh.PublicKeyAuthentication, "not verified"))
+		addFinding(snapshot, "linux-ssh-passwords", "Remote access", "SSH password authentication is enabled", "medium", "The SSH daemon accepts passwords in addition to any configured keys.", "Confirm that key-based access works, then disable SSH password authentication and retain a tested recovery path.")
+		return
+	}
+	if passwordAuthentication == "" || rootLogin == "" {
+		addCheck(snapshot, "linux-ssh", "Remote access", "OpenSSH", "unknown", "SSH is running, but all effective authentication settings could not be verified without additional read-only privilege.", "No usernames, keys, or login source addresses are collected")
+		return
+	}
+	evidence := "Password authentication " + passwordAuthentication + "; root login " + rootLogin
+	if ssh.FailedLoginCount24Hours != nil {
+		evidence += fmt.Sprintf("; %d failed login event(s) in 24h", *ssh.FailedLoginCount24Hours)
+	}
+	addCheck(snapshot, "linux-ssh", "Remote access", "OpenSSH", "configured", "SSH is running with password authentication disabled and direct root password access restricted.", evidence)
+}
+
+func evaluateLinuxAutomaticUpdates(snapshot *model.SecuritySnapshot) {
+	if snapshot.LinuxBaseline == nil || snapshot.LinuxBaseline.AutomaticUpdates == nil || snapshot.LinuxBaseline.AutomaticUpdates.Enabled == nil {
+		addCheck(snapshot, "linux-automatic-updates", "Maintenance", "Automatic security updates", "unknown", "The unattended-upgrades configuration could not be verified.", "")
+		return
+	}
+	status := snapshot.LinuxBaseline.AutomaticUpdates
+	if !*status.Enabled {
+		addCheck(snapshot, "linux-automatic-updates", "Maintenance", "Automatic security updates", "attention", "The unattended-upgrades service is not enabled.", "")
+		addFinding(snapshot, "linux-automatic-updates", "Maintenance", "Automatic Ubuntu updates are disabled", "medium", "The unattended-upgrades service is not enabled.", "Enable and review unattended-upgrades so important security patches are applied within an acceptable maintenance window.")
+		return
+	}
+	evidence := "Enabled"
+	if status.Active != nil {
+		evidence += fmt.Sprintf("; service active: %t", *status.Active)
+	}
+	addCheck(snapshot, "linux-automatic-updates", "Maintenance", "Automatic security updates", "pass", "The unattended-upgrades service is enabled.", evidence)
+}
+
+func evaluateLinuxAppArmor(snapshot *model.SecuritySnapshot) {
+	if snapshot.LinuxBaseline == nil || snapshot.LinuxBaseline.AppArmor == nil || snapshot.LinuxBaseline.AppArmor.Enabled == nil {
+		addCheck(snapshot, "linux-apparmor", "Platform", "AppArmor", "unknown", "AppArmor enforcement could not be verified.", "")
+		return
+	}
+	if !*snapshot.LinuxBaseline.AppArmor.Enabled {
+		addCheck(snapshot, "linux-apparmor", "Platform", "AppArmor", "attention", "AppArmor is not enabled.", "")
+		addFinding(snapshot, "linux-apparmor", "Platform", "AppArmor is disabled", "medium", "Ubuntu is not reporting its mandatory access-control framework as enabled.", "Review why AppArmor is disabled and restore it unless another deliberate mandatory access-control policy replaces it.")
+		return
+	}
+	addCheck(snapshot, "linux-apparmor", "Platform", "AppArmor", "pass", "AppArmor is enabled.", "Kernel enforcement available")
+}
+
+func evaluateLinuxTimeSync(snapshot *model.SecuritySnapshot) {
+	if snapshot.LinuxBaseline == nil || snapshot.LinuxBaseline.TimeSync == nil || snapshot.LinuxBaseline.TimeSync.Synchronized == nil {
+		addCheck(snapshot, "linux-time", "Platform", "Time synchronization", "unknown", "Network time synchronization could not be verified.", "")
+		return
+	}
+	if !*snapshot.LinuxBaseline.TimeSync.Synchronized {
+		addCheck(snapshot, "linux-time", "Platform", "Time synchronization", "attention", "The server clock is not synchronized.", "")
+		addFinding(snapshot, "linux-time", "Platform", "The Ubuntu clock is not synchronized", "medium", "Reliable timestamps are important for certificates, logs, updates, and authentication.", "Restore a trusted network time source and confirm that timedatectl reports synchronization.")
+		return
+	}
+	addCheck(snapshot, "linux-time", "Platform", "Time synchronization", "pass", "The server clock is synchronized.", "timedatectl reports NTPSynchronized=yes")
+}
+
+func evaluateLinuxServices(snapshot *model.SecuritySnapshot) {
+	if snapshot.LinuxBaseline == nil || snapshot.LinuxBaseline.Services == nil || snapshot.LinuxBaseline.Services.FailedUnitCount == nil {
+		addCheck(snapshot, "linux-services", "Reliability", "Failed system services", "unknown", "Failed system-service count could not be verified.", "")
+		return
+	}
+	count := *snapshot.LinuxBaseline.Services.FailedUnitCount
+	if count > 0 {
+		addCheck(snapshot, "linux-services", "Reliability", "Failed system services", "attention", fmt.Sprintf("systemd reports %d failed unit(s).", count), "Unit names are intentionally not retained")
+		addFinding(snapshot, "linux-failed-services", "Reliability", "Ubuntu has failed system services", "low", fmt.Sprintf("systemd reports %d failed unit(s); HAVEN does not retain their names in observation history.", count), "Run systemctl --failed directly on the server, review each unit, and repair or deliberately disable obsolete services.")
+		return
+	}
+	addCheck(snapshot, "linux-services", "Reliability", "Failed system services", "pass", "systemd reports no failed units.", "0 failed units")
+}
+
+func evaluateLinuxStorage(snapshot *model.SecuritySnapshot) {
+	if snapshot.LinuxBaseline == nil || snapshot.LinuxBaseline.Storage == nil || snapshot.LinuxBaseline.Storage.UsedPercentage == nil {
+		addCheck(snapshot, "linux-storage", "Reliability", "Root filesystem capacity", "unknown", "Root filesystem capacity could not be verified.", "")
+		return
+	}
+	storage := snapshot.LinuxBaseline.Storage
+	used := *storage.UsedPercentage
+	evidence := fmt.Sprintf("%.0f%% used on %s", used, fallback(storage.MountPoint, "/"))
+	if used >= 95 {
+		addCheck(snapshot, "linux-storage", "Reliability", "Root filesystem capacity", "attention", "The root filesystem is critically full.", evidence)
+		addFinding(snapshot, "linux-storage-critical", "Reliability", "Ubuntu storage is critically full", "high", evidence+".", "Free space immediately and identify unexpected growth before services or databases fail.")
+		return
+	}
+	if used >= 85 {
+		addCheck(snapshot, "linux-storage", "Reliability", "Root filesystem capacity", "attention", "The root filesystem is running low on free space.", evidence)
+		addFinding(snapshot, "linux-storage-low", "Reliability", "Ubuntu storage is running low", "medium", evidence+".", "Review application data, container images, logs, and backup retention before the filesystem reaches a critical threshold.")
+		return
+	}
+	addCheck(snapshot, "linux-storage", "Reliability", "Root filesystem capacity", "pass", "The root filesystem has reasonable free capacity.", evidence)
 }
 
 func evaluateDefender(snapshot *model.SecuritySnapshot, now time.Time) {

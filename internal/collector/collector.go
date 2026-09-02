@@ -18,6 +18,9 @@ func NewForCurrentPlatform() Collector {
 	if runtime.GOOS == "windows" {
 		return NewWindowsCollector(NewPowerShellRunner(30 * time.Second))
 	}
+	if runtime.GOOS == "linux" {
+		return NewLinuxCollector(NewOSCommandRunner(12 * time.Second))
+	}
 
 	return unsupportedCollector{}
 }

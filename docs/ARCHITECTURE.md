@@ -79,6 +79,8 @@ The public baseline Compose file publishes to host loopback. The private HomeOps
 
 1. **Local foundation:** validate Windows collection, UI, persistence, privacy behavior, and container build.
 2. **Trust foundation:** define versioned messages, enrollment, device certificates, mutual TLS, revocation, and replay resistance.
-3. **Household pilot:** deploy the Dockerized hub through private authenticated access and enroll one native Windows service.
-4. **Multi-platform:** add least-privileged Linux and macOS agents, preserving platform-specific security meaning.
+3. **Household pilot:** deploy the Dockerized hub through private authenticated access and enroll one native Windows agent.
+4. **Native Linux monitoring:** enroll the Ubuntu application host through a boot-persistent, unprivileged service. Collect platform-specific update, firewall, SSH, AppArmor, time, service, storage, and TCP posture without granting the agent Docker control.
+5. **Multi-platform:** add macOS and additional Linux agents with informed owner consent, preserving platform-specific security meaning.
+6. **Network explainability:** keep observed network assets separate from enrolled devices, then combine host listeners, firewall scope, router exposure, and privacy-bounded flow metadata.
 5. **Narrow controls:** add separately privileged allowlisted actions only after the read-only system is trustworthy.

@@ -70,6 +70,8 @@ Current and planned mitigations:
 
 An agent running on a compromised endpoint cannot be assumed to report trustworthy state. HAVEN will distinguish endpoint-reported observations, hub-observed reachability and certificate state, and independent network-sensor observations. Conflicts remain visible instead of being silently reconciled.
 
+The native Ubuntu agent runs as the existing unprivileged deployment account because production automation cannot create a dedicated system identity without separate host authorization. Its user unit denies access to the Docker socket, exposes its home directory read-only except for the agent identity directory, enables `no-new-privileges`, and applies systemd filesystem, namespace, device, and kernel hardening. It never joins a privileged container and receives no command-execution channel from the hub. Root-only posture remains unknown until it can be supplied through a separately reviewed, fixed-output local probe.
+
 ### Collection invades household privacy
 
 Mitigations and requirements:

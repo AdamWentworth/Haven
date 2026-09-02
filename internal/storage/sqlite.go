@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/AdamWentworth/haven/internal/model"
@@ -27,7 +28,9 @@ var (
 )
 
 type Store struct {
-	database *sql.DB
+	database         *sql.DB
+	liveMutex        sync.RWMutex
+	liveObservations map[string]model.SecuritySnapshot
 }
 
 type EnrollmentDevice struct {
@@ -237,7 +240,7 @@ func Open(ctx context.Context, path string) (*Store, error) {
 	database.SetMaxOpenConns(1)
 	database.SetMaxIdleConns(1)
 
-	store := &Store{database: database}
+	store := &Store{database: database, liveObservations: make(map[string]model.SecuritySnapshot)}
 	if err := store.initialize(ctx); err != nil {
 		_ = database.Close()
 		return nil, err
@@ -366,6 +369,7 @@ func (store *Store) SaveSnapshot(ctx context.Context, snapshot model.SecuritySna
 	if err := transaction.Commit(); err != nil {
 		return fmt.Errorf("commit local observation: %w", err)
 	}
+	store.rememberLiveSnapshot(deviceID, snapshot)
 	return nil
 }
 
@@ -550,6 +554,7 @@ func (store *Store) AcceptObservation(
 	if err := transaction.Commit(); err != nil {
 		return fmt.Errorf("commit agent observation: %w", err)
 	}
+	store.rememberLiveSnapshot(deviceID, envelope.Snapshot)
 	return nil
 }
 
@@ -667,6 +672,9 @@ func (store *Store) DeviceDetail(ctx context.Context, deviceID string, now time.
 	if err != nil {
 		return model.DeviceDetail{}, err
 	}
+	if snapshot, ok := store.liveSnapshot(deviceID); ok {
+		return model.DeviceDetail{Device: device, Snapshot: &snapshot}, nil
+	}
 
 	var payload []byte
 	err = store.database.QueryRowContext(
@@ -706,7 +714,27 @@ func (store *Store) RevokeDevice(ctx context.Context, deviceID string, now time.
 	if rows != 1 {
 		return sql.ErrNoRows
 	}
+	store.forgetLiveSnapshot(deviceID)
 	return nil
+}
+
+func (store *Store) rememberLiveSnapshot(deviceID string, snapshot model.SecuritySnapshot) {
+	store.liveMutex.Lock()
+	defer store.liveMutex.Unlock()
+	store.liveObservations[deviceID] = snapshot
+}
+
+func (store *Store) liveSnapshot(deviceID string) (model.SecuritySnapshot, bool) {
+	store.liveMutex.RLock()
+	defer store.liveMutex.RUnlock()
+	snapshot, ok := store.liveObservations[deviceID]
+	return snapshot, ok
+}
+
+func (store *Store) forgetLiveSnapshot(deviceID string) {
+	store.liveMutex.Lock()
+	defer store.liveMutex.Unlock()
+	delete(store.liveObservations, deviceID)
 }
 
 func (store *Store) SeedSyntheticDevices(ctx context.Context, count int, now time.Time) error {
@@ -764,6 +792,23 @@ func (store *Store) SeedSyntheticDevices(ctx context.Context, count int, now tim
 				RemoteAccess:     &model.RemoteAccessStatus{RemoteDesktopEnabled: &disabled, NetworkLevelAuthRequired: &healthy, RemoteAssistanceEnabled: &disabled, SMB1Enabled: &disabled, OpenSSHServerRunning: &disabled},
 				LocalAccounts:    &model.LocalAccountStatus{AdministratorCount: &administratorCount, EnabledAdministratorCount: &enabledAdministratorCount},
 				Threats:          &model.DefenderThreatStatus{ActiveThreatCount: &threatCount, RecentDetectionCount: &threatCount},
+			}
+		} else if strings.Contains(platform.operatingSystem, "Ubuntu") {
+			pendingPackages := index % 3
+			pendingSecurityPackages := 0
+			pendingReboot := false
+			failedUnits := 0
+			storageUsed := 42.0 + float64(index)
+			active := true
+			snapshot.LinuxBaseline = &model.LinuxBaseline{
+				Updates:          &model.LinuxUpdateStatus{PendingPackageCount: &pendingPackages, PendingSecurityPackageCount: &pendingSecurityPackages, PendingReboot: &pendingReboot},
+				Firewall:         &model.LinuxFirewallStatus{Provider: "ufw", Active: &enabled, DefaultInboundAction: "Block", DefaultOutboundAction: "Allow"},
+				SSH:              &model.LinuxSSHStatus{ServerRunning: &active, PasswordAuthentication: "no", PermitRootLogin: "prohibit-password", PublicKeyAuthentication: "yes"},
+				Services:         &model.LinuxServiceStatus{FailedUnitCount: &failedUnits},
+				AutomaticUpdates: &model.LinuxAutomaticUpdateStatus{Enabled: &active, Active: &active},
+				AppArmor:         &model.LinuxAppArmorStatus{Enabled: &active},
+				TimeSync:         &model.LinuxTimeSyncStatus{Synchronized: &active},
+				Storage:          &model.LinuxStorageStatus{MountPoint: "/", UsedPercentage: &storageUsed},
 			}
 		}
 		if !enabled {
@@ -896,6 +941,13 @@ func (store *Store) DeleteBefore(ctx context.Context, cutoff time.Time) (int64, 
 	if err := transaction.Commit(); err != nil {
 		return 0, fmt.Errorf("commit observation retention: %w", err)
 	}
+	store.liveMutex.Lock()
+	for deviceID, snapshot := range store.liveObservations {
+		if snapshot.CollectedAt.Before(cutoff.UTC()) {
+			delete(store.liveObservations, deviceID)
+		}
+	}
+	store.liveMutex.Unlock()
 	return deleted, nil
 }
 

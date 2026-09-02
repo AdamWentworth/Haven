@@ -130,11 +130,64 @@ func TestEvaluateFlagsUnrestrictedRDPFirewallScope(t *testing.T) {
 	assertFinding(t, evaluated.Findings, "rdp-firewall-scope", "medium")
 }
 
-func TestEvaluateDoesNotCreateWindowsClaimsForOtherPlatforms(t *testing.T) {
-	snapshot := model.SecuritySnapshot{Device: model.DeviceSummary{OperatingSystem: "Ubuntu Server"}}
+func TestEvaluateDoesNotCreatePlatformClaimsForUnsupportedPlatforms(t *testing.T) {
+	snapshot := model.SecuritySnapshot{Device: model.DeviceSummary{OperatingSystem: "macOS"}}
 	evaluated := Evaluate(snapshot, time.Now())
 	if len(evaluated.BaselineChecks) != 0 || len(evaluated.Findings) != 0 {
-		t.Fatal("non-Windows observations must not receive Windows findings")
+		t.Fatal("unsupported observations must not receive platform findings")
+	}
+}
+
+func TestEvaluateHealthyLinuxBaseline(t *testing.T) {
+	snapshot := healthyLinuxSnapshot()
+	evaluated := Evaluate(snapshot, time.Now())
+	if len(evaluated.BaselineChecks) != 9 {
+		t.Fatalf("expected 9 Linux checks, got %d", len(evaluated.BaselineChecks))
+	}
+	if len(evaluated.Findings) != 0 {
+		t.Fatalf("expected no Linux findings, got %#v", evaluated.Findings)
+	}
+	for _, check := range evaluated.BaselineChecks {
+		if check.Status != "pass" && check.Status != "configured" {
+			t.Fatalf("expected healthy or configured Linux check, got %#v", check)
+		}
+	}
+}
+
+func TestEvaluateActionableLinuxBaseline(t *testing.T) {
+	snapshot := healthyLinuxSnapshot()
+	snapshot.LinuxBaseline.Updates.PendingSecurityPackageCount = intPointer(2)
+	snapshot.LinuxBaseline.Updates.PendingPackageCount = intPointer(6)
+	snapshot.LinuxBaseline.Updates.PendingReboot = boolPointer(true)
+	snapshot.LinuxBaseline.Firewall.Active = boolPointer(false)
+	snapshot.LinuxBaseline.SSH.PasswordAuthentication = "yes"
+	snapshot.LinuxBaseline.AutomaticUpdates.Enabled = boolPointer(false)
+	snapshot.LinuxBaseline.Services.FailedUnitCount = intPointer(1)
+	snapshot.LinuxBaseline.Storage.UsedPercentage = floatPointer(91)
+
+	evaluated := Evaluate(snapshot, time.Now())
+	assertFinding(t, evaluated.Findings, "linux-security-updates", "medium")
+	assertFinding(t, evaluated.Findings, "linux-pending-reboot", "low")
+	assertFinding(t, evaluated.Findings, "linux-firewall-disabled", "medium")
+	assertFinding(t, evaluated.Findings, "linux-ssh-passwords", "medium")
+	assertFinding(t, evaluated.Findings, "linux-automatic-updates", "medium")
+	assertFinding(t, evaluated.Findings, "linux-failed-services", "low")
+	assertFinding(t, evaluated.Findings, "linux-storage-low", "medium")
+}
+
+func healthyLinuxSnapshot() model.SecuritySnapshot {
+	return model.SecuritySnapshot{
+		Device: model.DeviceSummary{OperatingSystem: "Ubuntu 24.04 LTS"},
+		LinuxBaseline: &model.LinuxBaseline{
+			Updates:          &model.LinuxUpdateStatus{PendingPackageCount: intPointer(0), PendingSecurityPackageCount: intPointer(0), PendingReboot: boolPointer(false)},
+			Firewall:         &model.LinuxFirewallStatus{Provider: "ufw", Active: boolPointer(true), DefaultInboundAction: "Block"},
+			SSH:              &model.LinuxSSHStatus{ServerRunning: boolPointer(true), PasswordAuthentication: "no", PermitRootLogin: "prohibit-password", PublicKeyAuthentication: "yes"},
+			Services:         &model.LinuxServiceStatus{FailedUnitCount: intPointer(0)},
+			AutomaticUpdates: &model.LinuxAutomaticUpdateStatus{Enabled: boolPointer(true), Active: boolPointer(true)},
+			AppArmor:         &model.LinuxAppArmorStatus{Enabled: boolPointer(true)},
+			TimeSync:         &model.LinuxTimeSyncStatus{Synchronized: boolPointer(true)},
+			Storage:          &model.LinuxStorageStatus{MountPoint: "/", UsedPercentage: floatPointer(45)},
+		},
 	}
 }
 
@@ -173,3 +226,4 @@ func findCheck(t *testing.T, checks []model.BaselineCheck, id string) model.Base
 func boolPointer(value bool) *bool           { return &value }
 func intPointer(value int) *int              { return &value }
 func timePointer(value time.Time) *time.Time { return &value }
+func floatPointer(value float64) *float64    { return &value }

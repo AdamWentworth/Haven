@@ -15,6 +15,7 @@ RUN go mod download
 COPY . .
 COPY --from=web-build /source/internal/webui/dist/ internal/webui/dist/
 RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /out/haven-hub ./cmd/haven-hub
+RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /out/haven-agent ./cmd/haven-agent
 RUN mkdir -p /out/data && touch /out/data/.haven-volume
 
 FROM scratch
@@ -25,6 +26,7 @@ LABEL org.opencontainers.image.source="https://github.com/AdamWentworth/Haven" \
       org.opencontainers.image.revision="${HAVEN_BUILD_SHA}"
 COPY --from=go-build /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
 COPY --from=go-build /out/haven-hub /haven-hub
+COPY --from=go-build /out/haven-agent /haven-agent
 COPY --from=go-build --chown=65532:65532 /out/data/ /var/lib/haven/
 USER 65532:65532
 VOLUME ["/var/lib/haven"]

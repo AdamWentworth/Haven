@@ -11,6 +11,7 @@ import type {
   FindingReview,
   FindingReviewState,
   FirewallProfileStatus,
+  LinuxBaseline,
   NetworkConnection,
   PasskeyInfo,
   RuntimeStatus,
@@ -127,6 +128,15 @@ function formatInterval(seconds: number) {
   return minutes < 60 ? `${minutes} min` : `${Math.round(minutes / 60)} hr`;
 }
 
+function formatBytes(value: number | null | undefined) {
+  if (value === null || value === undefined || !Number.isFinite(value)) return "Not reported";
+  const units = ["B", "KiB", "MiB", "GiB", "TiB"];
+  let size = Math.max(0, value);
+  let unit = 0;
+  while (size >= 1024 && unit < units.length - 1) { size /= 1024; unit += 1; }
+  return `${size >= 10 || unit === 0 ? size.toFixed(0) : size.toFixed(1)} ${units[unit]}`;
+}
+
 function booleanValue(value: boolean | null) {
   if (value === true) return { label: "On", className: "value-good" };
   if (value === false) return { label: "Off", className: "value-bad" };
@@ -215,6 +225,35 @@ function DefenderPanel({ defender }: { defender: DefenderStatus | null }) {
   );
 }
 
+function LinuxPanel({ baseline }: { baseline: LinuxBaseline }) {
+  const updates = baseline.updates;
+  const ssh = baseline.ssh;
+  const storage = baseline.storage;
+  const details = [
+    ["Available updates", updates?.pendingPackageCount === null || updates?.pendingPackageCount === undefined ? "Not verified" : String(updates.pendingPackageCount)],
+    ["Security updates", updates?.pendingSecurityPackageCount === null || updates?.pendingSecurityPackageCount === undefined ? "Not verified" : String(updates.pendingSecurityPackageCount)],
+    ["Restart required", booleanValue(updates?.pendingReboot ?? null).label],
+    ["Automatic updates", booleanValue(baseline.automaticUpdates?.enabled ?? null).label],
+    ["AppArmor", booleanValue(baseline.appArmor?.enabled ?? null).label],
+    ["Clock synchronized", booleanValue(baseline.timeSync?.synchronized ?? null).label],
+    ["OpenSSH server", booleanValue(ssh?.serverRunning ?? null).label],
+    ["SSH password authentication", ssh?.passwordAuthentication || "Not fully verified"],
+    ["SSH root login", ssh?.permitRootLogin || "Not fully verified"],
+    ["Failed systemd units", baseline.services?.failedUnitCount === null || baseline.services?.failedUnitCount === undefined ? "Not verified" : String(baseline.services.failedUnitCount)],
+    ["Root filesystem", storage?.usedPercentage === null || storage?.usedPercentage === undefined ? "Not verified" : `${storage.usedPercentage.toFixed(0)}% used · ${formatBytes(storage.availableBytes)} available`],
+  ];
+  return (
+    <section className="panel" aria-labelledby="linux-title">
+      <PanelHeading eyebrow="HOST PROTECTION" title="Ubuntu host posture" id="linux-title" icon={<ServerIcon />} accent="blue">
+        Read-only status from the native Linux agent
+      </PanelHeading>
+      <dl className="details-grid">
+        {details.map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{value}</dd></div>)}
+      </dl>
+    </section>
+  );
+}
+
 function PanelHeading({
   eyebrow,
   title,
@@ -244,8 +283,8 @@ function PanelHeading({
 function FirewallPanel({ profiles }: { profiles: FirewallProfileStatus[] }) {
   return (
     <section className="panel" aria-labelledby="firewall-title">
-      <PanelHeading eyebrow="NETWORK BOUNDARY" title="Firewall profiles" id="firewall-title" icon={<FirewallIcon />} accent="amber">
-        Domain, private, and public network behavior
+      <PanelHeading eyebrow="NETWORK BOUNDARY" title="Host firewall" id="firewall-title" icon={<FirewallIcon />} accent="amber">
+        Reported host-level inbound and outbound policy
       </PanelHeading>
       <div className="profile-grid">
         {profiles.length === 0 ? (
@@ -303,7 +342,7 @@ function ConnectionsPanel({ connections }: { connections: NetworkConnection[] })
               <tr><td colSpan={4} className="empty-state">{connections.length ? "No connections match this filter." : "No TCP connections were returned."}</td></tr>
             ) : filtered.map((connection) => (
               <tr key={`${connection.processId}-${connection.localAddress}-${connection.localPort}-${connection.remoteAddress}-${connection.remotePort}-${connection.state}`}>
-                <td><div className="process-name">{connection.processName || "Unknown"}</div><div className="process-id">PID {connection.processId}</div></td>
+                <td><div className="process-name">{connection.processName || "Owner unavailable"}</div><div className="process-id">{connection.processId > 0 ? `PID ${connection.processId}` : "Process hidden from this agent"}</div></td>
                 <td className="endpoint">{endpoint(connection.localAddress, connection.localPort)}</td>
                 <td className="endpoint">{endpoint(connection.remoteAddress, connection.remotePort)}</td>
                 <td className="state">{connection.state}</td>
@@ -319,12 +358,13 @@ function ConnectionsPanel({ connections }: { connections: NetworkConnection[] })
 
 function baselineIcon(id: string) {
   if (id === "defender" || id === "threats") return <DefenderIcon />;
-  if (id === "firewall") return <FirewallIcon />;
-  if (id === "updates") return <UpdateIcon />;
+  if (id === "firewall" || id === "linux-firewall") return <FirewallIcon />;
+  if (id === "updates" || id === "linux-updates" || id === "linux-reboot" || id === "linux-automatic-updates") return <UpdateIcon />;
   if (id === "encryption") return <LockIcon />;
-  if (id === "secure-boot" || id === "tpm") return <ChipIcon />;
-  if (id === "remote-access") return <RemoteAccessIcon />;
+  if (id === "secure-boot" || id === "tpm" || id === "linux-apparmor" || id === "linux-time") return <ChipIcon />;
+  if (id === "remote-access" || id === "linux-ssh") return <RemoteAccessIcon />;
   if (id === "local-admins") return <UsersIcon />;
+  if (id === "linux-services" || id === "linux-storage") return <ServerIcon />;
   return <HelpIcon />;
 }
 
@@ -403,7 +443,7 @@ function AwaitingAgents({ devices, runtime, passkeys, actions, audit, error, sel
       <PasskeyPanel passkeys={passkeys} add={addOwnerPasskey} remove={removeOwnerPasskey} busy={actionBusy} />
       <ActionCenter actions={actions} audit={audit} capabilities={runtime?.actionCapabilities || []} run={() => undefined} busy={actionBusy} />
     </main>
-    <footer><span>HAVEN milestone 0.6 · Agent hub</span><span>Observe continuously. Act deliberately.</span></footer>
+    <footer><span>HAVEN milestone 0.7 · Native agent hub</span><span>Observe continuously. Act deliberately.</span></footer>
   </>;
 }
 
@@ -438,7 +478,7 @@ function ActivityPanel({ events }: { events: SecurityEvent[] }) {
   );
 }
 
-function BaselinePanel({ checks, collectedAt }: { checks: BaselineCheck[]; collectedAt: string }) {
+function BaselinePanel({ checks, collectedAt, platform }: { checks: BaselineCheck[]; collectedAt: string; platform: string }) {
   if (checks.length === 0) return null;
   const passing = checks.filter((check) => check.status === "pass").length;
   const configured = checks.filter((check) => check.status === "configured").length;
@@ -446,7 +486,7 @@ function BaselinePanel({ checks, collectedAt }: { checks: BaselineCheck[]; colle
   const statusTone = (status: BaselineCheck["status"]): Tone => status === "pass" ? "healthy" : status === "configured" ? "configured" : status === "attention" ? "attention" : "unknown";
   return (
     <section className="panel baseline-panel" aria-labelledby="baseline-title">
-      <PanelHeading eyebrow="WINDOWS SECURITY BASELINE" title="Posture checks" id="baseline-title" icon={<ChipIcon />} accent="blue">
+      <PanelHeading eyebrow={`${platform.toUpperCase()} SECURITY BASELINE`} title="Posture checks" id="baseline-title" icon={<ChipIcon />} accent="blue">
         {passing} healthy{configured > 0 ? `, ${configured} intentionally configured` : ""}; unverified is never counted as safe
       </PanelHeading>
       <div className="baseline-grid">
@@ -466,11 +506,15 @@ function BaselinePanel({ checks, collectedAt }: { checks: BaselineCheck[]; colle
 }
 
 function Application({ snapshot, devices, events, runtime, selectedDevice, selectDevice, refresh, refreshing, error, demoMode, alertsEnabled, alertsSupported, enableAlerts, reviews, audit, actions, passkeys, reviewFinding, runAction, addOwnerPasskey, removeOwnerPasskey, actionBusy, signOut }: { snapshot: SecuritySnapshot; devices: DeviceRecord[]; events: SecurityEvent[]; runtime: RuntimeStatus | null; selectedDevice: DeviceRecord | null; selectDevice: (id: string) => void; refresh: () => void; refreshing: boolean; error: string | null; demoMode: boolean; alertsEnabled: boolean; alertsSupported: boolean; enableAlerts: () => void; reviews: FindingReview[]; audit: AuditEvent[]; actions: SecurityAction[]; passkeys: PasskeyInfo[]; reviewFinding: (finding: SecurityFinding, state: FindingReviewState) => void; runAction: (kind: SecurityActionKind) => void; addOwnerPasskey: () => void; removeOwnerPasskey: (passkey: PasskeyInfo) => void; actionBusy: boolean; signOut: () => void }) {
+  const isLinux = snapshot.linuxBaseline !== null || /linux|ubuntu/i.test(snapshot.device.operatingSystem);
   const defenderHealthy = snapshot.defender?.antivirusEnabled === true
     && snapshot.defender.realTimeProtectionEnabled === true
     && snapshot.defender.tamperProtected !== false;
   const firewallsKnown = snapshot.firewallProfiles.length > 0;
   const firewallsEnabled = firewallsKnown && snapshot.firewallProfiles.every((profile) => profile.enabled === true);
+  const linuxHardeningKnown = snapshot.linuxBaseline?.appArmor?.enabled !== null && snapshot.linuxBaseline?.appArmor?.enabled !== undefined
+    && snapshot.linuxBaseline?.automaticUpdates?.enabled !== null && snapshot.linuxBaseline?.automaticUpdates?.enabled !== undefined;
+  const linuxHardeningHealthy = snapshot.linuxBaseline?.appArmor?.enabled === true && snapshot.linuxBaseline?.automaticUpdates?.enabled === true;
   const established = snapshot.connections.filter((item) => item.state.toLowerCase() === "established").length;
   const listening = snapshot.connections.filter((item) => item.state.toLowerCase() === "listen").length;
 
@@ -495,20 +539,20 @@ function Application({ snapshot, devices, events, runtime, selectedDevice, selec
           <div className="collection-time"><span>Last observation</span><strong>{formatDate(snapshot.collectedAt)}</strong></div>
         </section>
         <section className="summary-grid" aria-label="Security summary">
-          <SummaryCard icon={<DefenderIcon />} accent="blue" title="Protection" label={snapshot.defender ? (defenderHealthy ? "Protected" : "Attention") : "Unavailable"} tone={snapshot.defender ? (defenderHealthy ? "healthy" : "attention") : "unknown"}>{snapshot.defender ? (defenderHealthy ? "Antivirus and real-time monitoring are active." : "One or more protection signals are off or unavailable.") : "Defender status was not returned."}</SummaryCard>
+          <SummaryCard icon={isLinux ? <ChipIcon /> : <DefenderIcon />} accent="blue" title={isLinux ? "Host hardening" : "Protection"} label={isLinux ? (linuxHardeningKnown ? (linuxHardeningHealthy ? "Active" : "Attention") : "Unavailable") : snapshot.defender ? (defenderHealthy ? "Protected" : "Attention") : "Unavailable"} tone={isLinux ? (linuxHardeningKnown ? (linuxHardeningHealthy ? "healthy" : "attention") : "unknown") : snapshot.defender ? (defenderHealthy ? "healthy" : "attention") : "unknown"}>{isLinux ? (linuxHardeningKnown ? (linuxHardeningHealthy ? "AppArmor and automatic update protections are enabled." : "One or more Linux hardening signals need review.") : "Linux hardening status was not fully returned.") : snapshot.defender ? (defenderHealthy ? "Antivirus and real-time monitoring are active." : "One or more protection signals are off or unavailable.") : "Defender status was not returned."}</SummaryCard>
           <SummaryCard icon={<FirewallIcon />} accent="amber" title="Firewall" label={firewallsKnown ? (firewallsEnabled ? "Enabled" : "Attention") : "Unavailable"} tone={firewallsKnown ? (firewallsEnabled ? "healthy" : "danger") : "unknown"}>{firewallsKnown ? (firewallsEnabled ? `All ${snapshot.firewallProfiles.length} firewall profiles are enabled.` : "At least one firewall profile is disabled.") : "Firewall profile data was not returned."}</SummaryCard>
           <SummaryCard icon={<NetworkIcon />} accent="cyan" title="Network" label={`${established} connected`} tone="healthy">{established} established and {listening} listening TCP endpoints observed right now. These are not threat counts.</SummaryCard>
           <SummaryCard icon={<ActivityIcon />} accent="green" title="Monitor" label={runtime?.localCollection && runtime.monitor.enabled ? `Every ${formatInterval(runtime.monitor.intervalSeconds)}` : "Agent reported"} tone={runtime?.monitor.lastCollectionError ? "attention" : "healthy"}>{runtime?.localCollection ? (runtime.monitor.lastCollectionError || (runtime.monitor.lastSuccessfulAt ? `Last automatic observation succeeded ${formatDate(runtime.monitor.lastSuccessfulAt)}.` : "Automatic monitoring is starting.")) : `Latest authenticated agent observation arrived ${formatDate(snapshot.collectedAt)}.`}</SummaryCard>
         </section>
         {!demoMode && <><PasskeyPanel passkeys={passkeys} add={addOwnerPasskey} remove={removeOwnerPasskey} busy={actionBusy} /><ActionCenter actions={actions} audit={audit} capabilities={runtime?.actionCapabilities || []} run={runAction} busy={actionBusy} /></>}
         <ActivityPanel events={events} />
-        {(snapshot.baselineChecks || []).length > 0 && <><FindingsPanel findings={snapshot.findings || []} checks={snapshot.baselineChecks || []} reviews={reviews} review={reviewFinding} /><BaselinePanel checks={snapshot.baselineChecks || []} collectedAt={snapshot.collectedAt} /></>}
+        {(snapshot.baselineChecks || []).length > 0 && <><FindingsPanel findings={snapshot.findings || []} checks={snapshot.baselineChecks || []} reviews={reviews} review={reviewFinding} /><BaselinePanel checks={snapshot.baselineChecks || []} collectedAt={snapshot.collectedAt} platform={isLinux ? "Linux" : "Windows"} /></>}
         {snapshot.notices.length > 0 && <section className="panel notices-panel" aria-labelledby="notices-title"><PanelHeading eyebrow="COLLECTION NOTES" title="Some signals could not be verified" id="notices-title" icon={<AlertIcon />} accent="amber">A collection limitation is not automatically a security problem</PanelHeading><ul className="notices-list">{snapshot.notices.map((notice, index) => <li className="notice" key={`${notice.source}-${index}`}><strong>{notice.source}: </strong>{notice.message}</li>)}</ul></section>}
-        <DefenderPanel defender={snapshot.defender} />
+        {isLinux && snapshot.linuxBaseline ? <LinuxPanel baseline={snapshot.linuxBaseline} /> : <DefenderPanel defender={snapshot.defender} />}
         <FirewallPanel profiles={snapshot.firewallProfiles} />
         <ConnectionsPanel connections={snapshot.connections} />
       </main>
-      <footer><span>HAVEN milestone 0.6 · Authenticated Action Center</span><span>Observe continuously. Act deliberately.</span></footer>
+      <footer><span>HAVEN milestone 0.7 · Native Linux monitoring</span><span>Observe continuously. Act deliberately.</span></footer>
     </>
   );
 }

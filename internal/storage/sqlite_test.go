@@ -3,6 +3,7 @@ package storage
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"path/filepath"
 	"testing"
@@ -46,8 +47,19 @@ func TestStoreSavesLoadsAndExpiresSnapshots(t *testing.T) {
 	if loaded.Device.HostName != "test-device" || !loaded.CollectedAt.Equal(collectedAt) {
 		t.Fatalf("unexpected stored snapshot: %#v", loaded)
 	}
-	if len(loaded.Connections) != 0 {
-		t.Fatal("connection metadata must remain live-only")
+	if len(loaded.Connections) != 1 {
+		t.Fatal("the current in-memory observation should retain live connection metadata")
+	}
+	var historicalPayloadJSON []byte
+	if err := store.database.QueryRowContext(ctx, `SELECT payload_json FROM device_observations WHERE device_id = ? ORDER BY collected_at DESC LIMIT 1`, "test-device-id").Scan(&historicalPayloadJSON); err != nil {
+		t.Fatal(err)
+	}
+	var historical model.SecuritySnapshot
+	if err := json.Unmarshal(historicalPayloadJSON, &historical); err != nil {
+		t.Fatal(err)
+	}
+	if len(historical.Connections) != 0 {
+		t.Fatal("connection metadata must never be persisted")
 	}
 
 	deleted, err := store.DeleteBefore(ctx, collectedAt.Add(time.Second))
@@ -290,10 +302,14 @@ func TestEnrollmentReplayRevocationAndBackup(t *testing.T) {
 		t.Fatalf("expected one-time token rejection, got %v", err)
 	}
 
-	snapshot := model.SecuritySnapshot{CollectedAt: now, Device: model.DeviceSummary{HostName: "test-laptop", OperatingSystem: "Test OS", Architecture: "amd64"}, FirewallProfiles: []model.FirewallProfileStatus{}, Connections: []model.NetworkConnection{}, Notices: []model.CollectorNotice{}}
+	snapshot := model.SecuritySnapshot{CollectedAt: now, Device: model.DeviceSummary{HostName: "test-laptop", OperatingSystem: "Test OS", Architecture: "amd64"}, FirewallProfiles: []model.FirewallProfileStatus{}, Connections: []model.NetworkConnection{{Protocol: "TCP", State: "Listen", LocalPort: 443}}, Notices: []model.CollectorNotice{}}
 	envelope := model.ObservationEnvelope{ObservationID: "obs_test", DeviceID: device.ID, Sequence: 1, Snapshot: snapshot}
 	if err := store.AcceptObservation(ctx, device.CertificateSerial, envelope, now); err != nil {
 		t.Fatal(err)
+	}
+	liveDetail, err := store.DeviceDetail(ctx, device.ID, now)
+	if err != nil || liveDetail.Snapshot == nil || len(liveDetail.Snapshot.Connections) != 1 {
+		t.Fatalf("expected the current remote observation to retain live connections in memory: %#v, %v", liveDetail, err)
 	}
 	if err := store.AcceptObservation(ctx, device.CertificateSerial, envelope, now); !errors.Is(err, ErrReplay) {
 		t.Fatalf("expected replay rejection, got %v", err)
@@ -322,5 +338,8 @@ func TestEnrollmentReplayRevocationAndBackup(t *testing.T) {
 	}
 	if detail.Device.Status != "revoked" || detail.Snapshot == nil {
 		t.Fatalf("backup did not preserve device state: %#v", detail)
+	}
+	if len(detail.Snapshot.Connections) != 0 {
+		t.Fatal("backup must not contain live connection metadata")
 	}
 }

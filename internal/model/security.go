@@ -9,11 +9,72 @@ type SecuritySnapshot struct {
 	Device           DeviceSummary           `json:"device"`
 	Defender         *DefenderStatus         `json:"defender"`
 	WindowsBaseline  *WindowsBaseline        `json:"windowsBaseline"`
+	LinuxBaseline    *LinuxBaseline          `json:"linuxBaseline"`
 	BaselineChecks   []BaselineCheck         `json:"baselineChecks"`
 	Findings         []SecurityFinding       `json:"findings"`
 	FirewallProfiles []FirewallProfileStatus `json:"firewallProfiles"`
 	Connections      []NetworkConnection     `json:"connections"`
 	Notices          []CollectorNotice       `json:"notices"`
+}
+
+// LinuxBaseline contains host-level, privacy-bounded Linux posture. It keeps
+// counts and effective configuration states, never usernames, login source
+// addresses, package names, journal contents, or file paths from user data.
+type LinuxBaseline struct {
+	Updates          *LinuxUpdateStatus          `json:"updates"`
+	Firewall         *LinuxFirewallStatus        `json:"firewall"`
+	SSH              *LinuxSSHStatus             `json:"ssh"`
+	Services         *LinuxServiceStatus         `json:"services"`
+	AutomaticUpdates *LinuxAutomaticUpdateStatus `json:"automaticUpdates"`
+	AppArmor         *LinuxAppArmorStatus        `json:"appArmor"`
+	TimeSync         *LinuxTimeSyncStatus        `json:"timeSync"`
+	Storage          *LinuxStorageStatus         `json:"storage"`
+}
+
+type LinuxUpdateStatus struct {
+	PendingPackageCount         *int  `json:"pendingPackageCount"`
+	PendingSecurityPackageCount *int  `json:"pendingSecurityPackageCount"`
+	PendingReboot               *bool `json:"pendingReboot"`
+}
+
+type LinuxFirewallStatus struct {
+	Provider              string `json:"provider"`
+	Active                *bool  `json:"active"`
+	DefaultInboundAction  string `json:"defaultInboundAction,omitempty"`
+	DefaultOutboundAction string `json:"defaultOutboundAction,omitempty"`
+}
+
+type LinuxSSHStatus struct {
+	ServerRunning           *bool  `json:"serverRunning"`
+	PasswordAuthentication  string `json:"passwordAuthentication,omitempty"`
+	PermitRootLogin         string `json:"permitRootLogin,omitempty"`
+	PublicKeyAuthentication string `json:"publicKeyAuthentication,omitempty"`
+	FailedLoginCount24Hours *int   `json:"failedLoginCount24Hours"`
+}
+
+type LinuxServiceStatus struct {
+	FailedUnitCount *int `json:"failedUnitCount"`
+}
+
+type LinuxAutomaticUpdateStatus struct {
+	Enabled *bool `json:"enabled"`
+	Active  *bool `json:"active"`
+}
+
+type LinuxAppArmorStatus struct {
+	Enabled *bool `json:"enabled"`
+}
+
+type LinuxTimeSyncStatus struct {
+	Synchronized *bool `json:"synchronized"`
+}
+
+type LinuxStorageStatus struct {
+	MountPoint     string   `json:"mountPoint"`
+	FileSystem     string   `json:"fileSystem,omitempty"`
+	CapacityBytes  *int64   `json:"capacityBytes"`
+	AvailableBytes *int64   `json:"availableBytes"`
+	UsedPercentage *float64 `json:"usedPercentage"`
 }
 
 // WindowsBaseline contains privacy-bounded host posture. It records counts and

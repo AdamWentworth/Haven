@@ -14,6 +14,7 @@ The current implementation provides:
 - Read-only Windows collection for Microsoft Defender, Windows Firewall, device posture, and up to 250 established or listening TCP endpoints
 - SQLite posture history with migrations, consistent online backups, a 90-day default retention window, and no historical storage of connection details
 - A native Go agent with one-time enrollment, a unique ECDSA certificate, and TLS 1.3 mutual authentication
+- Native Ubuntu posture collection for updates, restart state, UFW policy, SSH, AppArmor, time synchronization, failed services, root-filesystem capacity, and live TCP endpoints
 - Strictly increasing report sequences, timestamp checks, payload limits, rate limits, device revocation, and versioned messages
 - A device inventory and detail view with explicitly synthetic demo fixtures for portfolio work
 - Explainable Windows baseline checks for servicing, BitLocker, Secure Boot, TPM, remote access, local administrator count, and Defender threat counts
@@ -160,6 +161,6 @@ Haven/
 
 ## Next security milestone
 
-The next milestone is native endpoint-agent service packaging and authenticated action routing, followed by network explainability: classify listeners and connections by process, scope, ownership, and expected purpose without pretending that every open port is malicious. The Ubuntu hub does not execute Windows actions on another machine. GitHub Actions verifies the Go, frontend, dependency, image, and public-repository safety checks on each proposed change.
+Milestone 0.7 adds native Linux monitoring and boot-persistent endpoint-agent scheduling. The production Ubuntu agent runs outside the hub container with an explicit device identity; it is denied access to the Docker socket and treats root-only signals as unknown instead of elevating the whole collector. The next milestone is network explainability: classify listeners and connections by process, scope, ownership, and expected purpose without pretending that every open port is malicious. The Ubuntu hub does not execute Windows actions on another machine. GitHub Actions verifies the Go, frontend, dependency, image, and public-repository safety checks on each proposed change.
 
 Read the [architecture](docs/ARCHITECTURE.md), [threat model](docs/THREAT_MODEL.md), and [public repository policy](docs/PUBLIC_REPOSITORY.md) before expanding the trust boundary.
