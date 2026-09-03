@@ -610,7 +610,10 @@ function ConnectionsPanel({ deviceId, operatingSystem, connections, workloads, e
 	const [manualProtocol, setManualProtocol] = useState<"TCP" | "UDP">("TCP");
 	const [manualPort, setManualPort] = useState("");
 	const [manualScope, setManualScope] = useState<BindScope>("any");
+	const [editingListenerKey, setEditingListenerKey] = useState<string | null>(null);
+	const [listenerLabel, setListenerLabel] = useState("");
 	const listeners = useMemo(() => logicalListeners(connections), [connections]);
+	useEffect(() => { setEditingListenerKey(null); setListenerLabel(""); }, [deviceId]);
 	const active = useMemo(() => connections.filter((connection) => connection.state.toLowerCase() === "established"), [connections]);
 	const expectedFor = useCallback((listener: LogicalListener) => expectedServices.find((service) => expectedServiceMatches(listener, service, workloads)), [expectedServices, workloads]);
 	const reviewListeners = listeners.filter((listener) => listener.bindScope !== "local" && !expectedFor(listener));
@@ -631,10 +634,16 @@ function ConnectionsPanel({ deviceId, operatingSystem, connections, workloads, e
     );
   }, [connections, filter]);
 	const ownerAttributionAvailable = connections.some((connection) => connection.processName || connection.processId > 0 || connection.systemdUnit);
-	const markExpected = (listener: LogicalListener) => {
-		const entered = window.prompt(`Friendly name for ${listener.protocol} port ${listener.port} (for example, SSH or WireGuard).`, `${listener.protocol} ${listener.port}`);
-		if (entered === null || entered.trim() === "") return;
-		saveExpectation({ deviceId, label: entered.trim(), protocol: listener.protocol, port: listener.port, portEnd: listener.port, bindScope: listener.bindScope, processNames: listener.processes, workloadNames: workloadAttribution(listener, workloads).map(({ workload }) => workload.name), systemdUnits: listener.systemdUnits });
+	const beginExpected = (listener: LogicalListener) => {
+		setEditingListenerKey(listener.key);
+		setListenerLabel(`${listener.protocol} ${listener.port}`);
+	};
+	const markExpected = (event: React.FormEvent, listener: LogicalListener) => {
+		event.preventDefault();
+		if (!listenerLabel.trim()) return;
+		saveExpectation({ deviceId, label: listenerLabel.trim(), protocol: listener.protocol, port: listener.port, portEnd: listener.port, bindScope: listener.bindScope, processNames: listener.processes, workloadNames: workloadAttribution(listener, workloads).map(({ workload }) => workload.name), systemdUnits: listener.systemdUnits });
+		setEditingListenerKey(null);
+		setListenerLabel("");
 	};
 	const addManual = (event: React.FormEvent) => {
 		event.preventDefault();
@@ -673,12 +682,18 @@ function ConnectionsPanel({ deviceId, operatingSystem, connections, workloads, e
 		  const observation = observationFor(listener);
 		  const attributions = workloadAttribution(listener, workloads);
 		  const recentlyAppeared = !!observation && Date.now() - new Date(observation.appearedAt).valueOf() < 24 * 60 * 60 * 1000;
+		  const statusLabel = expectation ? "expected" : listener.bindScope === "local" ? recentlyAppeared ? "new · local only" : "local only" : recentlyAppeared ? "new · unreviewed" : "unreviewed";
+		  const ownerConstraints = [...listener.processes, ...listener.systemdUnits, ...attributions.map(({ workload }) => workload.name)];
 		  return <article className={`service-card ${expectation ? "expected" : listener.bindScope === "local" ? "local" : "review"}`} key={listener.key}>
-			<div className="service-card-heading"><div><span className="protocol">{listener.protocol}</span><strong>Port {listener.port}</strong></div><StatusChip label={expectation ? "expected" : recentlyAppeared ? "new · unreviewed" : listener.bindScope === "local" ? "local only" : "unreviewed"} tone={expectation ? "healthy" : listener.bindScope === "local" ? "configured" : "attention"} /></div>
+			<div className="service-card-heading"><div><span className="protocol">{listener.protocol}</span><strong>Port {listener.port}</strong></div><StatusChip label={statusLabel} tone={expectation ? "healthy" : listener.bindScope === "local" ? "configured" : "attention"} /></div>
 			<h3>{expectation?.label || (attributions.length === 1 ? attributions[0].workload.name : `${listener.protocol} service on port ${listener.port}`)}</h3>
 			<dl><div><dt>Bind scope</dt><dd>{bindScopeLabel(listener.bindScope)}</dd></div><div><dt>State</dt><dd>{listener.state}</dd></div><div><dt>Addresses</dt><dd className="endpoint">{listener.addresses.join(", ") || "Not reported"}</dd></div>{listener.processes.length > 0 && <div><dt>Host process</dt><dd>{listener.processes.join(", ")}</dd></div>}{listener.systemdUnits.length > 0 && <div><dt>System service</dt><dd>{listener.systemdUnits.join(", ")}</dd></div>}{attributions.length > 0 && <><div><dt>Runtime owner</dt><dd>{attributions.map(({ workload }) => workload.name).join(", ")}</dd></div><div><dt>Docker mapping</dt><dd className="endpoint">{attributions.flatMap(({ bindings }) => bindings).map(formatPortBinding).join(", ")}</dd></div></>}</dl>
 			<p>{observation ? `First observed ${formatDate(observation.firstSeenAt)} · continuously present since ${formatDate(observation.appearedAt)} · last confirmed ${formatRelativeTime(observation.lastSeenAt)}` : "Appearance history will begin with the next agent report."}{listener.rawCount > 1 ? ` · ${listener.rawCount} raw sockets grouped` : ""}</p>
-			{expectation ? <button className="secondary-action" type="button" disabled={busy} onClick={() => removeExpectation(expectation)}>Remove expectation</button> : <button className="secondary-action" type="button" disabled={busy} onClick={() => markExpected(listener)}>Mark expected…</button>}
+			{expectation ? <button className="secondary-action" type="button" disabled={busy} onClick={() => removeExpectation(expectation)}>Remove expectation</button> : editingListenerKey === listener.key ? <form className="service-expectation-editor" onSubmit={(event) => markExpected(event, listener)}>
+			  <label htmlFor={`listener-label-${listener.key}`}><span>Friendly label</span><input id={`listener-label-${listener.key}`} maxLength={80} autoFocus value={listenerLabel} onChange={(event) => setListenerLabel(event.target.value)} /></label>
+			  <small>Matches {listener.protocol} {listener.port}, {bindScopeLabel(listener.bindScope).toLowerCase()}{ownerConstraints.length ? `, and current owner${ownerConstraints.length === 1 ? "" : "s"}: ${ownerConstraints.join(", ")}` : ""}.</small>
+			  <div><button type="submit" disabled={busy || !listenerLabel.trim()}>{busy ? "Saving…" : "Save expectation"}</button><button className="secondary-action" type="button" disabled={busy} onClick={() => { setEditingListenerKey(null); setListenerLabel(""); }}>Cancel</button></div>
+			</form> : <button className="secondary-action" type="button" disabled={busy} onClick={() => beginExpected(listener)}>Mark expected…</button>}
 		  </article>;
 		})}
 	  </div>}
