@@ -353,7 +353,7 @@ function liveNetworkRelationships(devices: NetworkDeviceObservation[]) {
 		}
 	}
 
-	type MutableRelationship = Omit<NetworkRelationship, "owners" | "destinationCount"> & { owners: Set<string>; destinations: Set<string> };
+	type MutableRelationship = Omit<NetworkRelationship, "owners" | "connectionCount" | "destinationCount"> & { owners: Set<string>; connections: Set<string>; destinations: Set<string> };
 	const grouped = new Map<string, MutableRelationship>();
 	for (const localDevice of devices) {
 		const listenerPorts = new Set(logicalListeners(localDevice.snapshot?.connections || []).map((listener) => `${listener.protocol}:${listener.port}`));
@@ -372,6 +372,9 @@ function liveNetworkRelationships(devices: NetworkDeviceObservation[]) {
 			const peerIdentity = peerDevice ? `device:${peerDevice.device.id}` : peerKind === "observed" ? `asset:${remoteAddress}` : `internet:${canonicalOwnerName(owner)}`;
 			const localIdentity = `device:${localDevice.device.id}`;
 			const key = `${inbound ? `${peerIdentity}|${localIdentity}` : `${localIdentity}|${peerIdentity}`}|${protocol}:${servicePort}`;
+			const localEndpoint = endpoint(connection.localAddress, connection.localPort);
+			const remoteEndpoint = endpoint(connection.remoteAddress, connection.remotePort);
+			const connectionIdentity = [localEndpoint, remoteEndpoint].sort().join(" ↔ ");
 			const relationship = grouped.get(key) || {
 				key,
 				sourceName: inbound ? peerName : localDevice.device.displayName,
@@ -380,22 +383,21 @@ function liveNetworkRelationships(devices: NetworkDeviceObservation[]) {
 				protocol,
 				port: servicePort,
 				owners: new Set<string>(),
-				connectionCount: 0,
+				connections: new Set<string>(),
 				destinations: new Set<string>(),
 			};
 			relationship.owners.add(owner);
-			relationship.connectionCount += 1;
+			relationship.connections.add(connectionIdentity);
 			relationship.destinations.add(remoteAddress);
 			grouped.set(key, relationship);
 		}
 	}
 
 	const order = { enrolled: 0, observed: 1, external: 2 } satisfies Record<NetworkRelationship["peerKind"], number>;
-	return [...grouped.values()].map((relationship): NetworkRelationship => ({
-		...relationship,
-		owners: [...relationship.owners].sort(),
-		destinationCount: relationship.destinations.size,
-	})).sort((left, right) => order[left.peerKind] - order[right.peerKind]
+	return [...grouped.values()].map((relationship): NetworkRelationship => {
+		const { owners, connections, destinations, ...identity } = relationship;
+		return { ...identity, owners: [...owners].sort(), connectionCount: connections.size, destinationCount: destinations.size };
+	}).sort((left, right) => order[left.peerKind] - order[right.peerKind]
 		|| left.sourceName.localeCompare(right.sourceName)
 		|| left.targetName.localeCompare(right.targetName)
 		|| left.port - right.port);
@@ -788,13 +790,13 @@ function NetworkOverview({ devices, events, selectedId, selectDevice, demoMode }
 				</section>
 			</div>
 			<section className="network-flows" aria-labelledby="network-flows-title">
-				<div className="network-subheading"><div><p className="eyebrow">LIVE RELATIONSHIPS</p><h3 id="network-flows-title">Who is talking to what</h3></div><span>{activeConnectionCount} active · {observedAssetCount} observed-only private asset{observedAssetCount === 1 ? "" : "s"}</span></div>
+				<div className="network-subheading"><div><p className="eyebrow">LIVE RELATIONSHIPS</p><h3 id="network-flows-title">Who is talking to what</h3></div><span>{activeConnectionCount} endpoint-reported · {observedAssetCount} observed-only private asset{observedAssetCount === 1 ? "" : "s"}</span></div>
 				<p className="network-privacy-note">This is not a LAN scan. An observed-only asset is a private endpoint contacted by an enrolled device; it is neither trusted nor enrolled automatically. Internet connections are grouped by source process and destination service to reduce noise.</p>
 				{visibleRelationships.length === 0 ? <p className="activity-empty"><strong>No live relationships were returned.</strong><span>They will reappear after the next agent report and are never reconstructed from historical connection logs.</span></p> : <ol className="network-flow-list">{visibleRelationships.map((relationship) => {
 					const service = networkServiceLabel(relationship.protocol, relationship.port);
 					const label = relationship.peerKind === "enrolled" ? "enrolled" : relationship.peerKind === "observed" ? "observed only" : "external group";
 					const tone: Tone = relationship.peerKind === "enrolled" ? "healthy" : relationship.peerKind === "observed" ? "configured" : "unknown";
-					return <li key={relationship.key}><span className={`network-flow-icon ${relationship.peerKind}`}><NetworkIcon size={17} /></span><div><strong>{relationship.sourceName} <span aria-hidden="true">→</span> {relationship.targetName}</strong><small>{relationship.owners.join(", ")} · {relationship.protocol} {relationship.port}{service ? ` (${service})` : ""} · {relationship.connectionCount} connection{relationship.connectionCount === 1 ? "" : "s"}{relationship.destinationCount > 1 ? ` to ${relationship.destinationCount} destinations` : ""}</small></div><StatusChip label={label} tone={tone} /></li>;
+					return <li key={relationship.key}><span className={`network-flow-icon ${relationship.peerKind}`}><NetworkIcon size={17} /></span><div><strong>{relationship.sourceName} <span aria-hidden="true">→</span> {relationship.targetName}</strong><small>{relationship.owners.join(", ")} · {relationship.protocol} {relationship.port}{service ? ` (${service})` : ""} · {relationship.connectionCount} connection{relationship.connectionCount === 1 ? "" : "s"}{relationship.peerKind === "external" && relationship.destinationCount > 1 ? ` to ${relationship.destinationCount} destinations` : ""}</small></div><StatusChip label={label} tone={tone} /></li>;
 				})}</ol>}
 				{relationships.length > visibleRelationships.length && <p className="network-overflow-note">Showing the 12 highest-context relationship groups; {relationships.length - visibleRelationships.length} additional external group{relationships.length - visibleRelationships.length === 1 ? " is" : "s are"} summarized out of this overview.</p>}
 			</section>
