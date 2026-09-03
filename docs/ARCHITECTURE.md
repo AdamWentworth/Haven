@@ -34,7 +34,7 @@ PostgreSQL becomes appropriate if HAVEN needs multiple hub writers, multiple hub
 
 ## Current milestone boundary
 
-Milestone 0.7.5 extends the authenticated native-agent hub with privacy-bounded Linux system-service attribution:
+Milestone 0.8 extends the authenticated native-agent hub with a privacy-bounded network overview:
 
 - `haven-hub` serves a loopback dashboard, owns SQLite, and exposes a separate loopback TLS 1.3 agent listener. Native development may enable local collection; a containerized production hub disables it and never treats its ephemeral container hostname as a device.
 - Enrollment uses a short-lived, one-time 256-bit token plus an ECDSA P-256 certificate request. The trusted CA certificate is transferred out of band.
@@ -49,10 +49,12 @@ Milestone 0.7.5 extends the authenticated native-agent hub with privacy-bounded 
 - Findings use explicit evidence and recommendations rather than a combined score. Unavailable data remains unknown, never healthy.
 - When native local collection is enabled, the hub collects immediately at startup and on a bounded interval. Manual and scheduled collections are serialized so the fixed native collector cannot run concurrently with itself. Hub-only deployments select the latest authenticated enrolled-agent observation instead.
 - SQLite stores an append-only transition event only when an evaluated finding opens or resolves. Unchanged observations do not create activity noise.
+- The browser combines the latest authenticated device observations into an owner-only coverage view. It derives enrolled-device relationships from matching live endpoint addresses, labels other private destinations as observed-only assets, and groups public destinations by source owner and destination service. This derived view is not persisted.
+- Network overview data does not grant trust, enroll a device, resolve a hostname, probe an address, or scan the LAN. Raw remote endpoints remain live-only and disappear after a hub restart until agents report again.
 - The browser can request desktop-notification permission and alerts only on newly opened high- or medium-severity findings while the page is open. Notification state stays in browser-local storage.
 - A configured state distinguishes intentionally enabled services with verified compensating controls from both healthy defaults and actionable findings. The Windows collector can verify TPM readiness without elevation and summarizes RDP firewall scope without retaining rule names or network addresses.
 
-The trusted inventory contains only the local collector and explicitly enrolled agents. HAVEN does not infer trust from sharing a network. Any future network-discovery view will keep merely observed assets separate from enrolled devices, and another household member's device requires informed opt-in before an agent is installed.
+The trusted inventory contains only the local collector and explicitly enrolled agents. HAVEN does not infer trust from sharing a network. The network overview keeps merely observed assets separate from enrolled devices, and another household member's device requires informed opt-in before an agent is installed.
 
 Windows baseline collection stores configuration state and aggregate counts only. It excludes local administrator names, update titles, Defender threat names, detection resource paths, and BitLocker recovery material.
 

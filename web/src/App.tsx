@@ -37,6 +37,25 @@ interface ChipProps {
   tone: Tone;
 }
 
+interface NetworkDeviceObservation {
+  device: DeviceRecord;
+  snapshot: SecuritySnapshot | null;
+  expectedServices: ExpectedService[];
+  listenerObservations: ObservedListener[];
+}
+
+async function loadNetworkObservations(inventory: DeviceRecord[], demoMode: boolean, signal?: AbortSignal) {
+  const visible = inventory.filter((device) => device.trustState !== "revoked");
+  return Promise.all(visible.map(async (device): Promise<NetworkDeviceObservation> => {
+    const [detail, expectedServices, listenerObservations] = await Promise.all([
+      getDevice(device.id, signal),
+      demoMode ? Promise.resolve([]) : listExpectedServices(device.id, signal),
+      demoMode ? Promise.resolve([]) : listObservedListeners(device.id, signal),
+    ]);
+    return { device, snapshot: detail.snapshot, expectedServices, listenerObservations };
+  }));
+}
+
 async function latestEnrolledObservation(inventory: DeviceRecord[], preferredId: string, signal?: AbortSignal) {
   const candidates = inventory.filter((device) => device.trustState !== "revoked" && device.lastCollectedAt);
   const selected = candidates.find((device) => device.id === preferredId)
@@ -265,6 +284,116 @@ function expectedServiceMatches(listener: LogicalListener, service: ExpectedServ
 		if (observedUnits.length === 0 || !observedUnits.every((unit) => expectedUnits.has(unit))) return false;
 	}
 	return true;
+}
+
+function isLoopbackAddress(value: string) {
+	const address = normalizeAddress(value);
+	return address === "::1" || address.startsWith("127.");
+}
+
+function isUnspecifiedAddress(value: string) {
+	const address = normalizeAddress(value);
+	return address === "" || address === "*" || address === "::" || address === "0.0.0.0";
+}
+
+function isPrivateNetworkAddress(value: string) {
+	const address = normalizeAddress(value);
+	if (address.startsWith("10.") || address.startsWith("192.168.") || address.startsWith("169.254.")) return true;
+	const octets = address.split(".").map(Number);
+	if (octets.length === 4 && octets.every(Number.isFinite)) {
+		return octets[0] === 172 && octets[1] >= 16 && octets[1] <= 31;
+	}
+	return address.startsWith("fe80:") || address.startsWith("fc") || address.startsWith("fd");
+}
+
+function isMulticastAddress(value: string) {
+	const address = normalizeAddress(value);
+	if (address.startsWith("ff")) return true;
+	const firstOctet = Number(address.split(".")[0]);
+	return Number.isFinite(firstOctet) && firstOctet >= 224 && firstOctet <= 239;
+}
+
+function networkServiceLabel(protocol: string, port: number) {
+	const labels: Record<string, string> = {
+		"TCP:22": "SSH",
+		"TCP:53": "DNS",
+		"UDP:53": "DNS",
+		"UDP:67": "DHCP",
+		"TCP:80": "HTTP",
+		"TCP:443": "HTTPS",
+		"TCP:445": "SMB",
+		"TCP:3389": "Remote Desktop",
+		"TCP:4070": "Spotify",
+		"TCP:5228": "push messaging",
+		"TCP:8096": "Jellyfin",
+		"TCP:8443": "HAVEN",
+		"UDP:51822": "WireGuard",
+	};
+	return labels[`${protocol.toUpperCase()}:${port}`] || "";
+}
+
+interface NetworkRelationship {
+	key: string;
+	sourceName: string;
+	targetName: string;
+	targetKind: "enrolled" | "observed" | "external";
+	protocol: string;
+	port: number;
+	owners: string[];
+	connectionCount: number;
+	destinationCount: number;
+}
+
+function liveNetworkRelationships(devices: NetworkDeviceObservation[]) {
+	const addressOwners = new Map<string, NetworkDeviceObservation>();
+	for (const device of devices) {
+		for (const connection of device.snapshot?.connections || []) {
+			const address = normalizeAddress(connection.localAddress);
+			if (!isUnspecifiedAddress(address) && !isLoopbackAddress(address) && !isMulticastAddress(address)) addressOwners.set(address, device);
+		}
+	}
+
+	type MutableRelationship = Omit<NetworkRelationship, "owners" | "destinationCount"> & { owners: Set<string>; destinations: Set<string> };
+	const grouped = new Map<string, MutableRelationship>();
+	for (const source of devices) {
+		for (const connection of source.snapshot?.connections || []) {
+			if (connection.state.toLowerCase() !== "established") continue;
+			const remoteAddress = normalizeAddress(connection.remoteAddress);
+			if (!remoteAddress || connection.remotePort < 1 || isLoopbackAddress(remoteAddress) || isUnspecifiedAddress(remoteAddress) || isMulticastAddress(remoteAddress)) continue;
+			const targetDevice = addressOwners.get(remoteAddress);
+			if (targetDevice?.device.id === source.device.id) continue;
+			const targetKind: NetworkRelationship["targetKind"] = targetDevice ? "enrolled" : isPrivateNetworkAddress(remoteAddress) ? "observed" : "external";
+			const targetName = targetDevice?.device.displayName || (targetKind === "observed" ? remoteAddress : "Internet");
+			const owner = connection.processName || connection.systemdUnit || "Not attributed";
+			const targetIdentity = targetDevice ? `device:${targetDevice.device.id}` : targetKind === "observed" ? `asset:${remoteAddress}` : `internet:${canonicalOwnerName(owner)}`;
+			const key = `${source.device.id}|${targetIdentity}|${connection.protocol.toUpperCase()}:${connection.remotePort}`;
+			const relationship = grouped.get(key) || {
+				key,
+				sourceName: source.device.displayName,
+				targetName,
+				targetKind,
+				protocol: connection.protocol.toUpperCase(),
+				port: connection.remotePort,
+				owners: new Set<string>(),
+				connectionCount: 0,
+				destinations: new Set<string>(),
+			};
+			relationship.owners.add(owner);
+			relationship.connectionCount += 1;
+			relationship.destinations.add(remoteAddress);
+			grouped.set(key, relationship);
+		}
+	}
+
+	const order = { enrolled: 0, observed: 1, external: 2 } satisfies Record<NetworkRelationship["targetKind"], number>;
+	return [...grouped.values()].map((relationship): NetworkRelationship => ({
+		...relationship,
+		owners: [...relationship.owners].sort(),
+		destinationCount: relationship.destinations.size,
+	})).sort((left, right) => order[left.targetKind] - order[right.targetKind]
+		|| left.sourceName.localeCompare(right.sourceName)
+		|| left.targetName.localeCompare(right.targetName)
+		|| left.port - right.port);
 }
 
 interface BaselineSuggestion {
@@ -572,6 +701,99 @@ function PanelHeading({
       <p>{children}</p>
     </div>
   );
+}
+
+function NetworkOverview({ devices, events, selectedId, selectDevice, demoMode }: { devices: NetworkDeviceObservation[]; events: SecurityEvent[]; selectedId: string; selectDevice: (id: string) => void; demoMode: boolean }) {
+	const summaries = useMemo(() => devices.map((entry) => {
+		const snapshot = entry.snapshot;
+		const listeners = logicalListeners(snapshot?.connections || []);
+		const workloadInventory = snapshot?.linuxBaseline?.workloads ?? null;
+		const unreviewed = listeners.filter((listener) => listener.bindScope !== "local" && !entry.expectedServices.some((service) => expectedServiceMatches(listener, service, workloadInventory)));
+		const recentUnreviewed = unreviewed.filter((listener) => {
+			const observation = entry.listenerObservations.find((item) => item.present && item.protocol === listener.protocol && item.port === listener.port && item.bindScope === listener.bindScope);
+			return observation && Date.now() - new Date(observation.appearedAt).valueOf() < 24 * 60 * 60 * 1000;
+		}).length;
+		const findings = snapshot?.findings || [];
+		const highFindings = findings.filter((finding) => finding.severity === "high").length;
+		const firewallKnown = !!snapshot && snapshot.firewallProfiles.length > 0;
+		const firewallEnabled = firewallKnown && snapshot!.firewallProfiles.every((profile) => profile.enabled === true);
+		const establishedConnections = (snapshot?.connections || []).filter((connection) => connection.state.toLowerCase() === "established").length;
+		let tone: Tone = "healthy";
+		let label = "observed healthy";
+		if (!snapshot) { tone = "unknown"; label = "awaiting report"; }
+		else if (!firewallKnown) { tone = "unknown"; label = "partly verified"; }
+		else if (!firewallEnabled || highFindings > 0) { tone = "danger"; label = !firewallEnabled ? "firewall attention" : "high finding"; }
+		else if (entry.device.status !== "current" || findings.length > 0 || unreviewed.length > 0) { tone = "attention"; label = entry.device.status !== "current" ? entry.device.status.replaceAll("-", " ") : unreviewed.length > 0 ? "service review" : "finding open"; }
+		return { ...entry, listeners, unreviewed, recentUnreviewed, findings, firewallKnown, firewallEnabled, establishedConnections, tone, label };
+	}), [devices]);
+	const relationships = useMemo(() => liveNetworkRelationships(devices), [devices]);
+	const recentChanges = useMemo(() => latestFindingLifecycles(events).slice(0, 5), [events]);
+	const reportingCount = summaries.filter((entry) => entry.device.status === "current" && entry.snapshot).length;
+	const protectedFirewallCount = summaries.filter((entry) => entry.firewallEnabled).length;
+	const knownFirewallCount = summaries.filter((entry) => entry.firewallKnown).length;
+	const findingCount = summaries.reduce((count, entry) => count + entry.findings.length, 0);
+	const unreviewedCount = summaries.reduce((count, entry) => count + entry.unreviewed.length, 0);
+	const activeConnectionCount = summaries.reduce((count, entry) => count + entry.establishedConnections, 0);
+	const observedAssetCount = new Set(relationships.filter((item) => item.targetKind === "observed").map((item) => item.targetName)).size;
+	const urgent = summaries.some((entry) => entry.tone === "danger");
+	const attention = summaries.some((entry) => entry.tone === "attention") || unreviewedCount > 0;
+	const assuranceTone: Tone = urgent ? "danger" : attention ? "attention" : summaries.some((entry) => entry.tone === "unknown") ? "unknown" : "healthy";
+	const assuranceLabel = urgent ? "Action recommended" : attention ? "Review available" : assuranceTone === "unknown" ? "Partly verified" : "Observed baseline steady";
+	const attentionReasons = [
+		findingCount > 0 ? `${findingCount} current finding${findingCount === 1 ? "" : "s"}` : "",
+		unreviewedCount > 0 ? `${unreviewedCount} service review${unreviewedCount === 1 ? "" : "s"}` : "",
+		reportingCount < summaries.length ? `${summaries.length - reportingCount} device${summaries.length - reportingCount === 1 ? "" : "s"} not current` : "",
+	].filter(Boolean);
+	const visibleRelationships = relationships.slice(0, 12);
+
+	return (
+		<section className="panel network-overview-panel" aria-labelledby="network-overview-title">
+			<PanelHeading eyebrow="HOME NETWORK" title="Network overview" id="network-overview-title" icon={<NetworkIcon />} accent="cyan">
+				{demoMode ? "Synthetic relationships across the demo inventory" : "Latest authenticated reports; live connection details are not retained as history"}
+			</PanelHeading>
+			<div className={`network-assurance ${assuranceTone}`}>
+				<span className="network-assurance-icon">{urgent || attention ? <AlertIcon size={20} /> : <CheckIcon size={20} />}</span>
+				<div><strong>{assuranceLabel}</strong><p>{urgent ? "At least one reporting device has a high finding or firewall problem." : attention ? `${attentionReasons.join(" · ")} remain visible across enrolled devices.` : assuranceTone === "unknown" ? "No urgent issue is derived, but one or more devices has incomplete current evidence." : "Every reporting device has a verified firewall and no unreviewed non-local services or current findings."}</p></div>
+				<StatusChip label={assuranceLabel} tone={assuranceTone} />
+			</div>
+			<div className="network-metrics" aria-label="Network coverage summary">
+				<article><span>Reporting now</span><strong>{reportingCount}/{summaries.length}</strong><small>enrolled devices current</small></article>
+				<article><span>Protected firewalls</span><strong>{protectedFirewallCount}/{knownFirewallCount || summaries.length}</strong><small>{knownFirewallCount === summaries.length ? "verified devices" : `${summaries.length - knownFirewallCount} not verified`}</small></article>
+				<article><span>Open findings</span><strong>{findingCount}</strong><small>across current posture</small></article>
+				<article><span>Service reviews</span><strong>{unreviewedCount}</strong><small>non-local listeners</small></article>
+			</div>
+			<div className="network-overview-columns">
+				<section className="network-subsection" aria-labelledby="network-devices-title">
+					<div className="network-subheading"><div><p className="eyebrow">ENROLLED DEVICES</p><h3 id="network-devices-title">Security coverage</h3></div><span>{summaries.length} trusted</span></div>
+					<div className="network-device-grid">
+						{summaries.map((entry) => <button className={`network-device-card ${selectedId === entry.device.id ? "selected" : ""}`} type="button" key={entry.device.id} onClick={() => selectDevice(entry.device.id)} aria-pressed={selectedId === entry.device.id} disabled={!entry.snapshot}>
+							<div className="network-device-heading"><span className="device-icon">{entry.device.operatingSystem.toLowerCase().includes("server") ? <ServerIcon /> : entry.device.displayName.toLowerCase().includes("laptop") ? <LaptopIcon /> : <MonitorIcon />}</span><span><strong>{entry.device.displayName}</strong><small>{entry.device.operatingSystem || "Awaiting first report"}</small></span><StatusChip label={entry.label} tone={entry.tone} /></div>
+							<dl><div><dt>Last report</dt><dd>{formatRelativeTime(entry.device.lastCollectedAt)}</dd></div><div><dt>Host firewall</dt><dd>{entry.firewallKnown ? entry.firewallEnabled ? "Protected" : "Attention" : "Not verified"}</dd></div><div><dt>Findings</dt><dd>{entry.findings.length}</dd></div><div><dt>Services</dt><dd>{entry.unreviewed.length > 0 ? `${entry.unreviewed.length} to review${entry.recentUnreviewed > 0 ? ` · ${entry.recentUnreviewed} new` : ""}` : `${entry.listeners.length} classified/local`}</dd></div></dl>
+						</button>)}
+					</div>
+				</section>
+				<section className="network-subsection" aria-labelledby="network-changes-title">
+					<div className="network-subheading"><div><p className="eyebrow">CHANGE WATCH</p><h3 id="network-changes-title">Recent security changes</h3></div><span>latest lifecycle</span></div>
+					{recentChanges.length === 0 ? <p className="activity-empty"><strong>No finding transitions yet.</strong><span>Routine unchanged reports remain quiet.</span></p> : <ol className="network-change-list">{recentChanges.map(({ event }) => {
+						const resolved = event.kind === "resolved";
+						const tone: Tone = resolved ? "healthy" : event.severity === "high" ? "danger" : event.severity === "medium" ? "attention" : "configured";
+						return <li key={event.id}><span className={`network-change-mark ${resolved ? "resolved" : event.severity}`} /> <div><strong>{resolved ? `Resolved: ${event.title}` : event.title}</strong><small>{event.deviceName} · {formatRelativeTime(event.occurredAt)}</small></div><StatusChip label={resolved ? "resolved" : event.severity} tone={tone} /></li>;
+					})}</ol>}
+				</section>
+			</div>
+			<section className="network-flows" aria-labelledby="network-flows-title">
+				<div className="network-subheading"><div><p className="eyebrow">LIVE RELATIONSHIPS</p><h3 id="network-flows-title">Who is talking to what</h3></div><span>{activeConnectionCount} active · {observedAssetCount} observed-only private asset{observedAssetCount === 1 ? "" : "s"}</span></div>
+				<p className="network-privacy-note">This is not a LAN scan. An observed-only asset is a private endpoint contacted by an enrolled device; it is neither trusted nor enrolled automatically. Internet connections are grouped by source process and destination service to reduce noise.</p>
+				{visibleRelationships.length === 0 ? <p className="activity-empty"><strong>No live relationships were returned.</strong><span>They will reappear after the next agent report and are never reconstructed from historical connection logs.</span></p> : <ol className="network-flow-list">{visibleRelationships.map((relationship) => {
+					const service = networkServiceLabel(relationship.protocol, relationship.port);
+					const label = relationship.targetKind === "enrolled" ? "enrolled" : relationship.targetKind === "observed" ? "observed only" : "external group";
+					const tone: Tone = relationship.targetKind === "enrolled" ? "healthy" : relationship.targetKind === "observed" ? "configured" : "unknown";
+					return <li key={relationship.key}><span className={`network-flow-icon ${relationship.targetKind}`}><NetworkIcon size={17} /></span><div><strong>{relationship.sourceName} <span aria-hidden="true">→</span> {relationship.targetName}</strong><small>{relationship.owners.join(", ")} · {relationship.protocol} {relationship.port}{service ? ` (${service})` : ""} · {relationship.connectionCount} connection{relationship.connectionCount === 1 ? "" : "s"}{relationship.destinationCount > 1 ? ` to ${relationship.destinationCount} destinations` : ""}</small></div><StatusChip label={label} tone={tone} /></li>;
+				})}</ol>}
+				{relationships.length > visibleRelationships.length && <p className="network-overflow-note">Showing the 12 highest-context relationship groups; {relationships.length - visibleRelationships.length} additional external group{relationships.length - visibleRelationships.length === 1 ? " is" : "s are"} summarized out of this overview.</p>}
+			</section>
+		</section>
+	);
 }
 
 function FirewallPanel({ profiles, isLinux }: { profiles: FirewallProfileStatus[]; isLinux: boolean }) {
@@ -905,7 +1127,7 @@ function BaselinePanel({ checks, collectedAt, platform }: { checks: BaselineChec
   );
 }
 
-function Application({ snapshot, devices, events, runtime, selectedDevice, selectDevice, refresh, refreshing, error, demoMode, alertsEnabled, alertsSupported, enableAlerts, reviews, expectedServices, listenerObservations, audit, actions, passkeys, reviewFinding, saveServiceExpectation, saveServiceExpectations, removeServiceExpectation, runAction, addOwnerPasskey, removeOwnerPasskey, actionBusy, signOut }: { snapshot: SecuritySnapshot; devices: DeviceRecord[]; events: SecurityEvent[]; runtime: RuntimeStatus | null; selectedDevice: DeviceRecord | null; selectDevice: (id: string) => void; refresh: () => void; refreshing: boolean; error: string | null; demoMode: boolean; alertsEnabled: boolean; alertsSupported: boolean; enableAlerts: () => void; reviews: FindingReview[]; expectedServices: ExpectedService[]; listenerObservations: ObservedListener[]; audit: AuditEvent[]; actions: SecurityAction[]; passkeys: PasskeyInfo[]; reviewFinding: (finding: SecurityFinding, state: FindingReviewState) => void; saveServiceExpectation: (service: ExpectedServiceInput) => void; saveServiceExpectations: (services: ExpectedServiceInput[]) => void; removeServiceExpectation: (service: ExpectedService) => void; runAction: (kind: SecurityActionKind) => void; addOwnerPasskey: () => void; removeOwnerPasskey: (passkey: PasskeyInfo) => void; actionBusy: boolean; signOut: () => void }) {
+function Application({ snapshot, devices, networkDevices, events, networkEvents, runtime, selectedDevice, selectDevice, refresh, refreshing, error, demoMode, alertsEnabled, alertsSupported, enableAlerts, reviews, expectedServices, listenerObservations, audit, actions, passkeys, reviewFinding, saveServiceExpectation, saveServiceExpectations, removeServiceExpectation, runAction, addOwnerPasskey, removeOwnerPasskey, actionBusy, signOut }: { snapshot: SecuritySnapshot; devices: DeviceRecord[]; networkDevices: NetworkDeviceObservation[]; events: SecurityEvent[]; networkEvents: SecurityEvent[]; runtime: RuntimeStatus | null; selectedDevice: DeviceRecord | null; selectDevice: (id: string) => void; refresh: () => void; refreshing: boolean; error: string | null; demoMode: boolean; alertsEnabled: boolean; alertsSupported: boolean; enableAlerts: () => void; reviews: FindingReview[]; expectedServices: ExpectedService[]; listenerObservations: ObservedListener[]; audit: AuditEvent[]; actions: SecurityAction[]; passkeys: PasskeyInfo[]; reviewFinding: (finding: SecurityFinding, state: FindingReviewState) => void; saveServiceExpectation: (service: ExpectedServiceInput) => void; saveServiceExpectations: (services: ExpectedServiceInput[]) => void; removeServiceExpectation: (service: ExpectedService) => void; runAction: (kind: SecurityActionKind) => void; addOwnerPasskey: () => void; removeOwnerPasskey: (passkey: PasskeyInfo) => void; actionBusy: boolean; signOut: () => void }) {
   const isLinux = snapshot.linuxBaseline !== null || /linux|ubuntu/i.test(snapshot.device.operatingSystem);
   const defenderHealthy = snapshot.defender?.antivirusEnabled === true
     && snapshot.defender.realTimeProtectionEnabled === true
@@ -936,6 +1158,7 @@ function Application({ snapshot, devices, events, runtime, selectedDevice, selec
         {demoMode && <p className="demo-banner" role="status"><strong>Synthetic demo mode.</strong> Every device and observation on this page is invented. HAVEN is not showing or collecting data from this computer.</p>}
         {!demoMode && <p className="context-banner"><strong>Continuous, read-only monitoring.</strong> {runtime?.localCollection ? `HAVEN observes this computer every ${runtime.monitor.enabled ? formatInterval(runtime.monitor.intervalSeconds) : "configured interval"}.` : "A native agent reports this endpoint's security posture to the private HAVEN hub on its own schedule; this page checks the hub for a newer report every minute."} The current-posture sections always come from the latest observation. The activity section retains only the latest lifecycle for each finding, while routine unchanged observations stay quiet.</p>}
         {error && <p className="inline-error" role="alert">{error}</p>}
+        <NetworkOverview devices={networkDevices} events={networkEvents} selectedId={selectedDevice?.id || snapshot.device.deviceId || ""} selectDevice={selectDevice} demoMode={demoMode} />
         <section className="hero" aria-labelledby="device-name">
           <div className="hero-identity"><span className="hero-device-icon">{snapshot.device.operatingSystem.toLowerCase().includes("server") ? <ServerIcon size={28} /> : selectedDevice?.displayName.toLowerCase().includes("laptop") ? <LaptopIcon size={28} /> : <MonitorIcon size={28} />}</span><div><p className="eyebrow">{selectedDevice?.trustState === "local" ? "THIS DEVICE" : "DEVICE OBSERVATION"}</p><h1 id="device-name">{selectedDevice?.displayName || snapshot.device.hostName}</h1><p className="device-detail">{snapshot.device.hostName} · {snapshot.device.operatingSystem} · {snapshot.device.architecture} · {formatDuration(snapshot.device.uptimeSeconds)}</p></div></div>
           <div className="collection-time"><span>Last observation</span><strong>{formatRelativeTime(snapshot.collectedAt)}</strong><time dateTime={snapshot.collectedAt}>{formatDate(snapshot.collectedAt)}</time></div>
@@ -955,7 +1178,7 @@ function Application({ snapshot, devices, events, runtime, selectedDevice, selec
 		<FirewallPanel profiles={snapshot.firewallProfiles} isLinux={isLinux} />
 		<ConnectionsPanel deviceId={selectedDevice?.id || snapshot.device.deviceId || ""} operatingSystem={snapshot.device.operatingSystem} connections={snapshot.connections} workloads={workloadInventory} expectedServices={expectedServices} observations={listenerObservations} saveExpectation={saveServiceExpectation} saveExpectations={saveServiceExpectations} removeExpectation={removeServiceExpectation} busy={actionBusy} />
       </main>
-	  <footer><span>HAVEN milestone 0.7.5 · Linux service attribution</span><span>Observe continuously. Act deliberately.</span></footer>
+	  <footer><span>HAVEN milestone 0.8 · Network overview</span><span>Observe continuously. Act deliberately.</span></footer>
     </>
   );
 }
@@ -964,6 +1187,7 @@ export function App() {
   const [authentication, setAuthentication] = useState<AuthStatus | null>(null);
   const [snapshot, setSnapshot] = useState<SecuritySnapshot | null>(null);
   const [devices, setDevices] = useState<DeviceRecord[]>([]);
+  const [networkDevices, setNetworkDevices] = useState<NetworkDeviceObservation[]>([]);
   const [events, setEvents] = useState<SecurityEvent[]>([]);
   const [reviews, setReviews] = useState<FindingReview[]>([]);
 	const [expectedServices, setExpectedServices] = useState<ExpectedService[]>([]);
@@ -1003,8 +1227,10 @@ export function App() {
       } else {
         observed = await latestEnrolledObservation(inventory, selectedIdRef.current, signal);
       }
+      const networkObservations = await loadNetworkObservations(inventory, runtimeStatus.demoMode, signal);
       setSnapshot(observed?.snapshot || null);
       setDevices(inventory);
+      setNetworkDevices(networkObservations);
       setEvents(activity);
       setRuntime(runtimeStatus);
       setDemoMode(runtimeStatus.demoMode);
@@ -1088,7 +1314,9 @@ export function App() {
 		setActionBusy(true);
 		try {
 			await saveExpectedService(service);
-			setExpectedServices(await listExpectedServices(service.deviceId));
+			const saved = await listExpectedServices(service.deviceId);
+			setExpectedServices(saved);
+			setNetworkDevices((current) => current.map((entry) => entry.device.id === service.deviceId ? { ...entry, expectedServices: saved } : entry));
 			setAudit(await listAuditEvents());
 			setError(null);
 		} catch (reason) {
@@ -1104,6 +1332,7 @@ export function App() {
 		try {
 			const saved = await saveExpectedServices(selectedId, services);
 			setExpectedServices(saved);
+			setNetworkDevices((current) => current.map((entry) => entry.device.id === selectedId ? { ...entry, expectedServices: saved } : entry));
 			setAudit(await listAuditEvents());
 			setError(null);
 		} catch (reason) {
@@ -1118,7 +1347,9 @@ export function App() {
 		setActionBusy(true);
 		try {
 			await removeExpectedService(service);
-			setExpectedServices(await listExpectedServices(service.deviceId));
+			const saved = await listExpectedServices(service.deviceId);
+			setExpectedServices(saved);
+			setNetworkDevices((current) => current.map((entry) => entry.device.id === service.deviceId ? { ...entry, expectedServices: saved } : entry));
 			setAudit(await listAuditEvents());
 			setError(null);
 		} catch (reason) {
@@ -1179,6 +1410,7 @@ export function App() {
       setAuthentication((current) => current ? { ...current, authenticated: false } : current);
       setSnapshot(null);
       setDevices([]);
+      setNetworkDevices([]);
       setEvents([]);
       setReviews([]);
 	  setExpectedServices([]);
@@ -1259,7 +1491,9 @@ export function App() {
         } else {
           observed = await latestEnrolledObservation(inventory, selectedIdRef.current, controller.signal);
         }
+        const networkObservations = await loadNetworkObservations(inventory, runtimeStatus.demoMode, controller.signal);
         setDevices(inventory);
+        setNetworkDevices(networkObservations);
         setEvents(activity);
         setRuntime(runtimeStatus);
         setDemoMode(runtimeStatus.demoMode);
@@ -1327,5 +1561,5 @@ export function App() {
 
   const selectedDevice = devices.find((device) => device.id === selectedId) || null;
   const selectedEvents = selectedId ? events.filter((event) => event.deviceId === selectedId) : events;
-	return <Application snapshot={snapshot} devices={devices} events={selectedEvents} runtime={runtime} selectedDevice={selectedDevice} selectDevice={(id) => void selectDevice(id)} refresh={() => void refreshView()} refreshing={refreshing} error={error} demoMode={demoMode} alertsEnabled={alertsEnabled} alertsSupported={alertsSupported} enableAlerts={() => void enableAlerts()} reviews={reviews} expectedServices={expectedServices} listenerObservations={listenerObservations} audit={audit} actions={actions} passkeys={passkeys} reviewFinding={(finding, state) => void reviewFinding(finding, state)} saveServiceExpectation={(service) => void saveServiceExpectation(service)} saveServiceExpectations={(services) => void saveServiceBaseline(services)} removeServiceExpectation={(service) => void removeServiceExpectation(service)} runAction={(kind) => void runAction(kind)} addOwnerPasskey={() => void addOwnerPasskey()} removeOwnerPasskey={(passkey) => void removeOwnerPasskey(passkey)} actionBusy={actionBusy} signOut={() => void signOut()} />;
+	return <Application snapshot={snapshot} devices={devices} networkDevices={networkDevices} events={selectedEvents} networkEvents={events} runtime={runtime} selectedDevice={selectedDevice} selectDevice={(id) => void selectDevice(id)} refresh={() => void refreshView()} refreshing={refreshing} error={error} demoMode={demoMode} alertsEnabled={alertsEnabled} alertsSupported={alertsSupported} enableAlerts={() => void enableAlerts()} reviews={reviews} expectedServices={expectedServices} listenerObservations={listenerObservations} audit={audit} actions={actions} passkeys={passkeys} reviewFinding={(finding, state) => void reviewFinding(finding, state)} saveServiceExpectation={(service) => void saveServiceExpectation(service)} saveServiceExpectations={(services) => void saveServiceBaseline(services)} removeServiceExpectation={(service) => void removeServiceExpectation(service)} runAction={(kind) => void runAction(kind)} addOwnerPasskey={() => void addOwnerPasskey()} removeOwnerPasskey={(passkey) => void removeOwnerPasskey(passkey)} actionBusy={actionBusy} signOut={() => void signOut()} />;
 }

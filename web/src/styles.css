@@ -74,6 +74,62 @@ main, footer { width: min(1180px, 92vw); margin-inline: auto; }
 .demo-banner strong { color: var(--amber); }
 .context-banner { margin: 1rem 0 0; padding: .9rem 1rem; border: 1px solid var(--line); border-radius: .75rem; color: var(--muted); background: rgba(132, 183, 255, .045); font-size: .82rem; line-height: 1.5; }
 .context-banner strong { color: #cfe1f7; }
+.network-overview-panel { border-color: rgba(111, 216, 229, .25); }
+.network-assurance { display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: .85rem; margin-top: 1rem; padding: .9rem 1rem; border: 1px solid var(--line); border-radius: .85rem; background: rgba(255, 255, 255, .018); }
+.network-assurance.healthy { border-color: rgba(115, 226, 167, .25); background: rgba(115, 226, 167, .035); }
+.network-assurance.attention { border-color: rgba(244, 191, 103, .28); background: rgba(244, 191, 103, .04); }
+.network-assurance.danger { border-color: rgba(255, 139, 123, .3); background: rgba(255, 139, 123, .045); }
+.network-assurance-icon { display: grid; width: 2.35rem; height: 2.35rem; place-items: center; border-radius: .7rem; color: var(--cyan); background: rgba(111, 216, 229, .09); }
+.network-assurance.healthy .network-assurance-icon { color: var(--green); background: rgba(115, 226, 167, .09); }
+.network-assurance.attention .network-assurance-icon { color: var(--amber); background: rgba(244, 191, 103, .09); }
+.network-assurance.danger .network-assurance-icon { color: var(--red); background: rgba(255, 139, 123, .09); }
+.network-assurance strong, .network-assurance p { margin: 0; }
+.network-assurance strong { font-size: .88rem; }
+.network-assurance p { margin-top: .25rem; color: var(--muted); font-size: .72rem; line-height: 1.45; }
+.network-assurance > .status-chip { white-space: nowrap; }
+.network-metrics { display: grid; grid-template-columns: repeat(4, 1fr); gap: .65rem; margin-top: .7rem; }
+.network-metrics article { display: grid; min-height: 100px; padding: .85rem; border: 1px solid var(--line); border-radius: .75rem; background: rgba(0, 0, 0, .1); }
+.network-metrics span { color: var(--muted); font-size: .65rem; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; }
+.network-metrics strong { align-self: end; margin-top: .35rem; color: #e8f4ed; font-size: 1.45rem; letter-spacing: -.03em; }
+.network-metrics small { margin-top: .1rem; color: var(--muted); font-size: .64rem; }
+.network-overview-columns { display: grid; grid-template-columns: minmax(0, 1.15fr) minmax(280px, .85fr); gap: .7rem; margin-top: .7rem; }
+.network-subsection, .network-flows { min-width: 0; padding: 1rem; border: 1px solid var(--line); border-radius: .85rem; background: rgba(0, 0, 0, .09); }
+.network-flows { margin-top: .7rem; }
+.network-subheading { display: flex; align-items: center; justify-content: space-between; gap: .8rem; margin-bottom: .8rem; }
+.network-subheading .eyebrow, .network-subheading h3 { margin: 0; }
+.network-subheading h3 { margin-top: .18rem; font-size: .94rem; }
+.network-subheading > span { color: var(--muted); font-size: .66rem; text-align: right; }
+.network-device-grid { display: grid; gap: .55rem; }
+.network-device-card { width: 100%; padding: .8rem; border: 1px solid var(--line); border-radius: .75rem; color: inherit; background: rgba(255, 255, 255, .018); text-align: left; cursor: pointer; }
+.network-device-card:hover, .network-device-card.selected { border-color: rgba(111, 216, 229, .38); background: rgba(111, 216, 229, .045); }
+.network-device-card:disabled { opacity: .62; cursor: not-allowed; }
+.network-device-heading { display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: .65rem; }
+.network-device-heading > span:nth-child(2) { min-width: 0; }
+.network-device-heading strong, .network-device-heading small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.network-device-heading strong { font-size: .8rem; }
+.network-device-heading small { margin-top: .2rem; color: var(--muted); font-size: .65rem; }
+.network-device-heading .status-chip { font-size: .6rem; white-space: nowrap; }
+.network-device-card dl { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 1px; margin: .7rem 0 0; overflow: hidden; border: 1px solid var(--line); border-radius: .55rem; background: var(--line); }
+.network-device-card dl div { min-width: 0; padding: .55rem; background: #0d1618; }
+.network-device-card dt { color: var(--muted); font-size: .57rem; letter-spacing: .05em; text-transform: uppercase; }
+.network-device-card dd { overflow: hidden; margin: .24rem 0 0; color: #dceae2; font-size: .65rem; text-overflow: ellipsis; white-space: nowrap; }
+.network-change-list, .network-flow-list { display: grid; gap: .45rem; margin: 0; padding: 0; list-style: none; }
+.network-change-list li, .network-flow-list li { display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: .65rem; min-width: 0; padding: .7rem; border: 1px solid var(--line); border-radius: .65rem; background: rgba(255, 255, 255, .016); }
+.network-change-list li > div, .network-flow-list li > div { min-width: 0; }
+.network-change-list strong, .network-change-list small, .network-flow-list strong, .network-flow-list small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.network-change-list strong, .network-flow-list strong { font-size: .72rem; }
+.network-change-list small, .network-flow-list small { margin-top: .2rem; color: var(--muted); font-size: .62rem; }
+.network-change-list .status-chip, .network-flow-list .status-chip { font-size: .58rem; white-space: nowrap; }
+.network-change-mark { width: .55rem; height: .55rem; border-radius: 50%; background: var(--blue); box-shadow: 0 0 10px rgba(132, 183, 255, .45); }
+.network-change-mark.medium { background: var(--amber); box-shadow: 0 0 10px rgba(244, 191, 103, .45); }
+.network-change-mark.high { background: var(--red); box-shadow: 0 0 10px rgba(255, 139, 123, .45); }
+.network-change-mark.resolved { background: var(--green); box-shadow: 0 0 10px rgba(115, 226, 167, .4); }
+.network-privacy-note { margin: 0 0 .8rem; color: var(--muted); font-size: .7rem; line-height: 1.5; }
+.network-flow-list { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.network-flow-icon { display: grid; width: 2rem; height: 2rem; place-items: center; border-radius: .6rem; color: var(--muted); background: rgba(157, 176, 165, .07); }
+.network-flow-icon.enrolled { color: var(--green); background: rgba(115, 226, 167, .08); }
+.network-flow-icon.observed { color: var(--blue); background: rgba(132, 183, 255, .08); }
+.network-overflow-note { margin: .75rem 0 0; color: var(--muted); font-size: .66rem; }
 .hero { display: flex; align-items: end; justify-content: space-between; gap: 2rem; padding: 3.2rem 0 2.2rem; }
 .hero-identity { align-items: flex-start; }
 .hero-device-icon { display: grid; flex: 0 0 auto; width: 3.2rem; height: 3.2rem; margin-top: .15rem; place-items: center; border: 1px solid rgba(132, 183, 255, .2); border-radius: .95rem; color: var(--blue); background: rgba(132, 183, 255, .07); }
@@ -329,7 +385,12 @@ footer { display: flex; justify-content: space-between; padding: 2.5rem 0 3rem; 
   .desktop-alert-button { padding: .5rem; }
   .hero { align-items: start; flex-direction: column; padding-top: 3rem; }
   .collection-time { text-align: left; }
-	.summary-grid, .details-grid, .profile-grid, .baseline-grid, .action-grid, .action-history-grid, .service-grid, .workload-grid, .expectation-form, .baseline-suggestion-list { grid-template-columns: 1fr; }
+	.summary-grid, .details-grid, .profile-grid, .baseline-grid, .action-grid, .action-history-grid, .service-grid, .workload-grid, .expectation-form, .baseline-suggestion-list, .network-metrics, .network-overview-columns, .network-flow-list { grid-template-columns: 1fr; }
+	.network-assurance { grid-template-columns: auto 1fr; }
+	.network-assurance > .status-chip { grid-column: 2; width: fit-content; }
+	.network-device-card dl { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+	.network-device-heading { grid-template-columns: auto 1fr; }
+	.network-device-heading .status-chip { grid-column: 2; width: fit-content; }
   .section-heading { align-items: start; flex-direction: column; gap: .75rem; }
   .search-field, .search-field input { width: 100%; }
   .finding-heading { grid-template-columns: auto 1fr; }
@@ -344,7 +405,8 @@ footer { display: flex; justify-content: space-between; padding: 2.5rem 0 3rem; 
 }
 
 @media (min-width: 781px) and (max-width: 1050px) {
-  .summary-grid { grid-template-columns: repeat(2, 1fr); }
+  .summary-grid, .network-metrics { grid-template-columns: repeat(2, 1fr); }
+	.network-overview-columns { grid-template-columns: 1fr; }
 }
 
 @media (prefers-reduced-motion: no-preference) {

@@ -4,9 +4,9 @@
 
 HAVEN is a personal security observatory for home devices and networks. It presents native operating-system protections in one understandable console without trying to replace Microsoft Defender, host firewalls, or other trusted security controls.
 
-HAVEN is pre-release software. The current milestone adds privacy-bounded Linux system-service ownership to the owner-reviewed listener baseline in the authenticated, resource-constrained Ubuntu hub deployment; it is not a replacement for native protection.
+HAVEN is pre-release software. The current milestone adds a read-only network overview that combines authenticated endpoint reports without turning the hub into a network scanner or silently trusting observed assets; it is not a replacement for native protection.
 
-## Milestone 0.7.5 — Linux Service Attribution
+## Milestone 0.8 — Network Overview
 
 The current implementation provides:
 
@@ -25,6 +25,10 @@ The current implementation provides:
 - Privacy-bounded listener appearance history containing only protocol, port, bind scope, and timestamps—never payloads or historical remote connections
 - Strictly increasing report sequences, timestamp checks, payload limits, rate limits, device revocation, and versioned messages
 - A device inventory and detail view with explicitly synthetic demo fixtures for portfolio work
+- A network-wide coverage view that summarizes report freshness, verified host firewalls, current findings, and unreviewed service exposure across enrolled devices
+- Live relationship grouping that distinguishes explicitly enrolled peers, observed-only private endpoints, and Internet destinations grouped by source owner and destination service
+- Cross-device finding lifecycle context without retaining raw remote endpoints, connection history, packet contents, or inferred device trust
+- Clear language that observed-only assets are neither enrolled nor trusted and that the overview does not actively scan the LAN
 - Explainable Windows baseline checks for servicing, BitLocker, Secure Boot, TPM, remote access, local administrator count, and Defender threat counts
 - Non-elevated TPM verification through Windows TPM Tool when the administrative PowerShell provider is unavailable
 - RDP context that distinguishes NLA-protected, firewall-restricted access from unrestricted or unverifiable exposure
@@ -170,6 +174,6 @@ Haven/
 
 ## Current and next security milestone
 
-Milestone 0.7 adds native Linux monitoring and boot-persistent endpoint-agent scheduling. Milestone 0.7.1 makes its network results explainable, 0.7.2 makes report freshness and finding lifecycles explicit, and 0.7.3 correlates host listeners with sanitized Docker port mappings. Milestone 0.7.4 adds deliberate suggested-baseline review; 0.7.5 adds live systemd ownership and service-constrained expectations for Linux listeners. The production Ubuntu agent remains outside the hub container with an explicit device identity; its normal reporting service is denied Docker-socket access. A separate short-lived exporter receives socket access only long enough to write a fixed-schema inventory, has no IP-network access, and exits before the reporter reads that file. Workload and systemd ownership details remain live-only, and genuinely unavailable root-only signals remain unknown. The next milestone can add network-wide asset observation while keeping merely observed assets separate from explicitly enrolled devices. The Ubuntu hub does not execute Windows actions on another machine. GitHub Actions verifies the Go, frontend, dependency, image, and public-repository safety checks on each proposed change.
+Milestone 0.7 adds native Linux monitoring and boot-persistent endpoint-agent scheduling. Milestone 0.7.1 makes its network results explainable, 0.7.2 makes report freshness and finding lifecycles explicit, and 0.7.3 correlates host listeners with sanitized Docker port mappings. Milestone 0.7.4 adds deliberate suggested-baseline review; 0.7.5 adds live systemd ownership and service-constrained expectations for Linux listeners. Milestone 0.8 combines the latest authenticated reports into a network-wide coverage, change, and live-relationship view while keeping merely observed private endpoints separate from explicitly enrolled devices. It does not scan the LAN or retain remote endpoints. A later 0.8.x milestone can add owner-managed names and expectations for observed assets, then compare endpoint-reported exposure with separately reviewed router data. The Ubuntu hub does not execute Windows actions on another machine. GitHub Actions verifies the Go, frontend, dependency, image, and public-repository safety checks on each proposed change.
 
 Read the [architecture](docs/ARCHITECTURE.md), [threat model](docs/THREAT_MODEL.md), and [public repository policy](docs/PUBLIC_REPOSITORY.md) before expanding the trust boundary.
