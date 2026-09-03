@@ -109,25 +109,37 @@ export function canonicalOwnerName(value: string, executable = false) {
   return name;
 }
 
+export function listenerOwnerSummary(listener: LogicalListener) {
+  const parts: string[] = [];
+  if (listener.processes.length > 0) parts.push(`process${listener.processes.length === 1 ? "" : "es"}: ${listener.processes.join(", ")}`);
+  if (listener.systemdUnits.length > 0) parts.push(`service${listener.systemdUnits.length === 1 ? "" : "s"}: ${listener.systemdUnits.join(", ")}`);
+  return parts.join(" · ");
+}
+
+export function expectedServiceOwnerConstrained(service: ExpectedService) {
+  return (service.processNames?.length || 0) > 0 || (service.workloadNames?.length || 0) > 0 || (service.systemdUnits?.length || 0) > 0;
+}
+
 export function expectedServiceMatches(listener: LogicalListener, service: ExpectedService, inventory: WorkloadInventory | null) {
   const portEnd = service.portEnd || service.port;
   if (service.protocol !== listener.protocol || listener.port < service.port || listener.port > portEnd || (service.bindScope !== "any" && service.bindScope !== listener.bindScope)) return false;
-  if (service.processNames?.length) {
-    const expectedProcesses = new Set(service.processNames.map((process) => canonicalOwnerName(process, true)));
-    const observedProcesses = listener.processes.map((process) => canonicalOwnerName(process, true));
-    if (observedProcesses.length === 0 || !observedProcesses.every((process) => expectedProcesses.has(process))) return false;
-  }
-  if (service.workloadNames?.length) {
-    const expectedWorkloads = new Set(service.workloadNames.map((workload) => canonicalOwnerName(workload)));
-    const observedWorkloads = workloadAttribution(listener, inventory).map(({ workload }) => canonicalOwnerName(workload.name));
-    if (observedWorkloads.length === 0 || !observedWorkloads.every((workload) => expectedWorkloads.has(workload))) return false;
-  }
-  if (service.systemdUnits?.length) {
-    const expectedUnits = new Set(service.systemdUnits.map((unit) => canonicalOwnerName(unit)));
-    const observedUnits = listener.systemdUnits.map((unit) => canonicalOwnerName(unit));
-    if (observedUnits.length === 0 || !observedUnits.every((unit) => expectedUnits.has(unit))) return false;
-  }
+  const processNames = service.processNames || [];
+  const workloadNames = service.workloadNames || [];
+  const systemdUnits = service.systemdUnits || [];
+  const ownerConstrained = expectedServiceOwnerConstrained(service);
+  if (!ownerConstrained) return true;
+
+  const observedWorkloads = workloadAttribution(listener, inventory).map(({ workload }) => workload.name);
+  if (!ownerDimensionMatches(listener.processes, processNames, true)) return false;
+  if (!ownerDimensionMatches(observedWorkloads, workloadNames)) return false;
+  if (!ownerDimensionMatches(listener.systemdUnits, systemdUnits)) return false;
   return true;
+}
+
+function ownerDimensionMatches(observed: string[], expected: string[], executable = false) {
+  if (observed.length === 0 || expected.length === 0) return observed.length === expected.length;
+  const allowed = new Set(expected.map((value) => canonicalOwnerName(value, executable)));
+  return observed.every((value) => allowed.has(canonicalOwnerName(value, executable)));
 }
 
 export function isLoopbackAddress(value: string) {

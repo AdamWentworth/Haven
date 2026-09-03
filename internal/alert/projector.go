@@ -333,26 +333,25 @@ func expectedServiceMatches(listener logicalListener, service storage.ExpectedSe
 	if !endpointMatches(listener, service) {
 		return false
 	}
-	if !allObservedOwnersExpected(listener.processes, service.ProcessNames, true) {
+	ownerConstrained := len(service.ProcessNames) > 0 || len(service.WorkloadNames) > 0 || len(service.SystemdUnits) > 0
+	if !ownerConstrained {
+		return true
+	}
+	if !ownerDimensionMatches(listener.processes, service.ProcessNames, true) {
 		return false
 	}
-	if len(service.WorkloadNames) > 0 {
-		if !allObservedOwnersExpected(workloadNames(listener, inventory), service.WorkloadNames, false) {
-			return false
-		}
+	if !ownerDimensionMatches(workloadNames(listener, inventory), service.WorkloadNames, false) {
+		return false
 	}
-	if !allObservedOwnersExpected(listener.systemdUnits, service.SystemdUnits, false) {
+	if !ownerDimensionMatches(listener.systemdUnits, service.SystemdUnits, false) {
 		return false
 	}
 	return true
 }
 
-func allObservedOwnersExpected(observed, expected []string, executable bool) bool {
-	if len(expected) == 0 {
-		return true
-	}
-	if len(observed) == 0 {
-		return false
+func ownerDimensionMatches(observed, expected []string, executable bool) bool {
+	if len(observed) == 0 || len(expected) == 0 {
+		return len(observed) == len(expected)
 	}
 	allowed := make(map[string]struct{}, len(expected))
 	for _, value := range expected {

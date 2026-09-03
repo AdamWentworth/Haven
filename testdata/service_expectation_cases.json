@@ -51,14 +51,14 @@
   {
     "name": "live approved workload",
     "listener": { "protocol": "TCP", "address": "0.0.0.0", "port": 443, "processes": ["docker-proxy"], "systemdUnits": [] },
-    "service": { "protocol": "TCP", "port": 443, "portEnd": 443, "bindScope": "wildcard", "processNames": [], "workloadNames": ["gateway"], "systemdUnits": [] },
+    "service": { "protocol": "TCP", "port": 443, "portEnd": 443, "bindScope": "wildcard", "processNames": ["docker-proxy"], "workloadNames": ["gateway"], "systemdUnits": [] },
     "workloads": ["gateway"],
     "matches": true
   },
   {
     "name": "missing workload evidence",
     "listener": { "protocol": "TCP", "address": "0.0.0.0", "port": 443, "processes": ["docker-proxy"], "systemdUnits": [] },
-    "service": { "protocol": "TCP", "port": 443, "portEnd": 443, "bindScope": "wildcard", "processNames": [], "workloadNames": ["gateway"], "systemdUnits": [] },
+    "service": { "protocol": "TCP", "port": 443, "portEnd": 443, "bindScope": "wildcard", "processNames": ["docker-proxy"], "workloadNames": ["gateway"], "systemdUnits": [] },
     "workloads": [],
     "matches": false
   },
@@ -68,5 +68,33 @@
     "service": { "protocol": "TCP", "port": 49152, "portEnd": 65535, "bindScope": "wildcard", "processNames": ["SYSTEM"], "workloadNames": [], "systemdUnits": [] },
     "workloads": [],
     "matches": true
+  },
+  {
+    "name": "system service rejects a new process co-owner",
+    "listener": { "protocol": "UDP", "address": "0.0.0.0", "port": 5353, "processes": ["avahi-daemon", "adb"], "systemdUnits": ["avahi-daemon.service"] },
+    "service": { "protocol": "UDP", "port": 5353, "portEnd": 5353, "bindScope": "wildcard", "processNames": ["avahi-daemon"], "workloadNames": [], "systemdUnits": ["avahi-daemon.service"] },
+    "workloads": [],
+    "matches": false
+  },
+  {
+    "name": "mixed owners match when every category is approved",
+    "listener": { "protocol": "UDP", "address": "0.0.0.0", "port": 5353, "processes": ["avahi-daemon", "adb"], "systemdUnits": ["avahi-daemon.service"] },
+    "service": { "protocol": "UDP", "port": 5353, "portEnd": 5353, "bindScope": "wildcard", "processNames": ["avahi-daemon", "adb"], "workloadNames": [], "systemdUnits": ["avahi-daemon.service"] },
+    "workloads": [],
+    "matches": true
+  },
+  {
+    "name": "explicit port-only baseline allows observed owners",
+    "listener": { "protocol": "UDP", "address": "0.0.0.0", "port": 5353, "processes": ["avahi-daemon", "adb"], "systemdUnits": ["avahi-daemon.service"] },
+    "service": { "protocol": "UDP", "port": 5353, "portEnd": 5353, "bindScope": "wildcard", "processNames": [], "workloadNames": [], "systemdUnits": [] },
+    "workloads": [],
+    "matches": true
+  },
+  {
+    "name": "workload identity does not hide a new host process",
+    "listener": { "protocol": "TCP", "address": "0.0.0.0", "port": 443, "processes": ["docker-proxy", "unexpected-helper"], "systemdUnits": [] },
+    "service": { "protocol": "TCP", "port": 443, "portEnd": 443, "bindScope": "wildcard", "processNames": ["docker-proxy"], "workloadNames": ["gateway"], "systemdUnits": [] },
+    "workloads": ["gateway"],
+    "matches": false
   }
 ]

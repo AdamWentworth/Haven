@@ -82,11 +82,26 @@ func TestDeriveIgnoresLocalAndOwnerApprovedServices(t *testing.T) {
 	}
 }
 
+func TestDeriveReportsDriftWhenAProcessJoinsAnApprovedSystemService(t *testing.T) {
+	device := observedDevice("current",
+		model.NetworkConnection{Protocol: "UDP", LocalAddress: "0.0.0.0", LocalPort: 5353, State: "Bound", ProcessName: "avahi-daemon", SystemdUnit: "avahi-daemon.service"},
+		model.NetworkConnection{Protocol: "UDP", LocalAddress: "0.0.0.0", LocalPort: 5353, State: "Bound", ProcessName: "adb"},
+	)
+	device.ExpectedServices = []storage.ExpectedService{{
+		DeviceID: "device-a", Label: "mDNS discovery", Protocol: "UDP", Port: 5353, PortEnd: 5353,
+		BindScope: storage.BindScopeWildcard, ProcessNames: []string{"avahi-daemon"}, SystemdUnits: []string{"avahi-daemon.service"},
+	}}
+	alerts := Derive([]DeviceObservation{device}, nil, 30*time.Minute)
+	if len(alerts) != 1 || alerts[0].Kind != "service-drift" {
+		t.Fatalf("a newly observed co-owner must require review: %#v", alerts)
+	}
+}
+
 func TestDeriveRequiresLiveWorkloadEvidenceForWorkloadBaseline(t *testing.T) {
 	device := observedDevice("current", listener(443, "0.0.0.0", "docker-proxy", "docker.service"))
 	device.ExpectedServices = []storage.ExpectedService{{
 		DeviceID: "device-a", Label: "HTTPS", Protocol: "TCP", Port: 443, PortEnd: 443,
-		BindScope: storage.BindScopeWildcard, WorkloadNames: []string{"gateway"},
+		BindScope: storage.BindScopeWildcard, ProcessNames: []string{"docker-proxy"}, WorkloadNames: []string{"gateway"}, SystemdUnits: []string{"docker.service"},
 	}}
 	alerts := Derive([]DeviceObservation{device}, nil, 30*time.Minute)
 	if len(alerts) != 1 || alerts[0].Kind != "service-drift" {

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import serviceExpectationCases from "../../testdata/service_expectation_cases.json";
-import { bindScopeLabel, canonicalOwnerName, endpoint, endpointBindScope, endpointScope, expectedServiceMatches, isLoopbackAddress, isMulticastAddress, isPrivateNetworkAddress, isUnspecifiedAddress, liveNetworkRelationships, logicalListeners, networkServiceLabel, normalizeAddress, workloadAttribution, type NetworkDeviceObservation } from "./network";
+import { bindScopeLabel, canonicalOwnerName, endpoint, endpointBindScope, endpointScope, expectedServiceMatches, expectedServiceOwnerConstrained, isLoopbackAddress, isMulticastAddress, isPrivateNetworkAddress, isUnspecifiedAddress, listenerOwnerSummary, liveNetworkRelationships, logicalListeners, networkServiceLabel, normalizeAddress, workloadAttribution, type NetworkDeviceObservation } from "./network";
 import type { DeviceRecord, ExpectedService, NetworkConnection, SecuritySnapshot, WorkloadInventory } from "./types";
 
 const at = "2026-09-02T20:00:00Z";
@@ -63,6 +63,14 @@ describe("listener baselines", () => {
     expect(listeners[0]).toMatchObject({ key: "TCP:443:wildcard", rawCount: 2, addresses: ["0.0.0.0", "::"] });
   });
 
+  it("shows every attributed owner category in a listener summary", () => {
+    const listener = logicalListeners([
+      connection({ protocol: "UDP", localPort: 5353, processName: "avahi-daemon", systemdUnit: "avahi-daemon.service" }),
+      connection({ protocol: "UDP", localPort: 5353, processName: "adb", systemdUnit: "" }),
+    ])[0];
+    expect(listenerOwnerSummary(listener)).toBe("processes: avahi-daemon, adb · service: avahi-daemon.service");
+  });
+
   it("requires every observed process to be owner-approved", () => {
     const listener = logicalListeners([connection({ processName: "svchost.exe" })])[0];
     expect(expectedServiceMatches(listener, expected({ processNames: ["SVCHOST"] }), null)).toBe(true);
@@ -70,13 +78,20 @@ describe("listener baselines", () => {
     expect(expectedServiceMatches(drifted, expected({ processNames: ["svchost"] }), null)).toBe(false);
   });
 
+  it("distinguishes a port-only rule from an owner-constrained baseline", () => {
+    expect(expectedServiceOwnerConstrained(expected())).toBe(false);
+    expect(expectedServiceOwnerConstrained(expected({ processNames: ["caddy"] }))).toBe(true);
+    expect(expectedServiceOwnerConstrained(expected({ workloadNames: ["gateway"] }))).toBe(true);
+    expect(expectedServiceOwnerConstrained(expected({ systemdUnits: ["caddy.service"] }))).toBe(true);
+  });
+
   it("requires a live workload mapping for a workload-constrained baseline", () => {
     const listener = logicalListeners([connection()])[0];
     const inventory: WorkloadInventory = { runtime: "docker", collectedAt: at, workloads: [{ name: "haven_proxy", state: "running", ports: [{ protocol: "TCP", containerPort: 443, published: true, hostAddress: "0.0.0.0", hostPort: 443 }] }] };
     expect(workloadAttribution(listener, inventory).map(({ workload }) => workload.name)).toEqual(["haven_proxy"]);
-    expect(expectedServiceMatches(listener, expected({ workloadNames: ["haven_proxy"] }), inventory)).toBe(true);
-    expect(expectedServiceMatches(listener, expected({ workloadNames: ["different"] }), inventory)).toBe(false);
-    expect(expectedServiceMatches(listener, expected({ workloadNames: ["haven_proxy"] }), null)).toBe(false);
+    expect(expectedServiceMatches(listener, expected({ processNames: ["caddy"], workloadNames: ["haven_proxy"] }), inventory)).toBe(true);
+    expect(expectedServiceMatches(listener, expected({ processNames: ["caddy"], workloadNames: ["different"] }), inventory)).toBe(false);
+    expect(expectedServiceMatches(listener, expected({ processNames: ["caddy"], workloadNames: ["haven_proxy"] }), null)).toBe(false);
   });
 
   it("does not let a port range cover the wrong protocol or bind scope", () => {
@@ -88,8 +103,9 @@ describe("listener baselines", () => {
 
   it("enforces systemd ownership when a baseline names a service", () => {
     const listener = logicalListeners([connection({ processName: "sshd", systemdUnit: "ssh.socket", localPort: 22 })])[0];
-    expect(expectedServiceMatches(listener, expected({ port: 22, portEnd: 22, systemdUnits: ["SSH.SOCKET"] }), null)).toBe(true);
-    expect(expectedServiceMatches(listener, expected({ port: 22, portEnd: 22, systemdUnits: ["other.service"] }), null)).toBe(false);
+    expect(expectedServiceMatches(listener, expected({ port: 22, portEnd: 22, processNames: ["sshd"], systemdUnits: ["SSH.SOCKET"] }), null)).toBe(true);
+    expect(expectedServiceMatches(listener, expected({ port: 22, portEnd: 22, processNames: ["sshd"], systemdUnits: ["other.service"] }), null)).toBe(false);
+    expect(expectedServiceMatches(listener, expected({ port: 22, portEnd: 22, systemdUnits: ["ssh.socket"] }), null)).toBe(false);
   });
 });
 
