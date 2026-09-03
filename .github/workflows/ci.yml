@@ -66,10 +66,39 @@ jobs:
         shell: pwsh
         run: ./scripts/Test-PublicRepository.ps1
 
+  verify-windows-agent:
+    name: Verify console-free Windows agent
+    runs-on: windows-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v7
+
+      - name: Set up Go
+        uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Test Windows process isolation
+        run: go test ./internal/action ./internal/collector ./internal/subprocess
+
+      - name: Build console-free reporter
+        shell: pwsh
+        run: |
+          $output = Join-Path $env:RUNNER_TEMP 'haven-agent-background.exe'
+          go build -trimpath -ldflags '-H=windowsgui' -o $output .\cmd\haven-agent
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          $bytes = [System.IO.File]::ReadAllBytes($output)
+          $peOffset = [BitConverter]::ToInt32($bytes, 0x3c)
+          $subsystem = [BitConverter]::ToUInt16($bytes, $peOffset + 24 + 68)
+          if ($subsystem -ne 2) { throw "Expected Windows GUI subsystem 2, got $subsystem." }
+
   publish-hub-image:
     name: Publish immutable hub image
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    needs: verify
+    needs: [verify, verify-windows-agent]
     runs-on: ubuntu-latest
     timeout-minutes: 20
     permissions:

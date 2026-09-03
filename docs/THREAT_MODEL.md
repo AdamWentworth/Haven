@@ -22,6 +22,8 @@ Passkey credential data is encrypted at rest with a random key outside the repos
 
 The agent endpoint uses TLS 1.3. Enrollment tokens are random, short-lived, one-time values; each accepted certificate has a distinct key and device identity. Observation identity, device identity, sequence, timestamp, schema, media type, body size, and request rate are validated. Revoked devices cannot submit reports.
 
+The Windows scheduled reporter runs as the enrolled interactive user without elevation, but uses a separate GUI-subsystem binary so Task Scheduler does not allocate a visible console. Fixed Windows child processes set hidden startup state and `CREATE_NO_WINDOW`; this affects presentation only and grants no additional authority. The interactive console binary remains separate so enrollment errors and diagnostic output are not hidden from the owner.
+
 SQLite and private keys are stored outside the source tree. Historical records exclude live connection and workload details and expire after a bounded period. Development Compose publishes only the dashboard to host loopback. The production profile binds exact private addresses for its dashboard, DNS, and agent listeners and does not expose them through public ingress.
 
 Baseline history contains only bounded posture and counts. HAVEN does not retain administrator names, Windows update titles, Defender threat names, detected file or resource paths, BitLocker recovery keys, or other recovery material. A finding is a local rule evaluation, not proof of compromise or a substitute for native security guidance.

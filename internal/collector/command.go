@@ -7,6 +7,8 @@ import (
 	"os/exec"
 	"strings"
 	"time"
+
+	"github.com/AdamWentworth/haven/internal/subprocess"
 )
 
 // CommandRunner executes fixed collector commands. Callers never pass browser,
@@ -28,6 +30,7 @@ func (runner *OSCommandRunner) Run(ctx context.Context, name string, arguments .
 	defer cancel()
 
 	command := exec.CommandContext(commandContext, name, arguments...)
+	subprocess.HideWindow(command)
 	output, err := command.CombinedOutput()
 	if errors.Is(commandContext.Err(), context.DeadlineExceeded) {
 		return output, fmt.Errorf("%s collection exceeded the %s limit", name, runner.timeout)

@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/AdamWentworth/haven/internal/storage"
+	"github.com/AdamWentworth/haven/internal/subprocess"
 )
 
 const (
@@ -130,6 +131,7 @@ func (NativeExecutor) Execute(ctx context.Context, kind string) error {
 	// The command is selected exclusively from the fixed allowlist above. No
 	// browser-supplied text is ever interpolated into PowerShell.
 	process := exec.CommandContext(ctx, "powershell.exe", "-NoLogo", "-NoProfile", "-NonInteractive", "-Command", command)
+	subprocess.HideWindow(process)
 	if output, err := process.CombinedOutput(); err != nil {
 		return fmt.Errorf("execute fixed Defender action: %w (%d output bytes)", err, len(output))
 	}

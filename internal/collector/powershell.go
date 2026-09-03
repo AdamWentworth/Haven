@@ -7,6 +7,8 @@ import (
 	"os/exec"
 	"strings"
 	"time"
+
+	"github.com/AdamWentworth/haven/internal/subprocess"
 )
 
 type ScriptRunner interface {
@@ -34,6 +36,7 @@ func (r *PowerShellRunner) Run(ctx context.Context, script string) ([]byte, erro
 		"-Command",
 		"$source = [Console]::In.ReadToEnd(); & ([ScriptBlock]::Create($source))",
 	)
+	subprocess.HideWindow(command)
 	// The collector script is fixed at build time, but is intentionally sent
 	// over stdin so it cannot exceed Windows' process command-line limit. This
 	// also avoids writing a temporary script containing a posture observation.

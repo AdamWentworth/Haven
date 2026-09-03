@@ -26,6 +26,7 @@ HAVEN treats security statements as testable claims. A green test does not prove
 | Lock-screen content does not expose finding details | Fixed server-generated payload schema | Delivery tests require the title and summary to be absent and the generic open-HAVEN prompt to be present |
 | Push capability endpoints are not stored or returned as plaintext | AES-GCM subscription ciphertext plus endpoint hash | Notification tests inspect stored/status records and require the capability hostname to remain absent |
 | Historical storage does not become a household activity log | Persisted observation payload | Go storage tests require live connections and workload metadata to remain memory-only |
+| Scheduled Windows reporting does not allocate a console | GUI-subsystem reporter plus Windows child-process creation flags | Windows CI tests require hidden startup state and `CREATE_NO_WINDOW`, then inspects the built reporter's PE subsystem before an image may publish |
 | Public source stays portfolio-safe | Staged repository content | The PowerShell public-repository scan runs before commits and in CI |
 
 ## Required local gates
