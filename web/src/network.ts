@@ -132,7 +132,7 @@ export function expectedServiceMatches(listener: LogicalListener, service: Expec
   const observedWorkloads = workloadAttribution(listener, inventory).map(({ workload }) => workload.name);
   if (!ownerDimensionMatches(listener.processes, processNames, true)) return false;
   if (!ownerDimensionMatches(observedWorkloads, workloadNames)) return false;
-  if (!ownerDimensionMatches(listener.systemdUnits, systemdUnits)) return false;
+  if (!systemdOwnerDimensionMatches(listener.systemdUnits, systemdUnits, workloadNames.length > 0, inventory)) return false;
   return true;
 }
 
@@ -140,6 +140,12 @@ function ownerDimensionMatches(observed: string[], expected: string[], executabl
   if (observed.length === 0 || expected.length === 0) return observed.length === expected.length;
   const allowed = new Set(expected.map((value) => canonicalOwnerName(value, executable)));
   return observed.every((value) => allowed.has(canonicalOwnerName(value, executable)));
+}
+
+function systemdOwnerDimensionMatches(observed: string[], expected: string[], workloadConstrained: boolean, inventory: WorkloadInventory | null) {
+  if (expected.length === 0 && workloadConstrained && inventory?.runtime.toLowerCase() === "docker" && observed.length > 0
+    && observed.every((unit) => canonicalOwnerName(unit) === "docker.service")) return true;
+  return ownerDimensionMatches(observed, expected);
 }
 
 export function isLoopbackAddress(value: string) {

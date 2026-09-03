@@ -94,6 +94,14 @@ describe("listener baselines", () => {
     expect(expectedServiceMatches(listener, expected({ processNames: ["caddy"], workloadNames: ["haven_proxy"] }), null)).toBe(false);
   });
 
+  it("treats Docker's service unit as support evidence for a legacy workload-only baseline", () => {
+    const inventory: WorkloadInventory = { runtime: "docker", collectedAt: at, workloads: [{ name: "gateway", state: "running", ports: [{ protocol: "TCP", containerPort: 443, published: true, hostAddress: "0.0.0.0", hostPort: 443 }] }] };
+    const dockerOwned = logicalListeners([connection({ processName: "", systemdUnit: "docker.service" })])[0];
+    expect(expectedServiceMatches(dockerOwned, expected({ workloadNames: ["gateway"] }), inventory)).toBe(true);
+    const unrelated = logicalListeners([connection({ processName: "", systemdUnit: "unexpected.service" })])[0];
+    expect(expectedServiceMatches(unrelated, expected({ workloadNames: ["gateway"] }), inventory)).toBe(false);
+  });
+
   it("does not let a port range cover the wrong protocol or bind scope", () => {
     const listener = logicalListeners([connection({ localPort: 50000 })])[0];
     expect(expectedServiceMatches(listener, expected({ port: 49152, portEnd: 65535 }), null)).toBe(true);

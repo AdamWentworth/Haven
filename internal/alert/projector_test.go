@@ -115,6 +115,25 @@ func TestDeriveRequiresLiveWorkloadEvidenceForWorkloadBaseline(t *testing.T) {
 	}
 }
 
+func TestDeriveAllowsDockerServiceEvidenceForLegacyWorkloadBaseline(t *testing.T) {
+	device := observedDevice("current", listener(443, "0.0.0.0", "", "docker.service"))
+	device.ExpectedServices = []storage.ExpectedService{{
+		DeviceID: "device-a", Label: "HTTPS", Protocol: "TCP", Port: 443, PortEnd: 443,
+		BindScope: storage.BindScopeWildcard, WorkloadNames: []string{"gateway"},
+	}}
+	device.Snapshot.LinuxBaseline = &model.LinuxBaseline{Workloads: &model.WorkloadInventory{Runtime: "docker", Workloads: []model.ContainerWorkload{{
+		Name: "gateway", Ports: []model.ContainerPortBinding{{Protocol: "TCP", Published: true, HostAddress: "0.0.0.0", HostPort: 443}},
+	}}}}
+	if alerts := Derive([]DeviceObservation{device}, nil, 30*time.Minute); len(alerts) != 0 {
+		t.Fatalf("Docker's own service unit should not invalidate a matching legacy workload baseline: %#v", alerts)
+	}
+	device.Snapshot.Connections[0].SystemdUnit = "unexpected.service"
+	alerts := Derive([]DeviceObservation{device}, nil, 30*time.Minute)
+	if len(alerts) != 1 || alerts[0].Kind != "service-drift" {
+		t.Fatalf("an unrelated service unit must still require review: %#v", alerts)
+	}
+}
+
 func TestDeriveClassifiesFreshnessAndOrdersSeverity(t *testing.T) {
 	stale := observedDevice("stale")
 	stale.Device.LastSeenAt = timePointer(fixedTime.Add(-time.Hour))
@@ -186,7 +205,7 @@ func TestSharedServiceExpectationContract(t *testing.T) {
 			service := storage.ExpectedService{DeviceID: "fixture", Protocol: item.Service.Protocol, Port: item.Service.Port, PortEnd: item.Service.PortEnd, BindScope: item.Service.BindScope, ProcessNames: item.Service.ProcessNames, WorkloadNames: item.Service.WorkloadNames, SystemdUnits: item.Service.SystemdUnits}
 			var inventory *model.WorkloadInventory
 			if len(item.Workloads) > 0 {
-				inventory = &model.WorkloadInventory{}
+				inventory = &model.WorkloadInventory{Runtime: "docker"}
 				for _, name := range item.Workloads {
 					inventory.Workloads = append(inventory.Workloads, model.ContainerWorkload{Name: name, Ports: []model.ContainerPortBinding{{Protocol: item.Listener.Protocol, Published: true, HostAddress: item.Listener.Address, HostPort: item.Listener.Port}}})
 				}

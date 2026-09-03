@@ -96,5 +96,19 @@
     "service": { "protocol": "TCP", "port": 443, "portEnd": 443, "bindScope": "wildcard", "processNames": ["docker-proxy"], "workloadNames": ["gateway"], "systemdUnits": [] },
     "workloads": ["gateway"],
     "matches": false
+  },
+  {
+    "name": "legacy workload baseline accepts Docker service attribution",
+    "listener": { "protocol": "TCP", "address": "0.0.0.0", "port": 443, "processes": [], "systemdUnits": ["docker.service"] },
+    "service": { "protocol": "TCP", "port": 443, "portEnd": 443, "bindScope": "wildcard", "processNames": [], "workloadNames": ["gateway"], "systemdUnits": [] },
+    "workloads": ["gateway"],
+    "matches": true
+  },
+  {
+    "name": "legacy workload baseline rejects unrelated system service",
+    "listener": { "protocol": "TCP", "address": "0.0.0.0", "port": 443, "processes": [], "systemdUnits": ["unexpected.service"] },
+    "service": { "protocol": "TCP", "port": 443, "portEnd": 443, "bindScope": "wildcard", "processNames": [], "workloadNames": ["gateway"], "systemdUnits": [] },
+    "workloads": ["gateway"],
+    "matches": false
   }
 ]

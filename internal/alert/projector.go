@@ -343,7 +343,7 @@ func expectedServiceMatches(listener logicalListener, service storage.ExpectedSe
 	if !ownerDimensionMatches(workloadNames(listener, inventory), service.WorkloadNames, false) {
 		return false
 	}
-	if !ownerDimensionMatches(listener.systemdUnits, service.SystemdUnits, false) {
+	if !systemdOwnerDimensionMatches(listener.systemdUnits, service.SystemdUnits, len(service.WorkloadNames) > 0, inventory) {
 		return false
 	}
 	return true
@@ -363,6 +363,18 @@ func ownerDimensionMatches(observed, expected []string, executable bool) bool {
 		}
 	}
 	return true
+}
+
+func systemdOwnerDimensionMatches(observed, expected []string, workloadConstrained bool, inventory *model.WorkloadInventory) bool {
+	if len(expected) == 0 && workloadConstrained && inventory != nil && strings.EqualFold(inventory.Runtime, "docker") && len(observed) > 0 {
+		for _, unit := range observed {
+			if canonicalOwner(unit, false) != "docker.service" {
+				return false
+			}
+		}
+		return true
+	}
+	return ownerDimensionMatches(observed, expected, false)
 }
 
 func workloadNames(listener logicalListener, inventory *model.WorkloadInventory) []string {
