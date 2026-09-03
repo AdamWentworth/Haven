@@ -1,6 +1,9 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { addPasskey, collectSnapshot, getAuthStatus, getDevice, getLatestSnapshot, getRuntimeStatus, listAuditEvents, listDevices, listEvents, listExpectedServices, listFindingReviews, listObservedListeners, listPasskeys, listSecurityActions, loginWithPasskey, logout, registerPasskey, removeExpectedService, removePasskey, requestSecurityAction, saveExpectedService, saveExpectedServices, saveFindingReview } from "./api";
+import { notificationCandidates, parseAlertReceipts, receiptsForCurrentAlerts, type AlertReceipts } from "./alert-notifications";
+import { deriveCurrentAlerts, type HavenAlert } from "./alerts";
 import { ActivityIcon, AlertIcon, BellIcon, CheckIcon, ChipIcon, DefenderIcon, DevicesIcon, FirewallIcon, HavenIcon, HelpIcon, LaptopIcon, LockIcon, MonitorIcon, NetworkIcon, RefreshIcon, RemoteAccessIcon, ServerIcon, UpdateIcon, UsersIcon, WorkloadIcon } from "./icons";
+import { bindScopeLabel, canonicalOwnerName, endpoint, endpointScope, expectedServiceMatches, isPrivateNetworkAddress, liveNetworkRelationships, logicalListeners, networkServiceLabel, normalizeAddress, workloadAttribution, type LogicalListener, type NetworkDeviceObservation } from "./network";
 import type {
   BaselineCheck,
   AuditEvent,
@@ -35,13 +38,6 @@ type Accent = "green" | "blue" | "amber" | "cyan";
 interface ChipProps {
   label: string;
   tone: Tone;
-}
-
-interface NetworkDeviceObservation {
-  device: DeviceRecord;
-  snapshot: SecuritySnapshot | null;
-  expectedServices: ExpectedService[];
-  listenerObservations: ObservedListener[];
 }
 
 async function loadNetworkObservations(inventory: DeviceRecord[], demoMode: boolean, signal?: AbortSignal) {
@@ -181,226 +177,6 @@ function booleanValue(value: boolean | null) {
   if (value === true) return { label: "On", className: "value-good" };
   if (value === false) return { label: "Off", className: "value-bad" };
   return { label: "Unavailable", className: "value-muted" };
-}
-
-function endpoint(address: string, port: number) {
-	const normalized = normalizeAddress(address);
-	if (!normalized || port === 0) return "—";
-  const host = normalized.includes(":") ? `[${normalized}]` : normalized;
-  return `${host}:${port}`;
-}
-
-function normalizeAddress(value: string) {
-	let address = value.trim().replace(/^\[|\]$/g, "");
-	const zone = address.lastIndexOf("%");
-	if (zone >= 0) address = address.slice(0, zone);
-	if (address.toLowerCase().startsWith("::ffff:") && /^\d+\.\d+\.\d+\.\d+$/.test(address.slice(7))) address = address.slice(7);
-	return address.toLowerCase();
-}
-
-function endpointBindScope(connection: NetworkConnection): Exclude<BindScope, "any"> {
-  const address = normalizeAddress(connection.localAddress);
-  if (address === "127.0.0.1" || address === "::1" || address.startsWith("127.")) return "local";
-  if (address === "0.0.0.0" || address === "::" || address === "*" || address === "") return "wildcard";
-  if (address.startsWith("10.") || address.startsWith("192.168.")) return "private";
-  const octets = address.split(".").map(Number);
-  if (octets.length === 4 && octets[0] === 172 && octets[1] >= 16 && octets[1] <= 31) return "private";
-  if (address.startsWith("169.254.") || address.startsWith("fe80:") || address.startsWith("fc") || address.startsWith("fd")) return "private";
-  return "specific";
-}
-
-function bindScopeLabel(scope: BindScope) {
-	return ({ any: "Any bind", local: "This host only", private: "Private address", wildcard: "All interfaces", specific: "Specific address" } satisfies Record<BindScope, string>)[scope];
-}
-
-function endpointScope(connection: NetworkConnection) {
-  if (connection.state.toLowerCase() === "established") return "Active connection";
-  return bindScopeLabel(endpointBindScope(connection));
-}
-
-interface LogicalListener {
-	key: string;
-	protocol: "TCP" | "UDP";
-	port: number;
-	bindScope: Exclude<BindScope, "any">;
-	addresses: string[];
-	processes: string[];
-	systemdUnits: string[];
-	rawCount: number;
-	state: "Listening" | "Bound";
-}
-
-function logicalListeners(connections: NetworkConnection[]) {
-	const grouped = new Map<string, LogicalListener>();
-	connections.filter((connection) => ["listen", "open", "bound"].includes(connection.state.toLowerCase())).forEach((connection) => {
-		const protocol = connection.protocol.toUpperCase() === "UDP" ? "UDP" : "TCP";
-		const bindScope = endpointBindScope(connection);
-		const key = `${protocol}:${connection.localPort}:${bindScope}`;
-		const current = grouped.get(key) || { key, protocol, port: connection.localPort, bindScope, addresses: [], processes: [], systemdUnits: [], rawCount: 0, state: protocol === "UDP" ? "Bound" : "Listening" };
-		const address = normalizeAddress(connection.localAddress);
-		if (address && !current.addresses.includes(address)) current.addresses.push(address);
-		if (connection.processName && !current.processes.includes(connection.processName)) current.processes.push(connection.processName);
-		if (connection.systemdUnit && !current.systemdUnits.includes(connection.systemdUnit)) current.systemdUnits.push(connection.systemdUnit);
-		current.rawCount += 1;
-		grouped.set(key, current);
-	});
-	return [...grouped.values()].sort((left, right) => left.protocol.localeCompare(right.protocol) || left.port - right.port || left.bindScope.localeCompare(right.bindScope));
-}
-
-function workloadAttribution(listener: LogicalListener, inventory: WorkloadInventory | null) {
-	if (!inventory) return [];
-	return inventory.workloads.flatMap((workload) => {
-		const bindings = workload.ports.filter((binding) => binding.published && binding.protocol === listener.protocol && binding.hostPort === listener.port && (() => {
-			const address = normalizeAddress(binding.hostAddress || "");
-			if (!address || address === "0.0.0.0" || address === "::") return listener.bindScope === "wildcard";
-			return listener.addresses.includes(address);
-		})());
-		return bindings.length > 0 ? [{ workload, bindings }] : [];
-	});
-}
-
-function canonicalOwnerName(value: string, executable = false) {
-	let name = value.trim().toLowerCase();
-	if (executable && name.endsWith(".exe")) name = name.slice(0, -4);
-	return name;
-}
-
-function expectedServiceMatches(listener: LogicalListener, service: ExpectedService, inventory: WorkloadInventory | null) {
-	const portEnd = service.portEnd || service.port;
-	if (service.protocol !== listener.protocol || listener.port < service.port || listener.port > portEnd || (service.bindScope !== "any" && service.bindScope !== listener.bindScope)) return false;
-	if (service.processNames?.length) {
-		const expectedProcesses = new Set(service.processNames.map((process) => canonicalOwnerName(process, true)));
-		const observedProcesses = listener.processes.map((process) => canonicalOwnerName(process, true));
-		if (observedProcesses.length === 0 || !observedProcesses.every((process) => expectedProcesses.has(process))) return false;
-	}
-	if (service.workloadNames?.length) {
-		const expectedWorkloads = new Set(service.workloadNames.map((workload) => canonicalOwnerName(workload)));
-		const observedWorkloads = workloadAttribution(listener, inventory).map(({ workload }) => canonicalOwnerName(workload.name));
-		if (observedWorkloads.length === 0 || !observedWorkloads.every((workload) => expectedWorkloads.has(workload))) return false;
-	}
-	if (service.systemdUnits?.length) {
-		const expectedUnits = new Set(service.systemdUnits.map((unit) => canonicalOwnerName(unit)));
-		const observedUnits = listener.systemdUnits.map((unit) => canonicalOwnerName(unit));
-		if (observedUnits.length === 0 || !observedUnits.every((unit) => expectedUnits.has(unit))) return false;
-	}
-	return true;
-}
-
-function isLoopbackAddress(value: string) {
-	const address = normalizeAddress(value);
-	return address === "::1" || address.startsWith("127.");
-}
-
-function isUnspecifiedAddress(value: string) {
-	const address = normalizeAddress(value);
-	return address === "" || address === "*" || address === "::" || address === "0.0.0.0";
-}
-
-function isPrivateNetworkAddress(value: string) {
-	const address = normalizeAddress(value);
-	if (address.startsWith("10.") || address.startsWith("192.168.") || address.startsWith("169.254.")) return true;
-	const octets = address.split(".").map(Number);
-	if (octets.length === 4 && octets.every(Number.isFinite)) {
-		return octets[0] === 172 && octets[1] >= 16 && octets[1] <= 31;
-	}
-	return address.startsWith("fe80:") || address.startsWith("fc") || address.startsWith("fd");
-}
-
-function isMulticastAddress(value: string) {
-	const address = normalizeAddress(value);
-	if (address.startsWith("ff")) return true;
-	const firstOctet = Number(address.split(".")[0]);
-	return Number.isFinite(firstOctet) && firstOctet >= 224 && firstOctet <= 239;
-}
-
-function networkServiceLabel(protocol: string, port: number) {
-	const labels: Record<string, string> = {
-		"TCP:22": "SSH",
-		"TCP:53": "DNS",
-		"UDP:53": "DNS",
-		"UDP:67": "DHCP",
-		"TCP:80": "HTTP",
-		"TCP:443": "HTTPS",
-		"TCP:445": "SMB",
-		"TCP:3389": "Remote Desktop",
-		"TCP:4070": "Spotify",
-		"TCP:5228": "push messaging",
-		"TCP:8096": "Jellyfin",
-		"TCP:8443": "HAVEN",
-		"UDP:51822": "WireGuard",
-	};
-	return labels[`${protocol.toUpperCase()}:${port}`] || "";
-}
-
-interface NetworkRelationship {
-	key: string;
-	sourceName: string;
-	targetName: string;
-	peerKind: "enrolled" | "observed" | "external";
-	protocol: string;
-	port: number;
-	owners: string[];
-	connectionCount: number;
-	destinationCount: number;
-}
-
-function liveNetworkRelationships(devices: NetworkDeviceObservation[]) {
-	const addressOwners = new Map<string, NetworkDeviceObservation>();
-	for (const device of devices) {
-		for (const connection of device.snapshot?.connections || []) {
-			const address = normalizeAddress(connection.localAddress);
-			if (!isUnspecifiedAddress(address) && !isLoopbackAddress(address) && !isMulticastAddress(address)) addressOwners.set(address, device);
-		}
-	}
-
-	type MutableRelationship = Omit<NetworkRelationship, "owners" | "connectionCount" | "destinationCount"> & { owners: Set<string>; connections: Set<string>; destinations: Set<string> };
-	const grouped = new Map<string, MutableRelationship>();
-	for (const localDevice of devices) {
-		const listenerPorts = new Set(logicalListeners(localDevice.snapshot?.connections || []).map((listener) => `${listener.protocol}:${listener.port}`));
-		for (const connection of localDevice.snapshot?.connections || []) {
-			if (connection.state.toLowerCase() !== "established") continue;
-			const remoteAddress = normalizeAddress(connection.remoteAddress);
-			if (!remoteAddress || connection.remotePort < 1 || isLoopbackAddress(remoteAddress) || isUnspecifiedAddress(remoteAddress) || isMulticastAddress(remoteAddress)) continue;
-			const peerDevice = addressOwners.get(remoteAddress);
-			if (peerDevice?.device.id === localDevice.device.id) continue;
-			const peerKind: NetworkRelationship["peerKind"] = peerDevice ? "enrolled" : isPrivateNetworkAddress(remoteAddress) ? "observed" : "external";
-			const peerName = peerDevice?.device.displayName || (peerKind === "observed" ? remoteAddress : "Internet");
-			const owner = connection.processName || connection.systemdUnit || "Not attributed";
-			const protocol = connection.protocol.toUpperCase();
-			const inbound = listenerPorts.has(`${protocol}:${connection.localPort}`);
-			const servicePort = inbound ? connection.localPort : connection.remotePort;
-			const peerIdentity = peerDevice ? `device:${peerDevice.device.id}` : peerKind === "observed" ? `asset:${remoteAddress}` : `internet:${canonicalOwnerName(owner)}`;
-			const localIdentity = `device:${localDevice.device.id}`;
-			const key = `${inbound ? `${peerIdentity}|${localIdentity}` : `${localIdentity}|${peerIdentity}`}|${protocol}:${servicePort}`;
-			const localEndpoint = endpoint(connection.localAddress, connection.localPort);
-			const remoteEndpoint = endpoint(connection.remoteAddress, connection.remotePort);
-			const connectionIdentity = [localEndpoint, remoteEndpoint].sort().join(" ↔ ");
-			const relationship = grouped.get(key) || {
-				key,
-				sourceName: inbound ? peerName : localDevice.device.displayName,
-				targetName: inbound ? localDevice.device.displayName : peerName,
-				peerKind,
-				protocol,
-				port: servicePort,
-				owners: new Set<string>(),
-				connections: new Set<string>(),
-				destinations: new Set<string>(),
-			};
-			relationship.owners.add(owner);
-			relationship.connections.add(connectionIdentity);
-			relationship.destinations.add(remoteAddress);
-			grouped.set(key, relationship);
-		}
-	}
-
-	const order = { enrolled: 0, observed: 1, external: 2 } satisfies Record<NetworkRelationship["peerKind"], number>;
-	return [...grouped.values()].map((relationship): NetworkRelationship => {
-		const { owners, connections, destinations, ...identity } = relationship;
-		return { ...identity, owners: [...owners].sort(), connectionCount: connections.size, destinationCount: destinations.size };
-	}).sort((left, right) => order[left.peerKind] - order[right.peerKind]
-		|| left.sourceName.localeCompare(right.sourceName)
-		|| left.targetName.localeCompare(right.targetName)
-		|| left.port - right.port);
 }
 
 interface BaselineSuggestion {
@@ -710,7 +486,7 @@ function PanelHeading({
   );
 }
 
-function NetworkOverview({ devices, events, selectedId, selectDevice, demoMode }: { devices: NetworkDeviceObservation[]; events: SecurityEvent[]; selectedId: string; selectDevice: (id: string) => void; demoMode: boolean }) {
+function NetworkOverview({ devices, events, alerts, selectedId, selectDevice, demoMode }: { devices: NetworkDeviceObservation[]; events: SecurityEvent[]; alerts: HavenAlert[]; selectedId: string; selectDevice: (id: string) => void; demoMode: boolean }) {
 	const summaries = useMemo(() => devices.map((entry) => {
 		const snapshot = entry.snapshot;
 		const listeners = logicalListeners(snapshot?.connections || []);
@@ -770,6 +546,15 @@ function NetworkOverview({ devices, events, selectedId, selectDevice, demoMode }
 				<article><span>Open findings</span><strong>{findingCount}</strong><small>across current posture</small></article>
 				<article><span>Service reviews</span><strong>{unreviewedCount}</strong><small>non-local listeners</small></article>
 			</div>
+			<section className="network-alert-watch" aria-labelledby="network-alerts-title">
+				<div className="network-subheading"><div><p className="eyebrow">ACTIVE ALERTS</p><h3 id="network-alerts-title">What currently needs attention</h3></div><span>{alerts.length} active</span></div>
+				<p className="network-privacy-note">Alerts come only from authenticated report freshness, evaluated posture findings, and owner-reviewed service baselines. An alert is a review prompt—not a claim that an attack occurred.</p>
+				{alerts.length === 0 ? <p className="alert-watch-clear"><CheckIcon size={18} /><span><strong>No active alerts.</strong><small>Current reports match the reviewed baseline.</small></span></p> : <ol className="network-alert-list">{alerts.slice(0, 8).map((alert) => {
+					const tone: Tone = alert.severity === "high" ? "danger" : alert.severity === "medium" ? "attention" : "configured";
+					return <li key={alert.id}><button type="button" onClick={() => selectDevice(alert.deviceId)}><span className={`alert-watch-icon ${alert.severity}`}><AlertIcon size={17} /></span><span><strong>{alert.title}</strong><small>{alert.deviceName} · active since {formatRelativeTime(alert.startedAt)} · {alert.evidence}</small><em>{alert.summary}</em></span><StatusChip label={alert.severity} tone={tone} /></button></li>;
+				})}</ol>}
+				{alerts.length > 8 && <p className="network-overflow-note">Showing 8 of {alerts.length} current alerts.</p>}
+			</section>
 			<div className="network-overview-columns">
 				<section className="network-subsection" aria-labelledby="network-devices-title">
 					<div className="network-subheading"><div><p className="eyebrow">ENROLLED DEVICES</p><h3 id="network-devices-title">Security coverage</h3></div><span>{summaries.length} trusted</span></div>
@@ -1135,7 +920,7 @@ function BaselinePanel({ checks, collectedAt, platform }: { checks: BaselineChec
   );
 }
 
-function Application({ snapshot, devices, networkDevices, events, networkEvents, runtime, selectedDevice, selectDevice, refresh, refreshing, error, demoMode, alertsEnabled, alertsSupported, enableAlerts, reviews, expectedServices, listenerObservations, audit, actions, passkeys, reviewFinding, saveServiceExpectation, saveServiceExpectations, removeServiceExpectation, runAction, addOwnerPasskey, removeOwnerPasskey, actionBusy, signOut }: { snapshot: SecuritySnapshot; devices: DeviceRecord[]; networkDevices: NetworkDeviceObservation[]; events: SecurityEvent[]; networkEvents: SecurityEvent[]; runtime: RuntimeStatus | null; selectedDevice: DeviceRecord | null; selectDevice: (id: string) => void; refresh: () => void; refreshing: boolean; error: string | null; demoMode: boolean; alertsEnabled: boolean; alertsSupported: boolean; enableAlerts: () => void; reviews: FindingReview[]; expectedServices: ExpectedService[]; listenerObservations: ObservedListener[]; audit: AuditEvent[]; actions: SecurityAction[]; passkeys: PasskeyInfo[]; reviewFinding: (finding: SecurityFinding, state: FindingReviewState) => void; saveServiceExpectation: (service: ExpectedServiceInput) => void; saveServiceExpectations: (services: ExpectedServiceInput[]) => void; removeServiceExpectation: (service: ExpectedService) => void; runAction: (kind: SecurityActionKind) => void; addOwnerPasskey: () => void; removeOwnerPasskey: (passkey: PasskeyInfo) => void; actionBusy: boolean; signOut: () => void }) {
+function Application({ snapshot, devices, networkDevices, events, networkEvents, alerts, runtime, selectedDevice, selectDevice, refresh, refreshing, error, demoMode, alertsEnabled, alertsSupported, enableAlerts, reviews, expectedServices, listenerObservations, audit, actions, passkeys, reviewFinding, saveServiceExpectation, saveServiceExpectations, removeServiceExpectation, runAction, addOwnerPasskey, removeOwnerPasskey, actionBusy, signOut }: { snapshot: SecuritySnapshot; devices: DeviceRecord[]; networkDevices: NetworkDeviceObservation[]; events: SecurityEvent[]; networkEvents: SecurityEvent[]; alerts: HavenAlert[]; runtime: RuntimeStatus | null; selectedDevice: DeviceRecord | null; selectDevice: (id: string) => void; refresh: () => void; refreshing: boolean; error: string | null; demoMode: boolean; alertsEnabled: boolean; alertsSupported: boolean; enableAlerts: () => void; reviews: FindingReview[]; expectedServices: ExpectedService[]; listenerObservations: ObservedListener[]; audit: AuditEvent[]; actions: SecurityAction[]; passkeys: PasskeyInfo[]; reviewFinding: (finding: SecurityFinding, state: FindingReviewState) => void; saveServiceExpectation: (service: ExpectedServiceInput) => void; saveServiceExpectations: (services: ExpectedServiceInput[]) => void; removeServiceExpectation: (service: ExpectedService) => void; runAction: (kind: SecurityActionKind) => void; addOwnerPasskey: () => void; removeOwnerPasskey: (passkey: PasskeyInfo) => void; actionBusy: boolean; signOut: () => void }) {
   const isLinux = snapshot.linuxBaseline !== null || /linux|ubuntu/i.test(snapshot.device.operatingSystem);
   const defenderHealthy = snapshot.defender?.antivirusEnabled === true
     && snapshot.defender.realTimeProtectionEnabled === true
@@ -1166,7 +951,7 @@ function Application({ snapshot, devices, networkDevices, events, networkEvents,
         {demoMode && <p className="demo-banner" role="status"><strong>Synthetic demo mode.</strong> Every device and observation on this page is invented. HAVEN is not showing or collecting data from this computer.</p>}
         {!demoMode && <p className="context-banner"><strong>Continuous, read-only monitoring.</strong> {runtime?.localCollection ? `HAVEN observes this computer every ${runtime.monitor.enabled ? formatInterval(runtime.monitor.intervalSeconds) : "configured interval"}.` : "A native agent reports this endpoint's security posture to the private HAVEN hub on its own schedule; this page checks the hub for a newer report every minute."} The current-posture sections always come from the latest observation. The activity section retains only the latest lifecycle for each finding, while routine unchanged observations stay quiet.</p>}
         {error && <p className="inline-error" role="alert">{error}</p>}
-        <NetworkOverview devices={networkDevices} events={networkEvents} selectedId={selectedDevice?.id || snapshot.device.deviceId || ""} selectDevice={selectDevice} demoMode={demoMode} />
+        <NetworkOverview devices={networkDevices} events={networkEvents} alerts={alerts} selectedId={selectedDevice?.id || snapshot.device.deviceId || ""} selectDevice={selectDevice} demoMode={demoMode} />
         <section className="hero" aria-labelledby="device-name">
           <div className="hero-identity"><span className="hero-device-icon">{snapshot.device.operatingSystem.toLowerCase().includes("server") ? <ServerIcon size={28} /> : selectedDevice?.displayName.toLowerCase().includes("laptop") ? <LaptopIcon size={28} /> : <MonitorIcon size={28} />}</span><div><p className="eyebrow">{selectedDevice?.trustState === "local" ? "THIS DEVICE" : "DEVICE OBSERVATION"}</p><h1 id="device-name">{selectedDevice?.displayName || snapshot.device.hostName}</h1><p className="device-detail">{snapshot.device.hostName} · {snapshot.device.operatingSystem} · {snapshot.device.architecture} · {formatDuration(snapshot.device.uptimeSeconds)}</p></div></div>
           <div className="collection-time"><span>Last observation</span><strong>{formatRelativeTime(snapshot.collectedAt)}</strong><time dateTime={snapshot.collectedAt}>{formatDate(snapshot.collectedAt)}</time></div>
@@ -1186,7 +971,7 @@ function Application({ snapshot, devices, networkDevices, events, networkEvents,
 		<FirewallPanel profiles={snapshot.firewallProfiles} isLinux={isLinux} />
 		<ConnectionsPanel deviceId={selectedDevice?.id || snapshot.device.deviceId || ""} operatingSystem={snapshot.device.operatingSystem} connections={snapshot.connections} workloads={workloadInventory} expectedServices={expectedServices} observations={listenerObservations} saveExpectation={saveServiceExpectation} saveExpectations={saveServiceExpectations} removeExpectation={removeServiceExpectation} busy={actionBusy} />
       </main>
-	  <footer><span>HAVEN milestone 0.8 · Network overview</span><span>Observe continuously. Act deliberately.</span></footer>
+	  <footer><span>HAVEN milestone 0.9 · Alert baselines</span><span>Observe continuously. Act deliberately.</span></footer>
     </>
   );
 }
@@ -1213,7 +998,8 @@ export function App() {
   const selectedIdRef = useRef("");
   const alertsSupported = typeof window !== "undefined" && "Notification" in window;
   const [alertsEnabled, setAlertsEnabled] = useState(() => alertsSupported && window.Notification.permission === "granted" && window.localStorage.getItem("haven.desktopAlerts") === "enabled");
-  const lastNotifiedEvent = useRef<number>(typeof window === "undefined" ? -1 : Number(window.localStorage.getItem("haven.lastNotifiedEvent") ?? "-1"));
+  const alertReceipts = useRef<AlertReceipts>(typeof window === "undefined" ? {} : parseAlertReceipts(window.localStorage.getItem("haven.alertReceipts.v1")));
+  const currentAlerts = useMemo(() => deriveCurrentAlerts(networkDevices, events, runtime?.deviceFreshnessAllowanceSeconds), [networkDevices, events, runtime?.deviceFreshnessAllowanceSeconds]);
 
   const authenticate = useCallback(async (bootstrapCode?: string, label?: string) => {
     if (bootstrapCode === undefined) await loginWithPasskey();
@@ -1440,13 +1226,13 @@ export function App() {
       setError("Desktop notifications remain blocked. You can change this site's notification permission in the browser.");
       return;
     }
-    const newestEvent = events.reduce((highest, event) => Math.max(highest, event.id), 0);
-    lastNotifiedEvent.current = newestEvent;
-    window.localStorage.setItem("haven.lastNotifiedEvent", String(newestEvent));
+    alertReceipts.current = receiptsForCurrentAlerts(currentAlerts);
+    window.localStorage.setItem("haven.alertReceipts.v1", JSON.stringify(alertReceipts.current));
+    window.localStorage.removeItem("haven.lastNotifiedEvent");
     window.localStorage.setItem("haven.desktopAlerts", "enabled");
     setAlertsEnabled(true);
     setError(null);
-  }, [alertsSupported, events]);
+  }, [alertsSupported, currentAlerts]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -1525,31 +1311,21 @@ export function App() {
   }, [authentication?.authenticated]);
 
   useEffect(() => {
-    if (!alertsEnabled || !alertsSupported || window.Notification.permission !== "granted" || events.length === 0) return;
-    const newestEvent = events.reduce((highest, event) => Math.max(highest, event.id), 0);
-    if (lastNotifiedEvent.current < 0) {
-      lastNotifiedEvent.current = newestEvent;
-      window.localStorage.setItem("haven.lastNotifiedEvent", String(newestEvent));
-      return;
-    }
-    events
-      .filter((event) => event.id > lastNotifiedEvent.current && event.kind === "opened" && (event.severity === "high" || event.severity === "medium"))
-      .sort((left, right) => left.id - right.id)
-      .forEach((event) => {
-        const notification = new window.Notification(`HAVEN · ${event.title}`, {
-          body: `${event.deviceName}: ${event.summary}`,
-          tag: `haven-event-${event.id}`,
+    if (!alertsEnabled || !alertsSupported || window.Notification.permission !== "granted") return;
+    notificationCandidates(currentAlerts, alertReceipts.current)
+      .forEach((alert) => {
+        const notification = new window.Notification(`HAVEN · ${alert.title}`, {
+          body: `${alert.deviceName}: ${alert.summary}`,
+          tag: `haven-alert-${alert.id}`,
         });
         notification.onclick = () => {
           window.focus();
           notification.close();
         };
       });
-    if (newestEvent > lastNotifiedEvent.current) {
-      lastNotifiedEvent.current = newestEvent;
-      window.localStorage.setItem("haven.lastNotifiedEvent", String(newestEvent));
-    }
-  }, [alertsEnabled, alertsSupported, events]);
+    alertReceipts.current = receiptsForCurrentAlerts(currentAlerts);
+    window.localStorage.setItem("haven.alertReceipts.v1", JSON.stringify(alertReceipts.current));
+  }, [alertsEnabled, alertsSupported, currentAlerts]);
 
   if (!authentication) {
     return <main className="loading-state"><div className="brand-mark"><HavenIcon /></div><p>{error || "Checking HAVEN's security boundary…"}</p></main>;
@@ -1569,5 +1345,5 @@ export function App() {
 
   const selectedDevice = devices.find((device) => device.id === selectedId) || null;
   const selectedEvents = selectedId ? events.filter((event) => event.deviceId === selectedId) : events;
-	return <Application snapshot={snapshot} devices={devices} networkDevices={networkDevices} events={selectedEvents} networkEvents={events} runtime={runtime} selectedDevice={selectedDevice} selectDevice={(id) => void selectDevice(id)} refresh={() => void refreshView()} refreshing={refreshing} error={error} demoMode={demoMode} alertsEnabled={alertsEnabled} alertsSupported={alertsSupported} enableAlerts={() => void enableAlerts()} reviews={reviews} expectedServices={expectedServices} listenerObservations={listenerObservations} audit={audit} actions={actions} passkeys={passkeys} reviewFinding={(finding, state) => void reviewFinding(finding, state)} saveServiceExpectation={(service) => void saveServiceExpectation(service)} saveServiceExpectations={(services) => void saveServiceBaseline(services)} removeServiceExpectation={(service) => void removeServiceExpectation(service)} runAction={(kind) => void runAction(kind)} addOwnerPasskey={() => void addOwnerPasskey()} removeOwnerPasskey={(passkey) => void removeOwnerPasskey(passkey)} actionBusy={actionBusy} signOut={() => void signOut()} />;
+	return <Application snapshot={snapshot} devices={devices} networkDevices={networkDevices} events={selectedEvents} networkEvents={events} alerts={currentAlerts} runtime={runtime} selectedDevice={selectedDevice} selectDevice={(id) => void selectDevice(id)} refresh={() => void refreshView()} refreshing={refreshing} error={error} demoMode={demoMode} alertsEnabled={alertsEnabled} alertsSupported={alertsSupported} enableAlerts={() => void enableAlerts()} reviews={reviews} expectedServices={expectedServices} listenerObservations={listenerObservations} audit={audit} actions={actions} passkeys={passkeys} reviewFinding={(finding, state) => void reviewFinding(finding, state)} saveServiceExpectation={(service) => void saveServiceExpectation(service)} saveServiceExpectations={(services) => void saveServiceBaseline(services)} removeServiceExpectation={(service) => void removeServiceExpectation(service)} runAction={(kind) => void runAction(kind)} addOwnerPasskey={() => void addOwnerPasskey()} removeOwnerPasskey={(passkey) => void removeOwnerPasskey(passkey)} actionBusy={actionBusy} signOut={() => void signOut()} />;
 }

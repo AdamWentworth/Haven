@@ -75,6 +75,27 @@ func TestHealthEndpointHasSecurityHeaders(t *testing.T) {
 	}
 }
 
+func TestRuntimePublishesServerOwnedDeviceFreshnessAllowance(t *testing.T) {
+	server, store := testServer(t)
+	defer store.Close()
+
+	response := httptest.NewRecorder()
+	server.runtimeStatus(response, httptest.NewRequest(http.MethodGet, "/api/runtime", nil))
+	if response.Code != http.StatusOK {
+		t.Fatalf("unexpected status: %d", response.Code)
+	}
+	var runtime struct {
+		DeviceFreshnessAllowanceSeconds int64 `json:"deviceFreshnessAllowanceSeconds"`
+	}
+	if err := json.NewDecoder(response.Body).Decode(&runtime); err != nil {
+		t.Fatal(err)
+	}
+	want := int64(storage.EnrolledDeviceStaleAfter / time.Second)
+	if runtime.DeviceFreshnessAllowanceSeconds != want {
+		t.Fatalf("frontend freshness fact drifted from server policy: got %d, want %d", runtime.DeviceFreshnessAllowanceSeconds, want)
+	}
+}
+
 func TestAuthenticatedBoundaryAndAntiforgery(t *testing.T) {
 	server, store := testServer(t)
 	defer store.Close()

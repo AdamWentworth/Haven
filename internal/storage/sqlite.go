@@ -1360,7 +1360,10 @@ func scanDevice(row rowScanner, now time.Time) (model.DeviceRecord, error) {
 	return device, nil
 }
 
-const enrolledDeviceStaleAfter = 20 * time.Minute
+// EnrolledDeviceStaleAfter is the server-owned freshness allowance used when
+// classifying an enrolled endpoint. Clients receive this value from the
+// authenticated runtime endpoint instead of duplicating the threshold.
+const EnrolledDeviceStaleAfter = 20 * time.Minute
 
 func deviceStatus(device model.DeviceRecord, now time.Time) string {
 	if device.RevokedAt != nil || device.TrustState == "revoked" {
@@ -1369,7 +1372,7 @@ func deviceStatus(device model.DeviceRecord, now time.Time) string {
 	if device.LastSeenAt == nil {
 		return "awaiting-first-report"
 	}
-	if now.UTC().Sub(device.LastSeenAt.UTC()) > enrolledDeviceStaleAfter {
+	if now.UTC().Sub(device.LastSeenAt.UTC()) > EnrolledDeviceStaleAfter {
 		return "stale"
 	}
 	return "current"

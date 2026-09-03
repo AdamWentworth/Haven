@@ -119,15 +119,16 @@ func (server *Server) runtimeStatus(writer http.ResponseWriter, _ *http.Request)
 		capabilities = server.actions.Capabilities()
 	}
 	server.writeJSON(writer, http.StatusOK, map[string]any{
-		"status":             "ready",
-		"service":            "HAVEN",
-		"agentIngestion":     "mutual-tls",
-		"demoMode":           server.demoMode,
-		"localCollection":    server.localCollection,
-		"authentication":     server.auth != nil,
-		"actionCapabilities": capabilities,
-		"monitor":            server.monitorStatus(),
-		"timestamp":          time.Now().UTC(),
+		"status":                          "ready",
+		"service":                         "HAVEN",
+		"agentIngestion":                  "mutual-tls",
+		"demoMode":                        server.demoMode,
+		"localCollection":                 server.localCollection,
+		"authentication":                  server.auth != nil,
+		"actionCapabilities":              capabilities,
+		"deviceFreshnessAllowanceSeconds": int64(storage.EnrolledDeviceStaleAfter / time.Second),
+		"monitor":                         server.monitorStatus(),
+		"timestamp":                       time.Now().UTC(),
 	})
 }
 

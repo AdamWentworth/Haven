@@ -200,6 +200,7 @@ export interface RuntimeStatus {
   agentIngestion: string;
   demoMode: boolean;
   localCollection: boolean;
+  deviceFreshnessAllowanceSeconds: number;
   actionCapabilities: ActionCapability[];
   monitor: {
     enabled: boolean;

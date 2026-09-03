@@ -4,9 +4,9 @@
 
 HAVEN is a personal security observatory for home devices and networks. It presents native operating-system protections in one understandable console without trying to replace Microsoft Defender, host firewalls, or other trusted security controls.
 
-HAVEN is pre-release software. The current milestone adds a read-only network overview that combines authenticated endpoint reports without turning the hub into a network scanner or silently trusting observed assets; it is not a replacement for native protection.
+HAVEN is pre-release software. The current milestone adds fact-based alert baselines on top of the read-only network overview. It combines authenticated endpoint reports without turning the hub into a network scanner or silently trusting observed assets; it is not a replacement for native protection.
 
-## Milestone 0.8 — Network Overview
+## Milestone 0.9 — Alert Baselines and Verification
 
 The current implementation provides:
 
@@ -28,6 +28,12 @@ The current implementation provides:
 - A network-wide coverage view that summarizes report freshness, verified host firewalls, current findings, and unreviewed service exposure across enrolled devices
 - Live relationship grouping that distinguishes explicitly enrolled peers, observed-only private endpoints, and Internet destinations grouped by source owner and destination service
 - Cross-device finding lifecycle context without retaining raw remote endpoints, connection history, packet contents, or inferred device trust
+- A current-alert view derived only from server-classified report freshness, evaluated posture findings, and owner-reviewed service expectations
+- Service-drift alerts when a known protocol/port/scope is still present but its live process, systemd-unit, or Docker-workload attribution no longer matches the approved baseline
+- Opt-in browser notifications for new medium/high alert instances, with recurrence-aware deduplication that does not interrupt for low-severity review items
+- A server-published freshness allowance so browser wording and stale timestamps cannot silently drift from the server's policy
+- Frontend unit and invariant tests for address scope, listener grouping, expectation matching, relationship direction, mirrored-flow deduplication, external-address privacy, alert derivation, and notification receipts
+- Enforced coverage thresholds for security projection modules plus Go race detection in CI
 - Clear language that observed-only assets are neither enrolled nor trusted and that the overview does not actively scan the LAN
 - Explainable Windows baseline checks for servicing, BitLocker, Secure Boot, TPM, remote access, local administrator count, and Defender threat counts
 - Non-elevated TPM verification through Windows TPM Tool when the administrative PowerShell provider is unavailable
@@ -36,7 +42,7 @@ The current implementation provides:
 - Prioritized findings with evidence and conservative next steps instead of an opaque security score
 - Continuous local collection every 15 minutes by default, with serialized manual refreshes
 - A privacy-bounded activity ledger that records only when a finding opens or resolves
-- An activity-first dashboard with opt-in browser desktop alerts for new high- and medium-severity findings while HAVEN is open
+- An activity-first dashboard with opt-in browser desktop alerts for new medium/high current-alert instances while HAVEN is open
 - Passwordless owner authentication using the cross-platform WebAuthn passkey standard (Windows Hello is one supported provider)
 - Multiple labeled owner passkeys for trusted computers, phones, and hardware security keys, with local terminal recovery
 - Expiring server-side sessions, strict same-origin checks, anti-forgery tokens, and rate-limited authentication ceremonies
@@ -129,6 +135,7 @@ go vet .\...
 Set-Location .\web
 npm ci
 npm run build
+npm run test:coverage
 npm audit
 Set-Location ..
 
@@ -174,6 +181,6 @@ Haven/
 
 ## Current and next security milestone
 
-Milestone 0.7 adds native Linux monitoring and boot-persistent endpoint-agent scheduling. Milestone 0.7.1 makes its network results explainable, 0.7.2 makes report freshness and finding lifecycles explicit, and 0.7.3 correlates host listeners with sanitized Docker port mappings. Milestone 0.7.4 adds deliberate suggested-baseline review; 0.7.5 adds live systemd ownership and service-constrained expectations for Linux listeners. Milestone 0.8 combines the latest authenticated reports into a network-wide coverage, change, and live-relationship view while keeping merely observed private endpoints separate from explicitly enrolled devices. It does not scan the LAN or retain remote endpoints. A later 0.8.x milestone can add owner-managed names and expectations for observed assets, then compare endpoint-reported exposure with separately reviewed router data. The Ubuntu hub does not execute Windows actions on another machine. GitHub Actions verifies the Go, frontend, dependency, image, and public-repository safety checks on each proposed change.
+Milestone 0.7 adds native Linux monitoring and boot-persistent endpoint-agent scheduling. Milestone 0.7.1 makes its network results explainable, 0.7.2 makes report freshness and finding lifecycles explicit, and 0.7.3 correlates host listeners with sanitized Docker port mappings. Milestone 0.7.4 adds deliberate suggested-baseline review; 0.7.5 adds live systemd ownership and service-constrained expectations for Linux listeners. Milestone 0.8 combines the latest authenticated reports into a network-wide coverage, change, and live-relationship view while keeping merely observed private endpoints separate from explicitly enrolled devices. Milestone 0.9 turns current findings, server-classified stale agents, incomplete enrollments, new non-local listeners, and changed service attribution into explainable active alerts. It does not scan the LAN, retain remote endpoints, or claim that an alert proves compromise. See [verification](docs/VERIFICATION.md) for the claim-to-test map. The Ubuntu hub does not execute Windows actions on another machine. GitHub Actions verifies the Go, frontend, dependency, concurrency, image, and public-repository safety checks on each proposed change.
 
 Read the [architecture](docs/ARCHITECTURE.md), [threat model](docs/THREAT_MODEL.md), and [public repository policy](docs/PUBLIC_REPOSITORY.md) before expanding the trust boundary.
