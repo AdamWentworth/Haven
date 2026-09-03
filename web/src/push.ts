@@ -4,6 +4,12 @@ export interface SerializedPushSubscription {
   keys: { auth: string; p256dh: string };
 }
 
+export function normalizePushDestinationLabel(value: string) {
+  const label = value.trim();
+  if (!label) throw new Error("Give this notification destination a recognizable name.");
+  return label;
+}
+
 export function decodeApplicationServerKey(value: string) {
   const padding = "=".repeat((4 - value.length % 4) % 4);
   const binary = atob(value.replaceAll("-", "+").replaceAll("_", "/") + padding);

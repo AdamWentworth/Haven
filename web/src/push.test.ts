@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { decodeApplicationServerKey, serializePushSubscription, supportsBackgroundPush } from "./push";
+import { decodeApplicationServerKey, normalizePushDestinationLabel, serializePushSubscription, supportsBackgroundPush } from "./push";
 
 describe("background push protocol", () => {
   it("decodes an unpadded URL-safe application-server key", () => {
@@ -24,6 +24,11 @@ describe("background push protocol", () => {
   it("rejects incomplete browser subscriptions", () => {
     const subscription = { toJSON: () => ({ endpoint: "https://push.example.invalid/capability", keys: {} }) } as unknown as PushSubscription;
     expect(() => serializePushSubscription(subscription)).toThrow("incomplete");
+  });
+
+  it("normalizes a visible destination label and rejects an empty one", () => {
+    expect(normalizePushDestinationLabel("  Test browser  ")).toBe("Test browser");
+    expect(() => normalizePushDestinationLabel("   ")).toThrow("recognizable name");
   });
 
   it("reports no browser support in the test runtime", () => {

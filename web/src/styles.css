@@ -219,6 +219,7 @@ main, footer { width: min(1180px, 92vw); margin-inline: auto; }
 .notification-destinations article { display: grid; grid-template-columns: auto 1fr; align-items: center; gap: .8rem; padding: .85rem; border: 1px solid var(--line); border-radius: .8rem; background: rgba(111, 216, 229, .025); }
 .notification-destinations h3 { margin: 0 0 .25rem; font-size: .85rem; }
 .notification-destinations p { margin: 0; color: var(--muted); font-size: .7rem; line-height: 1.45; }
+.notification-label-field { margin: 0; max-width: 28rem; }
 .passkey-list { display: grid; gap: .6rem; padding-top: 1rem; }
 .passkey-card { display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: .8rem; padding: .85rem; border: 1px solid var(--line); border-radius: .8rem; background: rgba(115, 226, 167, .025); }
 .passkey-icon { display: grid; width: 2.3rem; height: 2.3rem; place-items: center; border-radius: .7rem; color: var(--green); background: rgba(115, 226, 167, .08); }
