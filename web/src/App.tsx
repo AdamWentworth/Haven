@@ -1,9 +1,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { addPasskey, collectSnapshot, getAuthStatus, getDevice, getLatestSnapshot, getRuntimeStatus, listAuditEvents, listDevices, listEvents, listExpectedServices, listFindingReviews, listObservedListeners, listPasskeys, listSecurityActions, loginWithPasskey, logout, registerPasskey, removeExpectedService, removePasskey, requestSecurityAction, saveExpectedService, saveExpectedServices, saveFindingReview } from "./api";
-import { notificationCandidates, parseAlertReceipts, receiptsForCurrentAlerts, type AlertReceipts } from "./alert-notifications";
-import { deriveCurrentAlerts, type HavenAlert } from "./alerts";
+import { addPasskey, collectSnapshot, getAuthStatus, getDevice, getLatestSnapshot, getNotificationStatus, getRuntimeStatus, listAlerts, listAuditEvents, listDevices, listEvents, listExpectedServices, listFindingReviews, listObservedListeners, listPasskeys, listSecurityActions, loginWithPasskey, logout, registerPasskey, registerPushDestination, removeExpectedService, removePasskey, removePushDestination, requestSecurityAction, saveExpectedService, saveExpectedServices, saveFindingReview } from "./api";
 import { ActivityIcon, AlertIcon, BellIcon, CheckIcon, ChipIcon, DefenderIcon, DevicesIcon, FirewallIcon, HavenIcon, HelpIcon, LaptopIcon, LockIcon, MonitorIcon, NetworkIcon, RefreshIcon, RemoteAccessIcon, ServerIcon, UpdateIcon, UsersIcon, WorkloadIcon } from "./icons";
 import { bindScopeLabel, canonicalOwnerName, endpoint, endpointScope, expectedServiceMatches, isPrivateNetworkAddress, liveNetworkRelationships, logicalListeners, networkServiceLabel, normalizeAddress, workloadAttribution, type LogicalListener, type NetworkDeviceObservation } from "./network";
+import { decodeApplicationServerKey, serializePushSubscription, supportsBackgroundPush } from "./push";
 import type {
   BaselineCheck,
   AuditEvent,
@@ -19,10 +18,12 @@ import type {
   FindingReview,
   FindingReviewState,
   FirewallProfileStatus,
+  HavenAlert,
   LinuxBaseline,
   NetworkConnection,
   ObservedListener,
   PasskeyInfo,
+  PushNotificationStatus,
   RuntimeStatus,
   SecurityEvent,
   SecurityAction,
@@ -799,6 +800,25 @@ function PasskeyPanel({ passkeys, add, remove, busy }: { passkeys: PasskeyInfo[]
   );
 }
 
+function NotificationPanel({ status, supported, enabled, busy, enable, disable }: { status: PushNotificationStatus | null; supported: boolean; enabled: boolean; busy: boolean; enable: () => void; disable: () => void }) {
+  const destinations = status?.destinations || [];
+  const health: Tone = !status?.available || !supported ? "unknown" : status.failedCount > 0 || (enabled && destinations.length === 0) ? "attention" : enabled ? "healthy" : "configured";
+  return (
+    <section className="panel notification-panel" aria-labelledby="notifications-title">
+      <PanelHeading eyebrow="DURABLE DELIVERY" title="Background alerts" id="notifications-title" icon={<BellIcon />} accent="cyan">
+        The HAVEN hub evaluates current evidence every {formatInterval(status?.evaluationPeriodSeconds || 60)}, even when this page is closed
+      </PanelHeading>
+      <div className="notification-summary">
+        <StatusChip label={!status?.available ? "hub unavailable" : !supported ? "browser unsupported" : enabled ? "this browser enabled" : "this browser off"} tone={health} />
+        <span>{destinations.length} destination{destinations.length === 1 ? "" : "s"} · {status?.pendingCount || 0} queued · {status?.failedCount || 0} failed</span>
+      </div>
+      {destinations.length > 0 && <div className="notification-destinations">{destinations.map((destination) => <article key={destination.id}><span className="passkey-icon"><BellIcon size={17} /></span><div><h3>{destination.label}</h3><p>{destination.lastSuccessAt ? `Last accepted by its push service ${formatDate(destination.lastSuccessAt)}` : "Ready for the next new medium or high alert"}{destination.failureCount > 0 ? ` · ${destination.failureCount} recent failure${destination.failureCount === 1 ? "" : "s"}` : ""}</p></div></article>)}</div>}
+      <button className="secondary-action" type="button" disabled={busy || !status?.available || !supported} onClick={enabled ? disable : enable}>{busy ? "Updating…" : enabled ? "Disable on this browser" : "Enable on this browser"}</button>
+      <p className="footnote">Enabling uses the browser vendor's push service. Delivery metadata leaves your network, but the payload is encrypted and contains only the device name, severity, and a prompt to open HAVEN—never the finding details. Existing alerts are baselined silently.</p>
+    </section>
+  );
+}
+
 function ActionCenter({ actions, audit, capabilities, run, busy }: { actions: SecurityAction[]; audit: AuditEvent[]; capabilities: ActionCapability[]; run: (kind: SecurityActionKind) => void; busy: boolean }) {
   const latest = actions.slice(0, 5);
   return (
@@ -835,7 +855,7 @@ function AwaitingAgents({ devices, runtime, passkeys, actions, audit, error, sel
       <PasskeyPanel passkeys={passkeys} add={addOwnerPasskey} remove={removeOwnerPasskey} busy={actionBusy} />
       <ActionCenter actions={actions} audit={audit} capabilities={runtime?.actionCapabilities || []} run={() => undefined} busy={actionBusy} />
     </main>
-    <footer><span>HAVEN milestone 0.7 · Native agent hub</span><span>Observe continuously. Act deliberately.</span></footer>
+    <footer><span>HAVEN milestone 0.10 · Durable alerts</span><span>Observe continuously. Act deliberately.</span></footer>
   </>;
 }
 
@@ -920,7 +940,7 @@ function BaselinePanel({ checks, collectedAt, platform }: { checks: BaselineChec
   );
 }
 
-function Application({ snapshot, devices, networkDevices, events, networkEvents, alerts, runtime, selectedDevice, selectDevice, refresh, refreshing, error, demoMode, alertsEnabled, alertsSupported, enableAlerts, reviews, expectedServices, listenerObservations, audit, actions, passkeys, reviewFinding, saveServiceExpectation, saveServiceExpectations, removeServiceExpectation, runAction, addOwnerPasskey, removeOwnerPasskey, actionBusy, signOut }: { snapshot: SecuritySnapshot; devices: DeviceRecord[]; networkDevices: NetworkDeviceObservation[]; events: SecurityEvent[]; networkEvents: SecurityEvent[]; alerts: HavenAlert[]; runtime: RuntimeStatus | null; selectedDevice: DeviceRecord | null; selectDevice: (id: string) => void; refresh: () => void; refreshing: boolean; error: string | null; demoMode: boolean; alertsEnabled: boolean; alertsSupported: boolean; enableAlerts: () => void; reviews: FindingReview[]; expectedServices: ExpectedService[]; listenerObservations: ObservedListener[]; audit: AuditEvent[]; actions: SecurityAction[]; passkeys: PasskeyInfo[]; reviewFinding: (finding: SecurityFinding, state: FindingReviewState) => void; saveServiceExpectation: (service: ExpectedServiceInput) => void; saveServiceExpectations: (services: ExpectedServiceInput[]) => void; removeServiceExpectation: (service: ExpectedService) => void; runAction: (kind: SecurityActionKind) => void; addOwnerPasskey: () => void; removeOwnerPasskey: (passkey: PasskeyInfo) => void; actionBusy: boolean; signOut: () => void }) {
+function Application({ snapshot, devices, networkDevices, events, networkEvents, alerts, runtime, notificationStatus, selectedDevice, selectDevice, refresh, refreshing, error, demoMode, alertsEnabled, alertsSupported, enableAlerts, disableAlerts, reviews, expectedServices, listenerObservations, audit, actions, passkeys, reviewFinding, saveServiceExpectation, saveServiceExpectations, removeServiceExpectation, runAction, addOwnerPasskey, removeOwnerPasskey, actionBusy, signOut }: { snapshot: SecuritySnapshot; devices: DeviceRecord[]; networkDevices: NetworkDeviceObservation[]; events: SecurityEvent[]; networkEvents: SecurityEvent[]; alerts: HavenAlert[]; runtime: RuntimeStatus | null; notificationStatus: PushNotificationStatus | null; selectedDevice: DeviceRecord | null; selectDevice: (id: string) => void; refresh: () => void; refreshing: boolean; error: string | null; demoMode: boolean; alertsEnabled: boolean; alertsSupported: boolean; enableAlerts: () => void; disableAlerts: () => void; reviews: FindingReview[]; expectedServices: ExpectedService[]; listenerObservations: ObservedListener[]; audit: AuditEvent[]; actions: SecurityAction[]; passkeys: PasskeyInfo[]; reviewFinding: (finding: SecurityFinding, state: FindingReviewState) => void; saveServiceExpectation: (service: ExpectedServiceInput) => void; saveServiceExpectations: (services: ExpectedServiceInput[]) => void; removeServiceExpectation: (service: ExpectedService) => void; runAction: (kind: SecurityActionKind) => void; addOwnerPasskey: () => void; removeOwnerPasskey: (passkey: PasskeyInfo) => void; actionBusy: boolean; signOut: () => void }) {
   const isLinux = snapshot.linuxBaseline !== null || /linux|ubuntu/i.test(snapshot.device.operatingSystem);
   const defenderHealthy = snapshot.defender?.antivirusEnabled === true
     && snapshot.defender.realTimeProtectionEnabled === true
@@ -941,7 +961,7 @@ function Application({ snapshot, devices, networkDevices, events, networkEvents,
         <a className="brand" href="/" aria-label="HAVEN home"><span className="brand-mark"><HavenIcon /></span><span><strong>HAVEN</strong><small>Personal Security Observatory</small></span></a>
         <div className="topbar-actions">
           <span className={`local-pill ${demoMode ? "demo-pill" : ""}`}><span className="local-dot" />{demoMode ? "Synthetic demo" : runtime?.localCollection ? "Local monitor" : "Agent hub"}</span>
-          {!demoMode && alertsSupported && <button className={`desktop-alert-button ${alertsEnabled ? "enabled" : ""}`} type="button" onClick={enableAlerts} disabled={alertsEnabled} aria-label={alertsEnabled ? "Desktop alerts enabled" : "Enable desktop alerts"}><BellIcon size={15} /><span>{alertsEnabled ? "Alerts on" : "Enable alerts"}</span></button>}
+          {!demoMode && alertsSupported && <button className={`desktop-alert-button ${alertsEnabled ? "enabled" : ""}`} type="button" onClick={alertsEnabled ? disableAlerts : enableAlerts} disabled={actionBusy} aria-label={alertsEnabled ? "Disable background alerts on this browser" : "Enable background alerts on this browser"}><BellIcon size={15} /><span>{alertsEnabled ? "Push alerts on" : "Enable push"}</span></button>}
           {!demoMode && <button className="refresh-button" type="button" onClick={refresh} disabled={refreshing}>{refreshing ? (runtime?.localCollection ? "Collecting…" : "Refreshing…") : <><RefreshIcon size={15} />{runtime?.localCollection ? "Collect now" : "Refresh view"}</>}</button>}
           {!demoMode && <button className="signout-button" type="button" onClick={signOut}>Lock</button>}
         </div>
@@ -962,7 +982,7 @@ function Application({ snapshot, devices, networkDevices, events, networkEvents,
 		  <SummaryCard icon={<NetworkIcon />} accent="cyan" title="Network" label={unreviewedListeners > 0 ? `${unreviewedListeners} unreviewed` : `${listeners.length} classified/local`} tone={unreviewedListeners > 0 ? "attention" : "healthy"}>{listeners.length} logical listener{listeners.length === 1 ? "" : "s"} ({broadListeners} on all interfaces) and {established} active connection{established === 1 ? "" : "s"}. Bind scope is not proof of Internet reachability.</SummaryCard>
           <SummaryCard icon={<ActivityIcon />} accent="green" title="Monitor" label={runtime?.localCollection && runtime.monitor.enabled ? `Every ${formatInterval(runtime.monitor.intervalSeconds)}` : formatRelativeTime(snapshot.collectedAt)} tone={selectedDevice?.status === "stale" || runtime?.monitor.lastCollectionError ? "attention" : "healthy"}>{runtime?.localCollection ? (runtime.monitor.lastCollectionError || (runtime.monitor.lastSuccessfulAt ? `Last automatic observation succeeded ${formatDate(runtime.monitor.lastSuccessfulAt)}.` : "Automatic monitoring is starting.")) : `Latest authenticated report was collected ${formatDate(snapshot.collectedAt)}. The view checks for newer hub data every minute.`}</SummaryCard>
         </section>
-        {!demoMode && <><PasskeyPanel passkeys={passkeys} add={addOwnerPasskey} remove={removeOwnerPasskey} busy={actionBusy} /><ActionCenter actions={actions} audit={audit} capabilities={runtime?.actionCapabilities || []} run={runAction} busy={actionBusy} /></>}
+        {!demoMode && <><NotificationPanel status={notificationStatus} supported={alertsSupported} enabled={alertsEnabled} busy={actionBusy} enable={enableAlerts} disable={disableAlerts} /><PasskeyPanel passkeys={passkeys} add={addOwnerPasskey} remove={removeOwnerPasskey} busy={actionBusy} /><ActionCenter actions={actions} audit={audit} capabilities={runtime?.actionCapabilities || []} run={runAction} busy={actionBusy} /></>}
         <ActivityPanel events={events} />
         {(snapshot.baselineChecks || []).length > 0 && <><FindingsPanel findings={snapshot.findings || []} checks={snapshot.baselineChecks || []} reviews={reviews} review={reviewFinding} /><BaselinePanel checks={snapshot.baselineChecks || []} collectedAt={snapshot.collectedAt} platform={isLinux ? "Linux" : "Windows"} /></>}
         {snapshot.notices.length > 0 && <section className="panel notices-panel" aria-labelledby="notices-title"><PanelHeading eyebrow="COLLECTION NOTES" title="Some signals could not be verified" id="notices-title" icon={<AlertIcon />} accent="amber">A collection limitation is not automatically a security problem</PanelHeading><ul className="notices-list">{snapshot.notices.map((notice, index) => <li className="notice" key={`${notice.source}-${index}`}><strong>{notice.source}: </strong>{notice.message}</li>)}</ul></section>}
@@ -971,7 +991,7 @@ function Application({ snapshot, devices, networkDevices, events, networkEvents,
 		<FirewallPanel profiles={snapshot.firewallProfiles} isLinux={isLinux} />
 		<ConnectionsPanel deviceId={selectedDevice?.id || snapshot.device.deviceId || ""} operatingSystem={snapshot.device.operatingSystem} connections={snapshot.connections} workloads={workloadInventory} expectedServices={expectedServices} observations={listenerObservations} saveExpectation={saveServiceExpectation} saveExpectations={saveServiceExpectations} removeExpectation={removeServiceExpectation} busy={actionBusy} />
       </main>
-	  <footer><span>HAVEN milestone 0.9 · Alert baselines</span><span>Observe continuously. Act deliberately.</span></footer>
+	  <footer><span>HAVEN milestone 0.10 · Durable alerts</span><span>Observe continuously. Act deliberately.</span></footer>
     </>
   );
 }
@@ -982,6 +1002,7 @@ export function App() {
   const [devices, setDevices] = useState<DeviceRecord[]>([]);
   const [networkDevices, setNetworkDevices] = useState<NetworkDeviceObservation[]>([]);
   const [events, setEvents] = useState<SecurityEvent[]>([]);
+  const [currentAlerts, setCurrentAlerts] = useState<HavenAlert[]>([]);
   const [reviews, setReviews] = useState<FindingReview[]>([]);
 	const [expectedServices, setExpectedServices] = useState<ExpectedService[]>([]);
 	const [listenerObservations, setListenerObservations] = useState<ObservedListener[]>([]);
@@ -989,6 +1010,7 @@ export function App() {
   const [actions, setActions] = useState<SecurityAction[]>([]);
   const [passkeys, setPasskeys] = useState<PasskeyInfo[]>([]);
   const [runtime, setRuntime] = useState<RuntimeStatus | null>(null);
+  const [notificationStatus, setNotificationStatus] = useState<PushNotificationStatus | null>(null);
   const [selectedId, setSelectedId] = useState("");
   const [demoMode, setDemoMode] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -996,10 +1018,8 @@ export function App() {
   const [actionBusy, setActionBusy] = useState(false);
   const [inventoryLoaded, setInventoryLoaded] = useState(false);
   const selectedIdRef = useRef("");
-  const alertsSupported = typeof window !== "undefined" && "Notification" in window;
-  const [alertsEnabled, setAlertsEnabled] = useState(() => alertsSupported && window.Notification.permission === "granted" && window.localStorage.getItem("haven.desktopAlerts") === "enabled");
-  const alertReceipts = useRef<AlertReceipts>(typeof window === "undefined" ? {} : parseAlertReceipts(window.localStorage.getItem("haven.alertReceipts.v1")));
-  const currentAlerts = useMemo(() => deriveCurrentAlerts(networkDevices, events, runtime?.deviceFreshnessAllowanceSeconds), [networkDevices, events, runtime?.deviceFreshnessAllowanceSeconds]);
+  const alertsSupported = supportsBackgroundPush();
+  const [alertsEnabled, setAlertsEnabled] = useState(false);
 
   const authenticate = useCallback(async (bootstrapCode?: string, label?: string) => {
     if (bootstrapCode === undefined) await loginWithPasskey();
@@ -1011,7 +1031,7 @@ export function App() {
   const refresh = useCallback(async (signal?: AbortSignal) => {
     setRefreshing(true);
     try {
-      const [initialInventory, runtimeStatus, activity] = await Promise.all([listDevices(signal), getRuntimeStatus(signal), listEvents(undefined, signal)]);
+      const [initialInventory, runtimeStatus, activity, activeAlerts, pushStatus] = await Promise.all([listDevices(signal), getRuntimeStatus(signal), listEvents(undefined, signal), listAlerts(signal), getNotificationStatus(signal)]);
       let inventory = initialInventory;
       let observed: { id: string; snapshot: SecuritySnapshot } | null;
       if (runtimeStatus.demoMode || runtimeStatus.localCollection) {
@@ -1026,7 +1046,9 @@ export function App() {
       setDevices(inventory);
       setNetworkDevices(networkObservations);
       setEvents(activity);
+      setCurrentAlerts(activeAlerts);
       setRuntime(runtimeStatus);
+      setNotificationStatus(pushStatus);
       setDemoMode(runtimeStatus.demoMode);
       const nextId = observed?.id || inventory.find((device) => device.status === "awaiting-first-report")?.id || "";
 	  if (!runtimeStatus.demoMode && nextId) setListenerObservations(await listObservedListeners(nextId, signal));
@@ -1111,6 +1133,7 @@ export function App() {
 			const saved = await listExpectedServices(service.deviceId);
 			setExpectedServices(saved);
 			setNetworkDevices((current) => current.map((entry) => entry.device.id === service.deviceId ? { ...entry, expectedServices: saved } : entry));
+			setCurrentAlerts(await listAlerts());
 			setAudit(await listAuditEvents());
 			setError(null);
 		} catch (reason) {
@@ -1127,6 +1150,7 @@ export function App() {
 			const saved = await saveExpectedServices(selectedId, services);
 			setExpectedServices(saved);
 			setNetworkDevices((current) => current.map((entry) => entry.device.id === selectedId ? { ...entry, expectedServices: saved } : entry));
+			setCurrentAlerts(await listAlerts());
 			setAudit(await listAuditEvents());
 			setError(null);
 		} catch (reason) {
@@ -1144,6 +1168,7 @@ export function App() {
 			const saved = await listExpectedServices(service.deviceId);
 			setExpectedServices(saved);
 			setNetworkDevices((current) => current.map((entry) => entry.device.id === service.deviceId ? { ...entry, expectedServices: saved } : entry));
+			setCurrentAlerts(await listAlerts());
 			setAudit(await listAuditEvents());
 			setError(null);
 		} catch (reason) {
@@ -1206,33 +1231,68 @@ export function App() {
       setDevices([]);
       setNetworkDevices([]);
       setEvents([]);
+      setCurrentAlerts([]);
       setReviews([]);
 	  setExpectedServices([]);
 	  setListenerObservations([]);
       setAudit([]);
       setActions([]);
       setPasskeys([]);
+      setNotificationStatus(null);
+      setAlertsEnabled(false);
       setInventoryLoaded(false);
     }
   }, []);
 
   const enableAlerts = useCallback(async () => {
     if (!alertsSupported) {
-      setError("This browser does not support desktop notifications.");
+      setError("This browser does not support service-worker background notifications.");
       return;
     }
-    const permission = await window.Notification.requestPermission();
-    if (permission !== "granted") {
-      setError("Desktop notifications remain blocked. You can change this site's notification permission in the browser.");
+    if (!notificationStatus?.available || !notificationStatus.vapidPublicKey) {
+      setError("The HAVEN hub has not advertised background-notification support.");
       return;
     }
-    alertReceipts.current = receiptsForCurrentAlerts(currentAlerts);
-    window.localStorage.setItem("haven.alertReceipts.v1", JSON.stringify(alertReceipts.current));
-    window.localStorage.removeItem("haven.lastNotifiedEvent");
-    window.localStorage.setItem("haven.desktopAlerts", "enabled");
-    setAlertsEnabled(true);
-    setError(null);
-  }, [alertsSupported, currentAlerts]);
+    const label = window.prompt("Name this notification destination so you can recognize it later.", "This browser");
+    if (label === null || !label.trim()) return;
+    setActionBusy(true);
+    try {
+      const permission = await window.Notification.requestPermission();
+      if (permission !== "granted") throw new Error("Background notifications remain blocked. Change this site's notification permission in the browser to enable them.");
+      const registration = await navigator.serviceWorker.register("/sw.js", { scope: "/" });
+      await navigator.serviceWorker.ready;
+      const existing = await registration.pushManager.getSubscription();
+      const subscription = existing || await registration.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: decodeApplicationServerKey(notificationStatus.vapidPublicKey) });
+      await registerPushDestination(serializePushSubscription(subscription), label.trim());
+      setNotificationStatus(await getNotificationStatus());
+      setAlertsEnabled(true);
+      setError(null);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "This browser could not be enabled for background alerts.");
+    } finally {
+      setActionBusy(false);
+    }
+  }, [alertsSupported, notificationStatus?.available, notificationStatus?.vapidPublicKey]);
+
+  const disableAlerts = useCallback(async () => {
+    if (!alertsSupported) return;
+    setActionBusy(true);
+    try {
+      const registration = await navigator.serviceWorker.getRegistration("/");
+      const subscription = await registration?.pushManager.getSubscription();
+      if (subscription) {
+        await removePushDestination(subscription.endpoint);
+        await subscription.unsubscribe();
+      }
+      setNotificationStatus(await getNotificationStatus());
+      setAlertsEnabled(false);
+      setError(null);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Background alerts could not be disabled on this browser.");
+    } finally {
+      setActionBusy(false);
+    }
+  }, [alertsSupported]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -1246,6 +1306,15 @@ export function App() {
     void refresh(controller.signal);
     return () => controller.abort();
   }, [authentication?.authenticated, refresh]);
+
+  useEffect(() => {
+    if (!authentication?.authenticated || !alertsSupported || !notificationStatus?.available) return;
+    let active = true;
+    void navigator.serviceWorker.getRegistration("/").then((registration) => registration?.pushManager.getSubscription()).then((subscription) => {
+      if (active) setAlertsEnabled(window.Notification.permission === "granted" && Boolean(subscription));
+    }).catch(() => { if (active) setAlertsEnabled(false); });
+    return () => { active = false; };
+  }, [alertsSupported, authentication?.authenticated, notificationStatus?.available]);
 
 	useEffect(() => {
 		if (!authentication?.authenticated || !inventoryLoaded || demoMode) return;
@@ -1277,7 +1346,7 @@ export function App() {
     const controller = new AbortController();
     const poll = async () => {
       try {
-        const [inventory, runtimeStatus, activity] = await Promise.all([listDevices(controller.signal), getRuntimeStatus(controller.signal), listEvents(undefined, controller.signal)]);
+        const [inventory, runtimeStatus, activity, activeAlerts, pushStatus] = await Promise.all([listDevices(controller.signal), getRuntimeStatus(controller.signal), listEvents(undefined, controller.signal), listAlerts(controller.signal), getNotificationStatus(controller.signal)]);
         let observed: { id: string; snapshot: SecuritySnapshot } | null;
         if (runtimeStatus.demoMode || runtimeStatus.localCollection) {
           const latest = await getLatestSnapshot(controller.signal);
@@ -1289,7 +1358,9 @@ export function App() {
         setDevices(inventory);
         setNetworkDevices(networkObservations);
         setEvents(activity);
+        setCurrentAlerts(activeAlerts);
         setRuntime(runtimeStatus);
+        setNotificationStatus(pushStatus);
         setDemoMode(runtimeStatus.demoMode);
         setSnapshot(observed?.snapshot || null);
         const nextId = observed?.id || inventory.find((device) => device.status === "awaiting-first-report")?.id || "";
@@ -1310,23 +1381,6 @@ export function App() {
     };
   }, [authentication?.authenticated]);
 
-  useEffect(() => {
-    if (!alertsEnabled || !alertsSupported || window.Notification.permission !== "granted") return;
-    notificationCandidates(currentAlerts, alertReceipts.current)
-      .forEach((alert) => {
-        const notification = new window.Notification(`HAVEN · ${alert.title}`, {
-          body: `${alert.deviceName}: ${alert.summary}`,
-          tag: `haven-alert-${alert.id}`,
-        });
-        notification.onclick = () => {
-          window.focus();
-          notification.close();
-        };
-      });
-    alertReceipts.current = receiptsForCurrentAlerts(currentAlerts);
-    window.localStorage.setItem("haven.alertReceipts.v1", JSON.stringify(alertReceipts.current));
-  }, [alertsEnabled, alertsSupported, currentAlerts]);
-
   if (!authentication) {
     return <main className="loading-state"><div className="brand-mark"><HavenIcon /></div><p>{error || "Checking HAVEN's security boundary…"}</p></main>;
   }
@@ -1345,5 +1399,5 @@ export function App() {
 
   const selectedDevice = devices.find((device) => device.id === selectedId) || null;
   const selectedEvents = selectedId ? events.filter((event) => event.deviceId === selectedId) : events;
-	return <Application snapshot={snapshot} devices={devices} networkDevices={networkDevices} events={selectedEvents} networkEvents={events} alerts={currentAlerts} runtime={runtime} selectedDevice={selectedDevice} selectDevice={(id) => void selectDevice(id)} refresh={() => void refreshView()} refreshing={refreshing} error={error} demoMode={demoMode} alertsEnabled={alertsEnabled} alertsSupported={alertsSupported} enableAlerts={() => void enableAlerts()} reviews={reviews} expectedServices={expectedServices} listenerObservations={listenerObservations} audit={audit} actions={actions} passkeys={passkeys} reviewFinding={(finding, state) => void reviewFinding(finding, state)} saveServiceExpectation={(service) => void saveServiceExpectation(service)} saveServiceExpectations={(services) => void saveServiceBaseline(services)} removeServiceExpectation={(service) => void removeServiceExpectation(service)} runAction={(kind) => void runAction(kind)} addOwnerPasskey={() => void addOwnerPasskey()} removeOwnerPasskey={(passkey) => void removeOwnerPasskey(passkey)} actionBusy={actionBusy} signOut={() => void signOut()} />;
+	return <Application snapshot={snapshot} devices={devices} networkDevices={networkDevices} events={selectedEvents} networkEvents={events} alerts={currentAlerts} runtime={runtime} notificationStatus={notificationStatus} selectedDevice={selectedDevice} selectDevice={(id) => void selectDevice(id)} refresh={() => void refreshView()} refreshing={refreshing} error={error} demoMode={demoMode} alertsEnabled={alertsEnabled} alertsSupported={alertsSupported} enableAlerts={() => void enableAlerts()} disableAlerts={() => void disableAlerts()} reviews={reviews} expectedServices={expectedServices} listenerObservations={listenerObservations} audit={audit} actions={actions} passkeys={passkeys} reviewFinding={(finding, state) => void reviewFinding(finding, state)} saveServiceExpectation={(service) => void saveServiceExpectation(service)} saveServiceExpectations={(services) => void saveServiceBaseline(services)} removeServiceExpectation={(service) => void removeServiceExpectation(service)} runAction={(kind) => void runAction(kind)} addOwnerPasskey={() => void addOwnerPasskey()} removeOwnerPasskey={(passkey) => void removeOwnerPasskey(passkey)} actionBusy={actionBusy} signOut={() => void signOut()} />;
 }

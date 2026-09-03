@@ -1,0 +1,72 @@
+[
+  {
+    "name": "unconstrained exact wildcard",
+    "listener": { "protocol": "TCP", "address": "0.0.0.0", "port": 443, "processes": ["caddy"], "systemdUnits": ["caddy.service"] },
+    "service": { "protocol": "TCP", "port": 443, "portEnd": 443, "bindScope": "wildcard", "processNames": [], "workloadNames": [], "systemdUnits": [] },
+    "workloads": [],
+    "matches": true
+  },
+  {
+    "name": "wrong protocol",
+    "listener": { "protocol": "TCP", "address": "0.0.0.0", "port": 443, "processes": ["caddy"], "systemdUnits": [] },
+    "service": { "protocol": "UDP", "port": 443, "portEnd": 443, "bindScope": "wildcard", "processNames": [], "workloadNames": [], "systemdUnits": [] },
+    "workloads": [],
+    "matches": false
+  },
+  {
+    "name": "wrong bind scope",
+    "listener": { "protocol": "TCP", "address": "192.0.2.20", "port": 8443, "processes": ["proxy"], "systemdUnits": [] },
+    "service": { "protocol": "TCP", "port": 8443, "portEnd": 8443, "bindScope": "private", "processNames": [], "workloadNames": [], "systemdUnits": [] },
+    "workloads": [],
+    "matches": false
+  },
+  {
+    "name": "canonical executable owner",
+    "listener": { "protocol": "TCP", "address": "0.0.0.0", "port": 5040, "processes": ["svchost.exe"], "systemdUnits": [] },
+    "service": { "protocol": "TCP", "port": 5040, "portEnd": 5040, "bindScope": "wildcard", "processNames": ["SVCHOST"], "workloadNames": [], "systemdUnits": [] },
+    "workloads": [],
+    "matches": true
+  },
+  {
+    "name": "unexpected additional process",
+    "listener": { "protocol": "TCP", "address": "0.0.0.0", "port": 5040, "processes": ["svchost", "unexpected.exe"], "systemdUnits": [] },
+    "service": { "protocol": "TCP", "port": 5040, "portEnd": 5040, "bindScope": "wildcard", "processNames": ["svchost"], "workloadNames": [], "systemdUnits": [] },
+    "workloads": [],
+    "matches": false
+  },
+  {
+    "name": "approved system service",
+    "listener": { "protocol": "TCP", "address": "0.0.0.0", "port": 22, "processes": ["sshd"], "systemdUnits": ["ssh.socket"] },
+    "service": { "protocol": "TCP", "port": 22, "portEnd": 22, "bindScope": "wildcard", "processNames": ["sshd"], "workloadNames": [], "systemdUnits": ["SSH.SOCKET"] },
+    "workloads": [],
+    "matches": true
+  },
+  {
+    "name": "changed system service",
+    "listener": { "protocol": "TCP", "address": "0.0.0.0", "port": 22, "processes": ["sshd"], "systemdUnits": ["unexpected.service"] },
+    "service": { "protocol": "TCP", "port": 22, "portEnd": 22, "bindScope": "wildcard", "processNames": ["sshd"], "workloadNames": [], "systemdUnits": ["ssh.socket"] },
+    "workloads": [],
+    "matches": false
+  },
+  {
+    "name": "live approved workload",
+    "listener": { "protocol": "TCP", "address": "0.0.0.0", "port": 443, "processes": ["docker-proxy"], "systemdUnits": [] },
+    "service": { "protocol": "TCP", "port": 443, "portEnd": 443, "bindScope": "wildcard", "processNames": [], "workloadNames": ["gateway"], "systemdUnits": [] },
+    "workloads": ["gateway"],
+    "matches": true
+  },
+  {
+    "name": "missing workload evidence",
+    "listener": { "protocol": "TCP", "address": "0.0.0.0", "port": 443, "processes": ["docker-proxy"], "systemdUnits": [] },
+    "service": { "protocol": "TCP", "port": 443, "portEnd": 443, "bindScope": "wildcard", "processNames": [], "workloadNames": ["gateway"], "systemdUnits": [] },
+    "workloads": [],
+    "matches": false
+  },
+  {
+    "name": "bounded dynamic range",
+    "listener": { "protocol": "TCP", "address": "0.0.0.0", "port": 55000, "processes": ["system"], "systemdUnits": [] },
+    "service": { "protocol": "TCP", "port": 49152, "portEnd": 65535, "bindScope": "wildcard", "processNames": ["SYSTEM"], "workloadNames": [], "systemdUnits": [] },
+    "workloads": [],
+    "matches": true
+  }
+]

@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import serviceExpectationCases from "../../testdata/service_expectation_cases.json";
 import { bindScopeLabel, canonicalOwnerName, endpoint, endpointBindScope, endpointScope, expectedServiceMatches, isLoopbackAddress, isMulticastAddress, isPrivateNetworkAddress, isUnspecifiedAddress, liveNetworkRelationships, logicalListeners, networkServiceLabel, normalizeAddress, workloadAttribution, type NetworkDeviceObservation } from "./network";
 import type { DeviceRecord, ExpectedService, NetworkConnection, SecuritySnapshot, WorkloadInventory } from "./types";
 
@@ -89,6 +90,35 @@ describe("listener baselines", () => {
     const listener = logicalListeners([connection({ processName: "sshd", systemdUnit: "ssh.socket", localPort: 22 })])[0];
     expect(expectedServiceMatches(listener, expected({ port: 22, portEnd: 22, systemdUnits: ["SSH.SOCKET"] }), null)).toBe(true);
     expect(expectedServiceMatches(listener, expected({ port: 22, portEnd: 22, systemdUnits: ["other.service"] }), null)).toBe(false);
+  });
+});
+
+describe("shared hub/browser service expectation contract", () => {
+  it.each(serviceExpectationCases)("matches $name identically", (item) => {
+    const count = Math.max(1, item.listener.processes.length, item.listener.systemdUnits.length);
+    const connections = Array.from({ length: count }, (_, index) => connection({
+      protocol: item.listener.protocol,
+      localAddress: item.listener.address,
+      localPort: item.listener.port,
+      processName: item.listener.processes[index] || "",
+      systemdUnit: item.listener.systemdUnits[index] || "",
+    }));
+    const listener = logicalListeners(connections)[0];
+    const service = expected({
+      protocol: item.service.protocol as ExpectedService["protocol"],
+      port: item.service.port,
+      portEnd: item.service.portEnd,
+      bindScope: item.service.bindScope as ExpectedService["bindScope"],
+      processNames: item.service.processNames,
+      workloadNames: item.service.workloadNames,
+      systemdUnits: item.service.systemdUnits,
+    });
+    const inventory: WorkloadInventory | null = item.workloads.length > 0 ? {
+      runtime: "docker",
+      collectedAt: at,
+      workloads: item.workloads.map((name) => ({ name, state: "running", ports: [{ protocol: item.listener.protocol as "TCP" | "UDP", containerPort: item.listener.port, published: true, hostAddress: item.listener.address, hostPort: item.listener.port }] })),
+    } : null;
+    expect(expectedServiceMatches(listener, service, inventory)).toBe(item.matches);
   });
 });
 

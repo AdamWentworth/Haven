@@ -315,6 +315,38 @@ var migrations = []migration{
 				ON expected_services (device_id, protocol, port, port_end)`,
 		},
 	},
+	{
+		version: 10,
+		statements: []string{
+			`CREATE TABLE push_subscriptions (
+				id TEXT PRIMARY KEY,
+				endpoint_hash BLOB NOT NULL UNIQUE,
+				encrypted_subscription BLOB NOT NULL,
+				label TEXT NOT NULL,
+				created_at TEXT NOT NULL,
+				updated_at TEXT NOT NULL,
+				last_success_at TEXT,
+				last_failure_at TEXT,
+				failure_count INTEGER NOT NULL DEFAULT 0
+			)`,
+			`CREATE TABLE push_deliveries (
+				instance_id TEXT NOT NULL,
+				alert_id TEXT NOT NULL,
+				device_id TEXT NOT NULL,
+				subscription_id TEXT NOT NULL REFERENCES push_subscriptions(id) ON DELETE CASCADE,
+				status TEXT NOT NULL,
+				attempt_count INTEGER NOT NULL DEFAULT 0,
+				first_queued_at TEXT NOT NULL,
+				last_attempt_at TEXT,
+				next_attempt_at TEXT NOT NULL,
+				delivered_at TEXT,
+				last_result TEXT NOT NULL DEFAULT '',
+				PRIMARY KEY (instance_id, subscription_id)
+			)`,
+			`CREATE INDEX push_deliveries_due ON push_deliveries (status, next_attempt_at)`,
+			`CREATE INDEX push_deliveries_subscription ON push_deliveries (subscription_id, first_queued_at DESC)`,
+		},
+	},
 }
 
 func Open(ctx context.Context, path string) (*Store, error) {

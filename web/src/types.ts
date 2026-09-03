@@ -87,6 +87,43 @@ export interface SecurityEvent {
   occurredAt: string;
 }
 
+export type AlertSeverity = "high" | "medium" | "low";
+export type AlertKind = "finding" | "stale-agent" | "awaiting-agent" | "new-service" | "service-drift";
+
+export interface HavenAlert {
+  id: string;
+  instanceId: string;
+  deviceId: string;
+  deviceName: string;
+  kind: AlertKind;
+  severity: AlertSeverity;
+  title: string;
+  summary: string;
+  evidence: string;
+  startedAt: string;
+}
+
+export interface PushDestination {
+  id: string;
+  label: string;
+  createdAt: string;
+  updatedAt: string;
+  lastSuccessAt: string | null;
+  lastFailureAt: string | null;
+  failureCount: number;
+}
+
+export interface PushNotificationStatus {
+  available: boolean;
+  vapidPublicKey: string;
+  destinations: PushDestination[];
+  pendingCount: number;
+  failedCount: number;
+  lastSuccessAt: string | null;
+  lastFailureAt: string | null;
+  evaluationPeriodSeconds: number;
+}
+
 export interface DeviceSummary {
   deviceId?: string;
   hostName: string;

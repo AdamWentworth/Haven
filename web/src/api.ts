@@ -1,4 +1,5 @@
-import type { AuditEvent, AuthStatus, DeviceDetail, DeviceRecord, ExpectedService, ExpectedServiceInput, FindingReview, FindingReviewState, ObservedListener, PasskeyInfo, RuntimeStatus, SecurityAction, SecurityActionKind, SecurityEvent, SecuritySnapshot } from "./types";
+import type { AuditEvent, AuthStatus, DeviceDetail, DeviceRecord, ExpectedService, ExpectedServiceInput, FindingReview, FindingReviewState, HavenAlert, ObservedListener, PasskeyInfo, PushDestination, PushNotificationStatus, RuntimeStatus, SecurityAction, SecurityActionKind, SecurityEvent, SecuritySnapshot } from "./types";
+import type { SerializedPushSubscription } from "./push";
 
 async function getJSON<T>(path: string, signal?: AbortSignal): Promise<T> {
   const response = await fetch(path, {
@@ -58,6 +59,16 @@ export const listEvents = (deviceId?: string, signal?: AbortSignal) => {
   if (deviceId) query.set("deviceId", deviceId);
   return getJSON<SecurityEvent[]>(`/api/events?${query.toString()}`, signal);
 };
+
+export const listAlerts = (signal?: AbortSignal) => getJSON<HavenAlert[]>("/api/alerts", signal);
+
+export const getNotificationStatus = (signal?: AbortSignal) => getJSON<PushNotificationStatus>("/api/notifications", signal);
+
+export const registerPushDestination = (subscription: SerializedPushSubscription, label: string) =>
+  postJSON<PushDestination>("/api/notifications/subscribe", { subscription, label });
+
+export const removePushDestination = (endpoint: string) =>
+  postJSON<void>("/api/notifications/unsubscribe", { endpoint });
 
 export const getAuthStatus = (signal?: AbortSignal) => getJSON<AuthStatus>("/api/auth/status", signal);
 

@@ -15,9 +15,11 @@ import (
 	"time"
 
 	"github.com/AdamWentworth/haven/internal/action"
+	"github.com/AdamWentworth/haven/internal/alert"
 	"github.com/AdamWentworth/haven/internal/authn"
 	"github.com/AdamWentworth/haven/internal/collector"
 	"github.com/AdamWentworth/haven/internal/model"
+	"github.com/AdamWentworth/haven/internal/notification"
 	"github.com/AdamWentworth/haven/internal/posture"
 	"github.com/AdamWentworth/haven/internal/storage"
 )
@@ -32,6 +34,8 @@ type Server struct {
 	localCollection bool
 	auth            *authn.Service
 	actions         *action.Service
+	alertProjector  *alert.Projector
+	notifications   *notification.Service
 
 	collectionMutex sync.Mutex
 	latestMutex     sync.RWMutex
@@ -56,6 +60,14 @@ func WithAuthentication(service *authn.Service) ServerOption {
 
 func WithActions(service *action.Service) ServerOption {
 	return func(server *Server) { server.actions = service }
+}
+
+func WithAlertProjector(projector *alert.Projector) ServerOption {
+	return func(server *Server) { server.alertProjector = projector }
+}
+
+func WithNotifications(service *notification.Service) ServerOption {
+	return func(server *Server) { server.notifications = service }
 }
 
 func NewServer(
@@ -90,6 +102,7 @@ func (server *Server) Handler() http.Handler {
 	mux.Handle("GET /api/devices/{deviceID}", server.protected(http.HandlerFunc(server.deviceDetail)))
 	mux.Handle("POST /api/devices/{deviceID}/revoke", server.mutating(http.HandlerFunc(server.revokeDevice)))
 	mux.Handle("GET /api/events", server.protected(http.HandlerFunc(server.securityEvents)))
+	mux.Handle("GET /api/alerts", server.protected(http.HandlerFunc(server.currentAlerts)))
 	mux.Handle("GET /api/finding-reviews", server.protected(http.HandlerFunc(server.findingReviews)))
 	mux.Handle("POST /api/finding-reviews", server.mutating(http.HandlerFunc(server.reviewFinding)))
 	mux.Handle("GET /api/expected-services", server.protected(http.HandlerFunc(server.expectedServices)))
@@ -100,6 +113,9 @@ func (server *Server) Handler() http.Handler {
 	mux.Handle("GET /api/audit", server.protected(http.HandlerFunc(server.auditEvents)))
 	mux.Handle("GET /api/actions", server.protected(http.HandlerFunc(server.securityActions)))
 	mux.Handle("POST /api/actions", server.mutating(http.HandlerFunc(server.requestSecurityAction)))
+	mux.Handle("GET /api/notifications", server.protected(http.HandlerFunc(server.notificationStatus)))
+	mux.Handle("POST /api/notifications/subscribe", server.mutating(http.HandlerFunc(server.subscribeNotifications)))
+	mux.Handle("POST /api/notifications/unsubscribe", server.mutating(http.HandlerFunc(server.unsubscribeNotifications)))
 	mux.HandleFunc("/", server.webApplication)
 	return server.securityHeaders(mux)
 }

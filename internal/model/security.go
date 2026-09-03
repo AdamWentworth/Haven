@@ -199,6 +199,22 @@ type SecurityEvent struct {
 	OccurredAt time.Time `json:"occurredAt"`
 }
 
+// Alert is the hub-owned projection of a currently actionable fact. ID stays
+// stable for one logical condition; InstanceID changes when that condition
+// resolves and later recurs or when its evidence materially changes.
+type Alert struct {
+	ID         string    `json:"id"`
+	InstanceID string    `json:"instanceId"`
+	DeviceID   string    `json:"deviceId"`
+	DeviceName string    `json:"deviceName"`
+	Kind       string    `json:"kind"`
+	Severity   string    `json:"severity"`
+	Title      string    `json:"title"`
+	Summary    string    `json:"summary"`
+	Evidence   string    `json:"evidence"`
+	StartedAt  time.Time `json:"startedAt"`
+}
+
 type MonitorStatus struct {
 	Enabled             bool       `json:"enabled"`
 	IntervalSeconds     int64      `json:"intervalSeconds"`

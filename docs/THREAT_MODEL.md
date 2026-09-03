@@ -14,7 +14,7 @@ HAVEN must not store passwords, session cookies, authenticator seeds, recovery-c
 
 ## Current boundary
 
-Milestone 0.9 performs continuous collection, explainable baseline evaluation, privacy-bounded finding and listener transition tracking, authenticated device reporting, owner-reviewed expected-service classification, explicit report freshness/lifecycle presentation, fact-based active-alert derivation, live Docker workload and Linux systemd-unit attribution, a derived network-wide overview, and an authenticated local action boundary. The overview distinguishes enrolled devices from observed-only private endpoints and grouped Internet relationships. It uses only the latest live connection reports, performs no active discovery, and persists no remote endpoint or relationship history. Suggested baseline entries are derived only from bounded platform roles and the current live observation; nothing is classified until the owner approves it. Alerts are review prompts based on current evidence, not intrusion verdicts or Internet-reachability claims. On Windows, the collector launches one fixed, internally defined PowerShell script with no user-controlled commands or parameters. The two available controls also select fixed internal PowerShell commands for a Defender quick scan or security-intelligence update; browser text is never interpolated into them.
+Milestone 0.10 performs continuous collection, explainable baseline evaluation, privacy-bounded finding and listener transition tracking, authenticated device reporting, owner-reviewed expected-service classification, explicit report freshness/lifecycle presentation, hub-owned fact-based active-alert derivation, opt-in encrypted Web Push delivery, live Docker workload and Linux systemd-unit attribution, a derived network-wide overview, and an authenticated local action boundary. The overview distinguishes enrolled devices from observed-only private endpoints and grouped Internet relationships. It uses only the latest live connection reports, performs no active discovery, and persists no remote endpoint or relationship history. Suggested baseline entries are derived only from bounded platform roles and the current live observation; nothing is classified until the owner approves it. Alerts are review prompts based on current evidence, not intrusion verdicts or Internet-reachability claims. On Windows, the collector launches one fixed, internally defined PowerShell script with no user-controlled commands or parameters. The two available controls also select fixed internal PowerShell commands for a Defender quick scan or security-intelligence update; browser text is never interpolated into them.
 
 The owner registers one or more discoverable passkeys through the cross-platform WebAuthn standard. Windows Hello, platform biometric providers, synchronized phone passkeys, and hardware security keys are authenticator choices rather than HAVEN dependencies. The first passkey requires a one-time local CLI code; the same short-lived mechanism provides local recovery. A signed-in owner can add or remove passkeys, but cannot remove the final credential without a replacement.
 
@@ -26,7 +26,9 @@ SQLite and private keys are stored outside the source tree. Historical records e
 
 Baseline history contains only bounded posture and counts. HAVEN does not retain administrator names, Windows update titles, Defender threat names, detected file or resource paths, BitLocker recovery keys, or other recovery material. A finding is a local rule evaluation, not proof of compromise or a substitute for native security guidance.
 
-The activity ledger records only finding-opened and finding-resolved transitions using the already bounded finding text. Listener history is a separate bounded baseline containing protocol, port, bind scope, and timestamps; raw addresses, remote endpoints, process history, systemd ownership history, and payloads are not persisted. An approved expected-service record may contain a small owner-selected process, workload, or systemd-unit allowlist, but this is configuration metadata rather than observation history; audit summaries deliberately omit those names. Active alerts are derived in the authenticated browser and are not persisted as a second history. Browser desktop alerts are opt-in, contain no secrets, and operate only while the page is open. HAVEN does not register a privileged tray process or notification service in this milestone.
+The activity ledger records only finding-opened and finding-resolved transitions using the already bounded finding text. Listener history is a separate bounded baseline containing protocol, port, bind scope, and timestamps; raw addresses, remote endpoints, process history, systemd ownership history, and payloads are not persisted. An approved expected-service record may contain a small owner-selected process, workload, or systemd-unit allowlist, but this is configuration metadata rather than observation history; audit summaries deliberately omit those names. Active alerts are recomputed by the hub and are not persisted as a second history. Durable delivery records contain identities, bounded result classifications, attempt times, and status—not alert text or network evidence.
+
+Background delivery is disabled until an authenticated owner explicitly grants browser permission and registers a destination through the anti-forgery-protected API. The Web Push capability endpoint and subscription keys are encrypted at rest with a separate random key outside SQLite. The push service receives an encrypted payload and can observe delivery metadata. To limit lock-screen disclosure, the plaintext contains only HAVEN's name, the owner-assigned device label, severity, and a prompt to open the authenticated dashboard; finding titles, summaries, ports, and endpoint evidence are excluded. Completed receipts expire after a bounded period. HAVEN does not register a privileged tray process or browser extension.
 
 The network overview is a browser-side projection of the latest authenticated reports. Address matches can explain likely enrolled-device relationships, but they are not cryptographic proof that the peer at an address is the enrolled machine. Unmatched private endpoints remain visibly "observed only," are never promoted to trusted inventory, and are not retained as asset history in this milestone. Internet destinations are grouped to reduce noise rather than classified as benign.
 
@@ -42,6 +44,7 @@ Current mitigations:
 - Require exact-origin and anti-forgery validation for every state-changing dashboard request.
 - Return no authentication secrets.
 - Send a restrictive Content Security Policy and related browser headers.
+- Protect push destination enrollment and removal with the same authenticated exact-origin and anti-forgery boundary as other owner mutations.
 
 Passkey verification provides the session boundary, and the current UI requires explicit confirmation for each Defender action. A later remote-action protocol must add fresh reauthorization and an independently authenticated native agent capability; loopback and private networking are not authentication.
 
@@ -67,6 +70,7 @@ Current and planned mitigations:
 - Privileged helpers accept only allowlisted actions and never a shell command.
 - The hub stores no user passwords or device-administrator credentials.
 - Browser access has independent application authentication and authorization.
+- Push capability endpoints, subscription keys, and the VAPID private key stay in the private state directory, never the source repository or an API response.
 
 ### A compromised endpoint lies to HAVEN
 
@@ -109,6 +113,18 @@ Planned mitigations:
 - Sign release artifacts and verify agent updates before installation.
 - Never auto-install an unsigned agent, collector, or policy bundle.
 
+### Background notification delivery becomes data exfiltration or SSRF
+
+Current mitigations:
+
+- Keep Web Push disabled by default and disclose that the browser-vendor service observes delivery metadata.
+- Use standards-based payload encryption and keep lock-screen text generic.
+- Encrypt subscription capability endpoints and key material at rest; never return endpoints through the status API or logs.
+- Accept only HTTPS hostname endpoints on the standard port, resolve every address before dialing, reject private, loopback, link-local, multicast, and non-global destinations, disable proxy routing, and refuse redirects.
+- Apply a fixed destination limit, payload schema, delivery timeout, maximum retry count, and exponential backoff.
+- Remove destinations that return `404` or `410`; expire queued work when its alert instance is no longer current.
+- Do not place arbitrary URLs, actions, scripts, credentials, finding details, or remote endpoints in notification payloads.
+
 ### Alert logic creates false certainty or notification fatigue
 
 Current mitigations:
@@ -116,9 +132,9 @@ Current mitigations:
 - Derive alerts only from named evidence sources: authenticated freshness state, current evaluated findings, listener appearance state, and owner-approved service expectations.
 - Describe an unreviewed listener as a review requirement, never as malware or proof of public exposure.
 - Keep low-severity items visible without desktop interruption.
-- Deduplicate medium/high notifications by stable alert identity plus recurrence-specific evidence.
+- Deduplicate medium/high notifications with durable per-destination receipts keyed by stable alert identity plus recurrence-specific evidence.
 - Publish the server-owned freshness threshold through the authenticated runtime API instead of duplicating it in browser logic.
-- Test direction, deduplication, privacy projection, baseline ownership, lifecycle state, alert severity, and notification recurrence in CI with enforced coverage thresholds.
+- Test direction, deduplication, privacy projection, baseline ownership, lifecycle state, alert severity, subscription validation, baselining, retry delay, expiry, generic payload content, and notification recurrence in CI with enforced coverage thresholds.
 
 ## Security gates
 

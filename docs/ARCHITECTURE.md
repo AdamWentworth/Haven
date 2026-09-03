@@ -10,6 +10,8 @@ Linux agent ───┼── outbound mutually authenticated observations ─�
 macOS agent ───┘                                                        │
                                                                         ├── SQLite
 Private browser clients ─────────── private HTTPS ──────────────────────┘
+        ▲                                                               │
+        └──── encrypted Web Push via browser-vendor push service ────────┘
 ```
 
 The hub owns persistence, policy, presentation, and future audit history. Native agents own platform collection. Agents initiate outbound communication; the hub never opens a management port on an endpoint.
@@ -28,13 +30,14 @@ The hub must not provide a general-purpose remote shell. Future actions are fixe
 | Agent packaging | Windows Service, systemd, and launchd | Host visibility without privileged containers |
 | Device authentication | Unique revocable certificates using mutual TLS | No shared household agent credential |
 | User access | Private HTTPS plus application authentication | Network location alone is not an identity |
+| Background alerts | Standards-based Web Push and a service worker | Cross-platform delivery without a privileged tray process or always-open page |
 | Desktop shell | Optional Tauri wrapper | Reuse the web interface only if tray or native notifications justify it |
 
 PostgreSQL becomes appropriate if HAVEN needs multiple hub writers, multiple hub replicas, sustained high-volume flow telemetry, multi-tenant hosting, or concurrency that batching cannot handle. Storage-specific behavior remains inside `internal/storage`, but supporting two engines simultaneously is not a current goal.
 
 ## Current milestone boundary
 
-Milestone 0.9 extends the authenticated native-agent hub with fact-based alert baselines on top of the privacy-bounded network overview:
+Milestone 0.10 extends the authenticated native-agent hub with durable background delivery for fact-based alert baselines:
 
 - `haven-hub` serves a loopback dashboard, owns SQLite, and exposes a separate loopback TLS 1.3 agent listener. Native development may enable local collection; a containerized production hub disables it and never treats its ephemeral container hostname as a device.
 - Enrollment uses a short-lived, one-time 256-bit token plus an ECDSA P-256 certificate request. The trusted CA certificate is transferred out of band.
@@ -51,9 +54,12 @@ Milestone 0.9 extends the authenticated native-agent hub with fact-based alert b
 - SQLite stores an append-only transition event only when an evaluated finding opens or resolves. Unchanged observations do not create activity noise.
 - The browser combines the latest authenticated device observations into an owner-only coverage view. It derives enrolled-device relationships from matching live endpoint addresses, labels other private destinations as observed-only assets, and groups public destinations by source owner and destination service. This derived view is not persisted.
 - Network overview data does not grant trust, enroll a device, resolve a hostname, probe an address, or scan the LAN. Raw remote endpoints remain live-only and disappear after a hub restart until agents report again.
-- The browser derives active alerts only from server-classified device freshness, current evaluated findings, persistent listener appearance timestamps, and owner-approved service expectations. A protocol/port/scope match whose current owner no longer satisfies its approved process, workload, or systemd-unit constraint is reported as service drift rather than silently trusted.
+- The hub derives active alerts only from server-classified device freshness, current evaluated findings, persistent listener appearance timestamps, and owner-approved service expectations. The authenticated browser consumes that projection rather than implementing a second policy. A protocol/port/scope match whose current owner no longer satisfies its approved process, workload, or systemd-unit constraint is reported as service drift rather than silently trusted.
 - The authenticated runtime response publishes the server's device-freshness allowance. The browser does not independently guess the stale threshold.
-- The browser can request desktop-notification permission and notifies once per new medium/high alert instance while the page is open. Recurrence identity and receipts stay in browser-local storage; low-severity alerts remain visible without interrupting the owner.
+- The hub reevaluates alerts every minute independently of dashboard activity. It queues one delivery per medium/high alert instance and enrolled push destination, persists the receipt before retrying, expires retries when the alert is no longer current, and leaves low-severity alerts visible without interruption.
+- A browser explicitly grants notification permission and registers a standards-based Web Push subscription. Its capability endpoint and encryption keys are AES-GCM encrypted at rest using a random key outside SQLite; the VAPID identity is stored beside that key in the private state directory. The push endpoint never appears in an authenticated status response, audit detail, or log.
+- The outbound sender accepts HTTPS hostnames on the standard port only, resolves every destination address before connecting, rejects private, loopback, link-local, multicast, and non-global addresses, and refuses redirects. This keeps a registered push endpoint from becoming a general server-side request primitive.
+- Web Push encrypts the message for the browser subscription. The browser-vendor service can still observe delivery metadata, so enrollment is disabled by default and the UI states that tradeoff. Lock-screen content includes only the device label and severity, not the finding title, summary, port, owner, or endpoint evidence.
 - A configured state distinguishes intentionally enabled services with verified compensating controls from both healthy defaults and actionable findings. The Windows collector can verify TPM readiness without elevation and summarizes RDP firewall scope without retaining rule names or network addresses.
 
 The trusted inventory contains only the local collector and explicitly enrolled agents. HAVEN does not infer trust from sharing a network. The network overview keeps merely observed assets separate from enrolled devices, and another household member's device requires informed opt-in before an agent is installed.
@@ -71,7 +77,8 @@ Agents will send high-level observations to the hub, never SQL. The SQLite file 
 - Posture observations expire after 90 days by default; deployment configuration can shorten that period.
 - Live TCP connection and Docker workload details are returned to the dashboard but removed before a snapshot is stored.
 - Finding-transition events retain the privacy-bounded category, title, severity, and summary already present in posture history; they never copy connection details or excluded identifiers.
-- Active-alert projection is live browser state and is not another historical telemetry table. Finding lifecycles and bounded listener appearance records remain the durable evidence behind it.
+- Active-alert projection is recomputed hub state and is not another historical telemetry table. Finding lifecycles and bounded listener appearance records remain the durable evidence behind it. Push-delivery rows retain only alert and recurrence identities, destination identity, bounded result classifications, attempt times, and delivery state; they do not copy finding text or connection evidence.
+- Push capability endpoints and subscription encryption keys are stored only inside AES-GCM ciphertext. VAPID and subscription-encryption keys live in the private state directory and must be backed up with the database. Completed delivery receipts expire after 90 days during reconciliation.
 - Expected-service records are per-device owner metadata containing a friendly label, protocol, exact port or bounded range, bind expectation, and optional approved process, workload, or systemd-unit owners. Suggestions are generated from the current live observation but are never saved automatically. Single and bulk changes are audited but do not start a service or alter a firewall.
 - Packet payloads, browser content, keystrokes, screenshots, and document contents are never collected.
 - Future high-volume network summaries receive shorter retention than posture changes.

@@ -2,6 +2,7 @@ package hub
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"io"
 	"io/fs"
@@ -14,8 +15,10 @@ import (
 	"testing/fstest"
 	"time"
 
+	"github.com/AdamWentworth/haven/internal/alert"
 	"github.com/AdamWentworth/haven/internal/authn"
 	"github.com/AdamWentworth/haven/internal/model"
+	"github.com/AdamWentworth/haven/internal/notification"
 	"github.com/AdamWentworth/haven/internal/storage"
 )
 
@@ -30,6 +33,12 @@ func (collector staticCollector) Collect(context.Context) model.SecuritySnapshot
 type signalingCollector struct {
 	snapshot model.SecuritySnapshot
 	calls    chan struct{}
+}
+
+type acceptingPushSender struct{}
+
+func (acceptingPushSender) Send(context.Context, notification.Subscription, []byte, notification.DeliveryOptions) (int, error) {
+	return http.StatusCreated, nil
 }
 
 func (collector signalingCollector) Collect(context.Context) model.SecuritySnapshot {
@@ -54,7 +63,7 @@ func testServer(t *testing.T) (*Server, *storage.Store) {
 		Notices:          []model.CollectorNotice{},
 	}
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	return NewServer(staticCollector{snapshot: snapshot}, store, logger, fs.FS(webFiles)), store
+	return NewServer(staticCollector{snapshot: snapshot}, store, logger, fs.FS(webFiles), WithAlertProjector(alert.NewProjector(store))), store
 }
 
 func TestHealthEndpointHasSecurityHeaders(t *testing.T) {
@@ -274,6 +283,66 @@ func TestSecurityEventEndpointReturnsFindingTransitions(t *testing.T) {
 
 	if events.Code != http.StatusOK || !strings.Contains(events.Body.String(), `"kind":"opened"`) || !strings.Contains(events.Body.String(), `"findingId":"defender-disabled"`) {
 		t.Fatalf("unexpected security events: %d %s", events.Code, events.Body.String())
+	}
+}
+
+func TestAlertEndpointUsesServerOwnedCurrentProjection(t *testing.T) {
+	server, store := testServer(t)
+	defer store.Close()
+	disabled := false
+	snapshot := server.collector.Collect(context.Background())
+	snapshot.Defender = &model.DefenderStatus{AntivirusEnabled: &disabled, RealTimeProtectionEnabled: &disabled}
+	server.collector = staticCollector{snapshot: snapshot}
+
+	collect := httptest.NewRecorder()
+	server.Handler().ServeHTTP(collect, httptest.NewRequest(http.MethodPost, "/api/security/snapshot", nil))
+	response := httptest.NewRecorder()
+	server.Handler().ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/api/alerts", nil))
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"kind":"finding"`) || !strings.Contains(response.Body.String(), `"severity":"high"`) {
+		t.Fatalf("expected a server-projected current alert: %d %s", response.Code, response.Body.String())
+	}
+}
+
+func TestNotificationStatusIsExplicitlyUnavailableWithoutService(t *testing.T) {
+	server, store := testServer(t)
+	defer store.Close()
+	response := httptest.NewRecorder()
+	server.Handler().ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/api/notifications", nil))
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"available":false`) || !strings.Contains(response.Body.String(), `"evaluationPeriodSeconds":60`) {
+		t.Fatalf("unexpected notification capability response: %d %s", response.Code, response.Body.String())
+	}
+}
+
+func TestNotificationDestinationAPIHidesCapabilityEndpoint(t *testing.T) {
+	server, store := testServer(t)
+	defer store.Close()
+	service, err := notification.New(store, t.TempDir(), "https://haven.example.invalid", server.logger, notification.WithSender(acceptingPushSender{}))
+	if err != nil {
+		t.Fatal(err)
+	}
+	server.notifications = service
+	public := make([]byte, 65)
+	public[0] = 4
+	for index := 1; index < len(public); index++ {
+		public[index] = byte(index)
+	}
+	auth := base64.RawURLEncoding.EncodeToString([]byte("0123456789abcdef"))
+	p256dh := base64.RawURLEncoding.EncodeToString(public)
+	body := strings.NewReader(`{"label":"Test browser","subscription":{"endpoint":"https://push.example.invalid/delivery/capability-token","expirationTime":null,"keys":{"auth":"` + auth + `","p256dh":"` + p256dh + `"}}}`)
+	created := httptest.NewRecorder()
+	server.Handler().ServeHTTP(created, httptest.NewRequest(http.MethodPost, "/api/notifications/subscribe", body))
+	if created.Code != http.StatusOK || strings.Contains(created.Body.String(), "push.example.invalid") || !strings.Contains(created.Body.String(), `"label":"Test browser"`) {
+		t.Fatalf("unexpected subscription response: %d %s", created.Code, created.Body.String())
+	}
+	status := httptest.NewRecorder()
+	server.Handler().ServeHTTP(status, httptest.NewRequest(http.MethodGet, "/api/notifications", nil))
+	if status.Code != http.StatusOK || strings.Contains(status.Body.String(), "push.example.invalid") || !strings.Contains(status.Body.String(), `"subscriptionCount"`) && !strings.Contains(status.Body.String(), `"destinations"`) {
+		t.Fatalf("notification status exposed the endpoint or missed status: %d %s", status.Code, status.Body.String())
+	}
+	removed := httptest.NewRecorder()
+	server.Handler().ServeHTTP(removed, httptest.NewRequest(http.MethodPost, "/api/notifications/unsubscribe", strings.NewReader(`{"endpoint":"https://push.example.invalid/delivery/capability-token"}`)))
+	if removed.Code != http.StatusNoContent {
+		t.Fatalf("unexpected unsubscribe response: %d %s", removed.Code, removed.Body.String())
 	}
 }
 

@@ -3,6 +3,7 @@ module github.com/AdamWentworth/haven
 go 1.26.6
 
 require (
+	github.com/SherClockHolmes/webpush-go v1.4.0
 	github.com/go-webauthn/webauthn v0.17.0
 	modernc.org/sqlite v1.57.0
 )

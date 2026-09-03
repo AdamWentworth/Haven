@@ -19,9 +19,11 @@ import (
 	"time"
 
 	"github.com/AdamWentworth/haven/internal/action"
+	"github.com/AdamWentworth/haven/internal/alert"
 	"github.com/AdamWentworth/haven/internal/authn"
 	"github.com/AdamWentworth/haven/internal/collector"
 	"github.com/AdamWentworth/haven/internal/hub"
+	"github.com/AdamWentworth/haven/internal/notification"
 	"github.com/AdamWentworth/haven/internal/storage"
 	"github.com/AdamWentworth/haven/internal/trust"
 	"github.com/AdamWentworth/haven/internal/webui"
@@ -276,7 +278,7 @@ func run(logger *slog.Logger) error {
 
 	uiAddress := configuredAddress("HAVEN_LISTEN_ADDRESS", "127.0.0.1:5080")
 	agentAddress := configuredAddress("HAVEN_AGENT_LISTEN_ADDRESS", "127.0.0.1:5443")
-	serverOptions := []hub.ServerOption{hub.WithLocalCollection(localCollection)}
+	serverOptions := []hub.ServerOption{hub.WithLocalCollection(localCollection), hub.WithAlertProjector(alert.NewProjector(store))}
 	if demoMode {
 		serverOptions = append(serverOptions, hub.WithDemoMode())
 		logger.Info("synthetic demo mode enabled")
@@ -290,6 +292,15 @@ func run(logger *slog.Logger) error {
 			return err
 		}
 		serverOptions = append(serverOptions, hub.WithAuthentication(authentication))
+		notificationSubscriber := publicOrigin
+		if strings.HasPrefix(notificationSubscriber, "http://localhost") {
+			notificationSubscriber = "https://haven.localhost.invalid"
+		}
+		notifications, err := notification.New(store, stateDirectory, notificationSubscriber, logger)
+		if err != nil {
+			return err
+		}
+		serverOptions = append(serverOptions, hub.WithNotifications(notifications))
 		if runtime.GOOS == "windows" {
 			serverOptions = append(serverOptions, hub.WithActions(action.New(store, logger)))
 		}
@@ -318,6 +329,10 @@ func run(logger *slog.Logger) error {
 		logger.Info("continuous local monitoring enabled", "interval", collectionInterval.String())
 	} else if !demoMode {
 		logger.Info("hub-only mode enabled; observations must come from enrolled native agents")
+	}
+	if !demoMode {
+		go dashboard.RunNotificationMonitor(runtimeContext, hub.NotificationEvaluationPeriod)
+		logger.Info("durable background alert evaluation enabled", "interval", hub.NotificationEvaluationPeriod.String())
 	}
 
 	serverErrors := make(chan error, 2)
