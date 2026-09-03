@@ -370,15 +370,16 @@ func (server *Server) expectedServices(writer http.ResponseWriter, request *http
 }
 
 type expectedServiceRequest struct {
-	DeviceID      string   `json:"deviceId"`
-	Label         string   `json:"label"`
-	Protocol      string   `json:"protocol"`
-	Port          int      `json:"port"`
-	PortEnd       int      `json:"portEnd"`
-	BindScope     string   `json:"bindScope"`
-	ProcessNames  []string `json:"processNames"`
-	WorkloadNames []string `json:"workloadNames"`
-	SystemdUnits  []string `json:"systemdUnits"`
+	DeviceID      string     `json:"deviceId"`
+	Label         string     `json:"label"`
+	Protocol      string     `json:"protocol"`
+	Port          int        `json:"port"`
+	PortEnd       int        `json:"portEnd"`
+	BindScope     string     `json:"bindScope"`
+	ProcessNames  []string   `json:"processNames"`
+	WorkloadNames []string   `json:"workloadNames"`
+	SystemdUnits  []string   `json:"systemdUnits"`
+	ExpiresAt     *time.Time `json:"expiresAt"`
 }
 
 func expectedServiceFromRequest(body expectedServiceRequest, deviceID string, now time.Time) (storage.ExpectedService, bool) {
@@ -404,8 +405,9 @@ func expectedServiceFromRequest(body expectedServiceRequest, deviceID string, no
 		}
 		return true
 	}
-	valid := validIdentifier(deviceID) && body.Label != "" && len(body.Label) <= 80 && !strings.ContainsAny(body.Label, "\r\n\t") && (body.Protocol == "TCP" || body.Protocol == "UDP") && body.Port >= 1 && body.Port <= 65535 && body.PortEnd >= body.Port && body.PortEnd <= 65535 && allowedScope && validOwners(body.ProcessNames) && validOwners(body.WorkloadNames) && validOwners(body.SystemdUnits)
-	return storage.ExpectedService{DeviceID: deviceID, Label: body.Label, Protocol: body.Protocol, Port: body.Port, PortEnd: body.PortEnd, BindScope: body.BindScope, ProcessNames: body.ProcessNames, WorkloadNames: body.WorkloadNames, SystemdUnits: body.SystemdUnits, UpdatedAt: now}, valid
+	validExpiration := body.ExpiresAt == nil || body.ExpiresAt.After(now) && !body.ExpiresAt.After(now.Add(storage.MaximumExpectedServiceLifetime))
+	valid := validIdentifier(deviceID) && body.Label != "" && len(body.Label) <= 80 && !strings.ContainsAny(body.Label, "\r\n\t") && (body.Protocol == "TCP" || body.Protocol == "UDP") && body.Port >= 1 && body.Port <= 65535 && body.PortEnd >= body.Port && body.PortEnd <= 65535 && allowedScope && validOwners(body.ProcessNames) && validOwners(body.WorkloadNames) && validOwners(body.SystemdUnits) && validExpiration
+	return storage.ExpectedService{DeviceID: deviceID, Label: body.Label, Protocol: body.Protocol, Port: body.Port, PortEnd: body.PortEnd, BindScope: body.BindScope, ProcessNames: body.ProcessNames, WorkloadNames: body.WorkloadNames, SystemdUnits: body.SystemdUnits, ExpiresAt: body.ExpiresAt, UpdatedAt: now}, valid
 }
 
 func (server *Server) saveExpectedService(writer http.ResponseWriter, request *http.Request) {
@@ -424,7 +426,11 @@ func (server *Server) saveExpectedService(writer http.ResponseWriter, request *h
 		http.Error(writer, "could not save expected service", http.StatusInternalServerError)
 		return
 	}
-	_ = server.store.AppendAudit(request.Context(), storage.AuditEvent{Actor: "owner", Action: "service.expectation.save", Target: serviceRequest.DeviceID + "/" + serviceRequest.Protocol + "/" + fmt.Sprint(serviceRequest.Port), Outcome: "succeeded", Detail: "An endpoint was classified as an expected service. The friendly label is intentionally omitted from audit history.", OccurredAt: now})
+	detail := "An endpoint was classified as an expected service. The friendly label is intentionally omitted from audit history."
+	if serviceRequest.ExpiresAt != nil {
+		detail = "A temporary endpoint classification was saved. It expires automatically; the friendly label is intentionally omitted from audit history."
+	}
+	_ = server.store.AppendAudit(request.Context(), storage.AuditEvent{Actor: "owner", Action: "service.expectation.save", Target: serviceRequest.DeviceID + "/" + serviceRequest.Protocol + "/" + fmt.Sprint(serviceRequest.Port), Outcome: "succeeded", Detail: detail, OccurredAt: now})
 	server.writeJSON(writer, http.StatusOK, service)
 }
 

@@ -3,6 +3,7 @@ package alert
 import (
 	"encoding/json"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -37,7 +38,7 @@ func TestDeriveUsesOnlyCurrentFindingsAndLatestOpenLifecycle(t *testing.T) {
 		{ID: 3, DeviceID: "device-a", FindingID: "firewall-disabled", Kind: "opened", OccurredAt: fixedTime.Add(-2 * time.Hour)},
 		{ID: 4, DeviceID: "device-a", FindingID: "historical-only", Kind: "opened", OccurredAt: fixedTime.Add(-time.Hour)},
 	}
-	alerts := Derive([]DeviceObservation{device}, events, 30*time.Minute)
+	alerts := Derive([]DeviceObservation{device}, events, 30*time.Minute, fixedTime)
 	if len(alerts) != 1 || alerts[0].StartedAt != events[2].OccurredAt || alerts[0].Severity != "high" {
 		t.Fatalf("expected only the current recurrence, got %#v", alerts)
 	}
@@ -59,7 +60,7 @@ func TestDeriveSeparatesNewServiceFromOwnerDrift(t *testing.T) {
 		{DeviceID: "device-a", Protocol: "TCP", Port: 443, BindScope: storage.BindScopeWildcard, AppearedAt: fixedTime.Add(-time.Hour), Present: true},
 		{DeviceID: "device-a", Protocol: "TCP", Port: 8443, BindScope: storage.BindScopeSpecific, AppearedAt: fixedTime.Add(-2 * time.Hour), Present: true},
 	}
-	alerts := Derive([]DeviceObservation{device}, nil, 30*time.Minute)
+	alerts := Derive([]DeviceObservation{device}, nil, 30*time.Minute, fixedTime)
 	if len(alerts) != 2 || alerts[0].Kind != "new-service" || alerts[1].Kind != "service-drift" {
 		t.Fatalf("expected a new service and owner drift, got %#v", alerts)
 	}
@@ -77,8 +78,35 @@ func TestDeriveIgnoresLocalAndOwnerApprovedServices(t *testing.T) {
 		DeviceID: "device-a", Label: "SSH", Protocol: "TCP", Port: 22, PortEnd: 22,
 		BindScope: storage.BindScopeWildcard, ProcessNames: []string{"sshd"}, SystemdUnits: []string{"ssh.socket"},
 	}}
-	if alerts := Derive([]DeviceObservation{device}, nil, 30*time.Minute); len(alerts) != 0 {
+	if alerts := Derive([]DeviceObservation{device}, nil, 30*time.Minute, fixedTime); len(alerts) != 0 {
 		t.Fatalf("local and owner-approved listeners must not alert: %#v", alerts)
+	}
+}
+
+func TestDeriveCreatesANewLifecycleWhenTemporaryExpectationExpires(t *testing.T) {
+	device := observedDevice("current", listener(8765, "0.0.0.0", "node", "apk-test.service"))
+	futureExpiration := fixedTime.Add(time.Hour)
+	device.ExpectedServices = []storage.ExpectedService{{
+		DeviceID: "device-a", Label: "Temporary APK test server", Protocol: "TCP", Port: 8765, PortEnd: 8765,
+		BindScope: storage.BindScopeWildcard, ProcessNames: []string{"node"}, SystemdUnits: []string{"apk-test.service"}, ExpiresAt: &futureExpiration,
+	}}
+	if alerts := Derive([]DeviceObservation{device}, nil, 30*time.Minute, fixedTime); len(alerts) != 0 {
+		t.Fatalf("an unexpired temporary expectation must remain active: %#v", alerts)
+	}
+
+	firstExpiration := fixedTime.Add(-time.Hour)
+	device.ExpectedServices[0].ExpiresAt = &firstExpiration
+	alerts := Derive([]DeviceObservation{device}, nil, 30*time.Minute, fixedTime)
+	if len(alerts) != 1 || alerts[0].Kind != "expired-service-expectation" || !alerts[0].StartedAt.Equal(firstExpiration) || !strings.Contains(alerts[0].Evidence, "Temporary APK test server") {
+		t.Fatalf("expected an evidence-backed expiration alert, got %#v", alerts)
+	}
+	firstInstance := alerts[0].InstanceID
+
+	renewedExpiration := fixedTime.Add(-30 * time.Minute)
+	device.ExpectedServices[0].ExpiresAt = &renewedExpiration
+	alerts = Derive([]DeviceObservation{device}, nil, 30*time.Minute, fixedTime)
+	if len(alerts) != 1 || alerts[0].InstanceID == firstInstance || !alerts[0].StartedAt.Equal(renewedExpiration) {
+		t.Fatalf("each expired renewal must create a distinct alert lifecycle, got %#v", alerts)
 	}
 }
 
@@ -91,7 +119,7 @@ func TestDeriveReportsDriftWhenAProcessJoinsAnApprovedSystemService(t *testing.T
 		DeviceID: "device-a", Label: "mDNS discovery", Protocol: "UDP", Port: 5353, PortEnd: 5353,
 		BindScope: storage.BindScopeWildcard, ProcessNames: []string{"avahi-daemon"}, SystemdUnits: []string{"avahi-daemon.service"},
 	}}
-	alerts := Derive([]DeviceObservation{device}, nil, 30*time.Minute)
+	alerts := Derive([]DeviceObservation{device}, nil, 30*time.Minute, fixedTime)
 	if len(alerts) != 1 || alerts[0].Kind != "service-drift" {
 		t.Fatalf("a newly observed co-owner must require review: %#v", alerts)
 	}
@@ -103,14 +131,14 @@ func TestDeriveRequiresLiveWorkloadEvidenceForWorkloadBaseline(t *testing.T) {
 		DeviceID: "device-a", Label: "HTTPS", Protocol: "TCP", Port: 443, PortEnd: 443,
 		BindScope: storage.BindScopeWildcard, ProcessNames: []string{"docker-proxy"}, WorkloadNames: []string{"gateway"}, SystemdUnits: []string{"docker.service"},
 	}}
-	alerts := Derive([]DeviceObservation{device}, nil, 30*time.Minute)
+	alerts := Derive([]DeviceObservation{device}, nil, 30*time.Minute, fixedTime)
 	if len(alerts) != 1 || alerts[0].Kind != "service-drift" {
 		t.Fatalf("a workload-constrained baseline needs current attribution: %#v", alerts)
 	}
 	device.Snapshot.LinuxBaseline = &model.LinuxBaseline{Workloads: &model.WorkloadInventory{Workloads: []model.ContainerWorkload{{
 		Name: "gateway", Ports: []model.ContainerPortBinding{{Protocol: "TCP", Published: true, HostAddress: "0.0.0.0", HostPort: 443}},
 	}}}}
-	if alerts := Derive([]DeviceObservation{device}, nil, 30*time.Minute); len(alerts) != 0 {
+	if alerts := Derive([]DeviceObservation{device}, nil, 30*time.Minute, fixedTime); len(alerts) != 0 {
 		t.Fatalf("matching live workload attribution should satisfy the baseline: %#v", alerts)
 	}
 }
@@ -124,11 +152,11 @@ func TestDeriveAllowsDockerServiceEvidenceForLegacyWorkloadBaseline(t *testing.T
 	device.Snapshot.LinuxBaseline = &model.LinuxBaseline{Workloads: &model.WorkloadInventory{Runtime: "docker", Workloads: []model.ContainerWorkload{{
 		Name: "gateway", Ports: []model.ContainerPortBinding{{Protocol: "TCP", Published: true, HostAddress: "0.0.0.0", HostPort: 443}},
 	}}}}
-	if alerts := Derive([]DeviceObservation{device}, nil, 30*time.Minute); len(alerts) != 0 {
+	if alerts := Derive([]DeviceObservation{device}, nil, 30*time.Minute, fixedTime); len(alerts) != 0 {
 		t.Fatalf("Docker's own service unit should not invalidate a matching legacy workload baseline: %#v", alerts)
 	}
 	device.Snapshot.Connections[0].SystemdUnit = "unexpected.service"
-	alerts := Derive([]DeviceObservation{device}, nil, 30*time.Minute)
+	alerts := Derive([]DeviceObservation{device}, nil, 30*time.Minute, fixedTime)
 	if len(alerts) != 1 || alerts[0].Kind != "service-drift" {
 		t.Fatalf("an unrelated service unit must still require review: %#v", alerts)
 	}
@@ -142,7 +170,7 @@ func TestDeriveClassifiesFreshnessAndOrdersSeverity(t *testing.T) {
 	awaiting.Device.ID = "device-b"
 	awaiting.Device.DisplayName = "Test laptop"
 	awaiting.Snapshot = nil
-	alerts := Derive([]DeviceObservation{stale, awaiting}, nil, 30*time.Minute)
+	alerts := Derive([]DeviceObservation{stale, awaiting}, nil, 30*time.Minute, fixedTime)
 	if len(alerts) != 3 || alerts[0].Kind != "stale-agent" || alerts[0].StartedAt != fixedTime.Add(-30*time.Minute) {
 		t.Fatalf("expected medium stale alert before low alerts: %#v", alerts)
 	}

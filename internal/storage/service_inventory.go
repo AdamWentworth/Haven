@@ -20,21 +20,24 @@ const (
 	BindScopePrivate  = "private"
 	BindScopeWildcard = "wildcard"
 	BindScopeSpecific = "specific"
+
+	MaximumExpectedServiceLifetime = 30 * 24 * time.Hour
 )
 
 type ExpectedService struct {
-	ID            string    `json:"id"`
-	DeviceID      string    `json:"deviceId"`
-	Label         string    `json:"label"`
-	Protocol      string    `json:"protocol"`
-	Port          int       `json:"port"`
-	PortEnd       int       `json:"portEnd"`
-	BindScope     string    `json:"bindScope"`
-	ProcessNames  []string  `json:"processNames"`
-	WorkloadNames []string  `json:"workloadNames"`
-	SystemdUnits  []string  `json:"systemdUnits"`
-	CreatedAt     time.Time `json:"createdAt"`
-	UpdatedAt     time.Time `json:"updatedAt"`
+	ID            string     `json:"id"`
+	DeviceID      string     `json:"deviceId"`
+	Label         string     `json:"label"`
+	Protocol      string     `json:"protocol"`
+	Port          int        `json:"port"`
+	PortEnd       int        `json:"portEnd"`
+	BindScope     string     `json:"bindScope"`
+	ProcessNames  []string   `json:"processNames"`
+	WorkloadNames []string   `json:"workloadNames"`
+	SystemdUnits  []string   `json:"systemdUnits"`
+	ExpiresAt     *time.Time `json:"expiresAt"`
+	CreatedAt     time.Time  `json:"createdAt"`
+	UpdatedAt     time.Time  `json:"updatedAt"`
 }
 
 type ObservedListener struct {
@@ -145,6 +148,17 @@ func normalizeExpectedService(service ExpectedService) (ExpectedService, error) 
 	if service.PortEnd == 0 {
 		service.PortEnd = service.Port
 	}
+	referenceTime := service.UpdatedAt.UTC()
+	if referenceTime.IsZero() {
+		referenceTime = time.Now().UTC()
+	}
+	if service.ExpiresAt != nil {
+		expiresAt := service.ExpiresAt.UTC()
+		if !expiresAt.After(referenceTime) || expiresAt.After(referenceTime.Add(MaximumExpectedServiceLifetime)) {
+			return ExpectedService{}, errors.New("invalid expected service expiration")
+		}
+		service.ExpiresAt = &expiresAt
+	}
 	canonicalNames := func(values []string, trimExecutable bool) ([]string, error) {
 		canonical := make(map[string]struct{}, len(values))
 		for _, value := range values {
@@ -225,14 +239,15 @@ func (store *Store) UpsertExpectedService(ctx context.Context, service ExpectedS
 	}
 	var id string
 	err = store.database.QueryRowContext(ctx,
-		`INSERT INTO expected_services (id, device_id, label, protocol, port, port_end, bind_scope, process_names, workload_names, systemd_units, created_at, updated_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+		`INSERT INTO expected_services (id, device_id, label, protocol, port, port_end, bind_scope, process_names, workload_names, systemd_units, expires_at, created_at, updated_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 		 ON CONFLICT(device_id, protocol, port, port_end, bind_scope, process_names, workload_names, systemd_units) DO UPDATE SET
 			label = excluded.label,
+			expires_at = excluded.expires_at,
 			updated_at = excluded.updated_at
 		 RETURNING id`,
 		service.ID, service.DeviceID, service.Label, service.Protocol, service.Port, service.PortEnd, service.BindScope, processNames, workloadNames, systemdUnits,
-		created.Format(time.RFC3339Nano), now.Format(time.RFC3339Nano)).Scan(&id)
+		databaseTimeValue(service.ExpiresAt), created.Format(time.RFC3339Nano), now.Format(time.RFC3339Nano)).Scan(&id)
 	if err != nil {
 		return ExpectedService{}, fmt.Errorf("save expected service: %w", err)
 	}
@@ -291,13 +306,14 @@ func (store *Store) UpsertExpectedServices(ctx context.Context, services []Expec
 			return nil, err
 		}
 		_, err = transaction.ExecContext(ctx,
-			`INSERT INTO expected_services (id, device_id, label, protocol, port, port_end, bind_scope, process_names, workload_names, systemd_units, created_at, updated_at)
-			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+			`INSERT INTO expected_services (id, device_id, label, protocol, port, port_end, bind_scope, process_names, workload_names, systemd_units, expires_at, created_at, updated_at)
+			 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
 			 ON CONFLICT(device_id, protocol, port, port_end, bind_scope, process_names, workload_names, systemd_units) DO UPDATE SET
 				label = excluded.label,
+				expires_at = excluded.expires_at,
 				updated_at = excluded.updated_at`,
 			service.ID, service.DeviceID, service.Label, service.Protocol, service.Port, service.PortEnd,
-			service.BindScope, processNames, workloadNames, systemdUnits, service.CreatedAt.UTC().Format(time.RFC3339Nano), service.UpdatedAt.UTC().Format(time.RFC3339Nano))
+			service.BindScope, processNames, workloadNames, systemdUnits, databaseTimeValue(service.ExpiresAt), service.CreatedAt.UTC().Format(time.RFC3339Nano), service.UpdatedAt.UTC().Format(time.RFC3339Nano))
 		if err != nil {
 			return nil, fmt.Errorf("save expected service batch: %w", err)
 		}
@@ -311,10 +327,11 @@ func (store *Store) UpsertExpectedServices(ctx context.Context, services []Expec
 func (store *Store) expectedService(ctx context.Context, id string) (ExpectedService, error) {
 	var service ExpectedService
 	var processNames, workloadNames, systemdUnits, created, updated string
+	var expiresAt sql.NullString
 	err := store.database.QueryRowContext(ctx,
-		`SELECT id, device_id, label, protocol, port, port_end, bind_scope, process_names, workload_names, systemd_units, created_at, updated_at
+		`SELECT id, device_id, label, protocol, port, port_end, bind_scope, process_names, workload_names, systemd_units, expires_at, created_at, updated_at
 		 FROM expected_services WHERE id = ?`, id).
-		Scan(&service.ID, &service.DeviceID, &service.Label, &service.Protocol, &service.Port, &service.PortEnd, &service.BindScope, &processNames, &workloadNames, &systemdUnits, &created, &updated)
+		Scan(&service.ID, &service.DeviceID, &service.Label, &service.Protocol, &service.Port, &service.PortEnd, &service.BindScope, &processNames, &workloadNames, &systemdUnits, &expiresAt, &created, &updated)
 	if err != nil {
 		return ExpectedService{}, err
 	}
@@ -322,6 +339,9 @@ func (store *Store) expectedService(ctx context.Context, id string) (ExpectedSer
 		return ExpectedService{}, err
 	}
 	if service.UpdatedAt, err = parseDatabaseTime(updated); err != nil {
+		return ExpectedService{}, err
+	}
+	if service.ExpiresAt, err = optionalDatabaseTime(expiresAt); err != nil {
 		return ExpectedService{}, err
 	}
 	if err := json.Unmarshal([]byte(processNames), &service.ProcessNames); err != nil {
@@ -337,8 +357,20 @@ func (store *Store) expectedService(ctx context.Context, id string) (ExpectedSer
 }
 
 func (store *Store) ListExpectedServices(ctx context.Context, deviceID string) ([]ExpectedService, error) {
+	return store.listExpectedServices(ctx, deviceID, false)
+}
+
+// ListExpectedServicesIncludingExpired is reserved for server-side projections
+// that need expiration evidence to create a new review lifecycle. User-facing
+// APIs should use ListExpectedServices so expired trust never appears active.
+func (store *Store) ListExpectedServicesIncludingExpired(ctx context.Context, deviceID string) ([]ExpectedService, error) {
+	return store.listExpectedServices(ctx, deviceID, true)
+}
+
+func (store *Store) listExpectedServices(ctx context.Context, deviceID string, includeExpired bool) ([]ExpectedService, error) {
+	now := time.Now().UTC()
 	rows, err := store.database.QueryContext(ctx,
-		`SELECT id, device_id, label, protocol, port, port_end, bind_scope, process_names, workload_names, systemd_units, created_at, updated_at
+		`SELECT id, device_id, label, protocol, port, port_end, bind_scope, process_names, workload_names, systemd_units, expires_at, created_at, updated_at
 		 FROM expected_services WHERE device_id = ? ORDER BY protocol, port, port_end, bind_scope`, deviceID)
 	if err != nil {
 		return nil, err
@@ -348,7 +380,8 @@ func (store *Store) ListExpectedServices(ctx context.Context, deviceID string) (
 	for rows.Next() {
 		var service ExpectedService
 		var processNames, workloadNames, systemdUnits, created, updated string
-		if err := rows.Scan(&service.ID, &service.DeviceID, &service.Label, &service.Protocol, &service.Port, &service.PortEnd, &service.BindScope, &processNames, &workloadNames, &systemdUnits, &created, &updated); err != nil {
+		var expiresAt sql.NullString
+		if err := rows.Scan(&service.ID, &service.DeviceID, &service.Label, &service.Protocol, &service.Port, &service.PortEnd, &service.BindScope, &processNames, &workloadNames, &systemdUnits, &expiresAt, &created, &updated); err != nil {
 			return nil, err
 		}
 		if service.CreatedAt, err = parseDatabaseTime(created); err != nil {
@@ -356,6 +389,12 @@ func (store *Store) ListExpectedServices(ctx context.Context, deviceID string) (
 		}
 		if service.UpdatedAt, err = parseDatabaseTime(updated); err != nil {
 			return nil, err
+		}
+		if service.ExpiresAt, err = optionalDatabaseTime(expiresAt); err != nil {
+			return nil, err
+		}
+		if !includeExpired && service.ExpiresAt != nil && !service.ExpiresAt.After(now) {
+			continue
 		}
 		if err := json.Unmarshal([]byte(processNames), &service.ProcessNames); err != nil {
 			return nil, fmt.Errorf("decode expected service processes: %w", err)
@@ -369,6 +408,13 @@ func (store *Store) ListExpectedServices(ctx context.Context, deviceID string) (
 		services = append(services, service)
 	}
 	return services, rows.Err()
+}
+
+func databaseTimeValue(value *time.Time) any {
+	if value == nil {
+		return nil
+	}
+	return value.UTC().Format(time.RFC3339Nano)
 }
 
 func (store *Store) RemoveExpectedService(ctx context.Context, deviceID, id string) error {

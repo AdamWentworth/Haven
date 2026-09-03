@@ -121,6 +121,10 @@ export function expectedServiceOwnerConstrained(service: ExpectedService) {
 }
 
 export function expectedServiceMatches(listener: LogicalListener, service: ExpectedService, inventory: WorkloadInventory | null) {
+  if (service.expiresAt) {
+    const expiresAt = new Date(service.expiresAt).valueOf();
+    if (!Number.isFinite(expiresAt) || expiresAt <= Date.now()) return false;
+  }
   const portEnd = service.portEnd || service.port;
   if (service.protocol !== listener.protocol || listener.port < service.port || listener.port > portEnd || (service.bindScope !== "any" && service.bindScope !== listener.bindScope)) return false;
   const processNames = service.processNames || [];

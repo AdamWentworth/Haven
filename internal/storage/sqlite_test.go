@@ -407,6 +407,66 @@ func TestExpectedServiceBatchSupportsOwnerConstrainedRanges(t *testing.T) {
 	}
 }
 
+func TestTemporaryExpectedServiceExpiresAndCanBeRenewed(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "haven.db")
+	store, err := Open(ctx, path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = store.Close() }()
+	now := time.Now().UTC()
+	snapshot := model.SecuritySnapshot{CollectedAt: now, Device: model.DeviceSummary{DeviceID: "temporary-test", HostName: "temporary-test", OperatingSystem: "Ubuntu"}}
+	if err := store.SaveSnapshot(ctx, snapshot); err != nil {
+		t.Fatal(err)
+	}
+	expiresAt := now.Add(8 * time.Hour)
+	created, err := store.UpsertExpectedService(ctx, ExpectedService{DeviceID: "temporary-test", Label: "Development server", Protocol: "TCP", Port: 8765, BindScope: BindScopeWildcard, SystemdUnits: []string{"dev-server.service"}, ExpiresAt: &expiresAt, UpdatedAt: now})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if created.ExpiresAt == nil || !created.ExpiresAt.Equal(expiresAt) {
+		t.Fatalf("expected a persisted expiration, got %#v", created)
+	}
+	renewedUntil := now.Add(24 * time.Hour)
+	renewed, err := store.UpsertExpectedService(ctx, ExpectedService{DeviceID: "temporary-test", Label: "Development server", Protocol: "TCP", Port: 8765, BindScope: BindScopeWildcard, SystemdUnits: []string{"dev-server.service"}, ExpiresAt: &renewedUntil, UpdatedAt: now.Add(time.Minute)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if renewed.ID != created.ID || renewed.ExpiresAt == nil || !renewed.ExpiresAt.Equal(renewedUntil) {
+		t.Fatalf("expected renewal to update the same classification, got %#v", renewed)
+	}
+	if err := store.Close(); err != nil {
+		t.Fatal(err)
+	}
+	store, err = Open(ctx, path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	services, err := store.ListExpectedServices(ctx, "temporary-test")
+	if err != nil || len(services) != 1 || services[0].ExpiresAt == nil || !services[0].ExpiresAt.Equal(renewedUntil) {
+		t.Fatalf("temporary classification must survive a hub restart: services=%#v err=%v", services, err)
+	}
+	if _, err := store.database.ExecContext(ctx, `UPDATE expected_services SET expires_at = ? WHERE id = ?`, now.Add(-time.Second).Format(time.RFC3339Nano), renewed.ID); err != nil {
+		t.Fatal(err)
+	}
+	services, err = store.ListExpectedServices(ctx, "temporary-test")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(services) != 0 {
+		t.Fatalf("expired classifications must not remain active, got %#v", services)
+	}
+	allServices, err := store.ListExpectedServicesIncludingExpired(ctx, "temporary-test")
+	if err != nil || len(allServices) != 1 || allServices[0].ExpiresAt == nil || allServices[0].ExpiresAt.After(time.Now().UTC()) {
+		t.Fatalf("server projections must retain expiration evidence: services=%#v err=%v", allServices, err)
+	}
+	tooLate := now.Add(MaximumExpectedServiceLifetime + time.Hour)
+	if _, err := store.UpsertExpectedService(ctx, ExpectedService{DeviceID: "temporary-test", Label: "Too long", Protocol: "TCP", Port: 9000, BindScope: BindScopeWildcard, ExpiresAt: &tooLate, UpdatedAt: now}); err == nil {
+		t.Fatal("expected an overlong temporary classification to be rejected")
+	}
+}
+
 func TestExpectedServiceMigrationPreservesVersionSevenRows(t *testing.T) {
 	ctx := context.Background()
 	path := filepath.Join(t.TempDir(), "haven.db")

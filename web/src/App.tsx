@@ -151,6 +151,16 @@ function formatRelativeTime(value: string | null | undefined, fallback = "not re
   return `${Math.floor(elapsedHours / 24)} days ago`;
 }
 
+function formatTimeRemaining(value: string) {
+  const remainingSeconds = Math.max(0, Math.ceil((new Date(value).valueOf() - Date.now()) / 1000));
+  if (remainingSeconds < 60) return "less than 1 min";
+  const minutes = Math.ceil(remainingSeconds / 60);
+  if (minutes < 60) return `${minutes} min`;
+  const hours = Math.ceil(minutes / 60);
+  if (hours < 48) return `${hours} hr`;
+  return `${Math.ceil(hours / 24)} days`;
+}
+
 function formatDuration(value: number | null) {
   if (value === null || !Number.isFinite(value)) return "Uptime unavailable";
   const totalHours = Math.floor(value / 3600);
@@ -209,7 +219,7 @@ function knownSystemdLabel(unit: string) {
 	return "";
 }
 
-function suggestedBaseline(deviceId: string, operatingSystem: string, listeners: LogicalListener[], inventory: WorkloadInventory | null, expectedServices: ExpectedService[]) {
+export function suggestedBaseline(deviceId: string, operatingSystem: string, listeners: LogicalListener[], inventory: WorkloadInventory | null, expectedServices: ExpectedService[]) {
 	const suggestions: BaselineSuggestion[] = [];
 	const isWindows = /windows/i.test(operatingSystem);
 	const unreviewed = listeners.filter((listener) => !expectedServices.some((service) => expectedServiceMatches(listener, service, inventory)));
@@ -300,6 +310,22 @@ function suggestedBaseline(deviceId: string, operatingSystem: string, listeners:
 				description: `Covers ${grouped.length} current TCP listener${grouped.length === 1 ? "" : "s"} in the Linux ephemeral range 32768–60999, but only while owned by containerd.service${processes.length ? ` and process${processes.length === 1 ? "" : "es"} ${processes.join(", ")}` : ""}.`,
 				listenerKeys: grouped.map((listener) => listener.key),
 				services: [{ deviceId, label: "containerd internal runtime listeners", protocol: "TCP", port: 32768, portEnd: 60999, bindScope: scope, processNames: processes, workloadNames: [], systemdUnits: ["containerd.service"] }],
+			});
+		}
+		const avahiByScope = new Map<LogicalListener["bindScope"], LogicalListener[]>();
+		for (const listener of unreviewed) {
+			const units = listener.systemdUnits.map((unit) => canonicalOwnerName(unit));
+			if (listener.protocol !== "UDP" || listener.port < 32768 || listener.port > 60999 || units.length === 0 || !units.every((unit) => unit === "avahi-daemon.service")) continue;
+			avahiByScope.set(listener.bindScope, [...(avahiByScope.get(listener.bindScope) || []), listener]);
+		}
+		for (const [scope, grouped] of avahiByScope) {
+			const processes = [...new Set(grouped.flatMap((listener) => listener.processes))].sort();
+			suggestions.push({
+				id: `avahi-dynamic:${scope}`,
+				title: "Avahi dynamic mDNS sockets",
+				description: `Covers ${grouped.length} current UDP socket${grouped.length === 1 ? "" : "s"} in this host's Linux dynamic range 32768–60999, but only while attributed to avahi-daemon.service${processes.length ? ` and process${processes.length === 1 ? "" : "es"} ${processes.join(", ")}` : ""}.`,
+				listenerKeys: grouped.map((listener) => listener.key),
+				services: [{ deviceId, label: "Avahi dynamic mDNS sockets", protocol: "UDP", port: 32768, portEnd: 60999, bindScope: scope, processNames: processes, workloadNames: [], systemdUnits: ["avahi-daemon.service"] }],
 			});
 		}
 	}
@@ -629,8 +655,9 @@ function ConnectionsPanel({ deviceId, operatingSystem, connections, workloads, e
 	const [manualScope, setManualScope] = useState<BindScope>("any");
 	const [editingListenerKey, setEditingListenerKey] = useState<string | null>(null);
 	const [listenerLabel, setListenerLabel] = useState("");
+	const [listenerDurationHours, setListenerDurationHours] = useState(0);
 	const listeners = useMemo(() => logicalListeners(connections), [connections]);
-	useEffect(() => { setEditingListenerKey(null); setListenerLabel(""); }, [deviceId]);
+	useEffect(() => { setEditingListenerKey(null); setListenerLabel(""); setListenerDurationHours(0); }, [deviceId]);
 	const active = useMemo(() => connections.filter((connection) => connection.state.toLowerCase() === "established"), [connections]);
 	const expectedFor = useCallback((listener: LogicalListener) => expectedServices.find((service) => expectedServiceMatches(listener, service, workloads)), [expectedServices, workloads]);
 	const reviewListeners = listeners.filter((listener) => listener.bindScope !== "local" && !expectedFor(listener));
@@ -651,16 +678,22 @@ function ConnectionsPanel({ deviceId, operatingSystem, connections, workloads, e
     );
   }, [connections, filter]);
 	const ownerAttributionAvailable = connections.some((connection) => connection.processName || connection.processId > 0 || connection.systemdUnit);
-	const beginExpected = (listener: LogicalListener) => {
+	const beginExpected = (listener: LogicalListener, durationHours = 0) => {
 		setEditingListenerKey(listener.key);
 		setListenerLabel(`${listener.protocol} ${listener.port}`);
+		setListenerDurationHours(durationHours);
 	};
 	const markExpected = (event: React.FormEvent, listener: LogicalListener) => {
 		event.preventDefault();
 		if (!listenerLabel.trim()) return;
-		saveExpectation({ deviceId, label: listenerLabel.trim(), protocol: listener.protocol, port: listener.port, portEnd: listener.port, bindScope: listener.bindScope, processNames: listener.processes, workloadNames: workloadAttribution(listener, workloads).map(({ workload }) => workload.name), systemdUnits: listener.systemdUnits });
+		const expiresAt = listenerDurationHours > 0 ? new Date(Date.now() + listenerDurationHours * 60 * 60 * 1000).toISOString() : null;
+		saveExpectation({ deviceId, label: listenerLabel.trim(), protocol: listener.protocol, port: listener.port, portEnd: listener.port, bindScope: listener.bindScope, processNames: listener.processes, workloadNames: workloadAttribution(listener, workloads).map(({ workload }) => workload.name), systemdUnits: listener.systemdUnits, expiresAt });
 		setEditingListenerKey(null);
 		setListenerLabel("");
+		setListenerDurationHours(0);
+	};
+	const extendExpectation = (service: ExpectedService, durationHours = 8) => {
+		saveExpectation({ deviceId: service.deviceId, label: service.label, protocol: service.protocol, port: service.port, portEnd: service.portEnd, bindScope: service.bindScope, processNames: service.processNames, workloadNames: service.workloadNames, systemdUnits: service.systemdUnits, expiresAt: new Date(Date.now() + durationHours * 60 * 60 * 1000).toISOString() });
 	};
 	const addManual = (event: React.FormEvent) => {
 		event.preventDefault();
@@ -699,19 +732,21 @@ function ConnectionsPanel({ deviceId, operatingSystem, connections, workloads, e
 		  const observation = observationFor(listener);
 		  const attributions = workloadAttribution(listener, workloads);
 		  const recentlyAppeared = !!observation && Date.now() - new Date(observation.appearedAt).valueOf() < 24 * 60 * 60 * 1000;
-		  const statusLabel = expectation ? "expected" : listener.bindScope === "local" ? recentlyAppeared ? "new · local only" : "local only" : recentlyAppeared ? "new · unreviewed" : "unreviewed";
+		  const statusLabel = expectation?.expiresAt ? `temporary · ${formatTimeRemaining(expectation.expiresAt)}` : expectation ? "expected" : listener.bindScope === "local" ? recentlyAppeared ? "new · local only" : "local only" : recentlyAppeared ? "new · unreviewed" : "unreviewed";
 		  const ownerConstraints = [...listener.processes, ...listener.systemdUnits, ...attributions.map(({ workload }) => workload.name)];
 		  return <article className={`service-card ${expectation ? "expected" : listener.bindScope === "local" ? "local" : "review"}`} key={listener.key}>
 			<div className="service-card-heading"><div><span className="protocol">{listener.protocol}</span><strong>Port {listener.port}</strong></div><StatusChip label={statusLabel} tone={expectation ? "healthy" : listener.bindScope === "local" ? "configured" : "attention"} /></div>
 			<h3>{expectation?.label || (attributions.length === 1 ? attributions[0].workload.name : `${listener.protocol} service on port ${listener.port}`)}</h3>
 			<dl><div><dt>Bind scope</dt><dd>{bindScopeLabel(listener.bindScope)}</dd></div><div><dt>State</dt><dd>{listener.state}</dd></div><div><dt>Addresses</dt><dd className="endpoint">{listener.addresses.join(", ") || "Not reported"}</dd></div>{listener.processes.length > 0 && <div><dt>Host process</dt><dd>{listener.processes.join(", ")}</dd></div>}{listener.systemdUnits.length > 0 && <div><dt>System service</dt><dd>{listener.systemdUnits.join(", ")}</dd></div>}{attributions.length > 0 && <><div><dt>Runtime owner</dt><dd>{attributions.map(({ workload }) => workload.name).join(", ")}</dd></div><div><dt>Docker mapping</dt><dd className="endpoint">{attributions.flatMap(({ bindings }) => bindings).map(formatPortBinding).join(", ")}</dd></div></>}</dl>
 			<p>{observation ? `First observed ${formatDate(observation.firstSeenAt)} · continuously present since ${formatDate(observation.appearedAt)} · last confirmed ${formatRelativeTime(observation.lastSeenAt)}` : "Appearance history will begin with the next agent report."}{listener.rawCount > 1 ? ` · ${listener.rawCount} raw sockets grouped` : ""}</p>
+			{expectation?.expiresAt && <p className="footnote"><strong>Temporary expectation.</strong> Expires in {formatTimeRemaining(expectation.expiresAt)} on {formatDate(expectation.expiresAt)}; this listener will require review again if it is still present.</p>}
 			{expectation && !expectedServiceOwnerConstrained(expectation) && <p className="footnote"><strong>Port-only expectation.</strong> HAVEN checks this endpoint and bind scope, but any reported owner can satisfy the saved rule.</p>}
-			{expectation ? <button className="secondary-action" type="button" disabled={busy} onClick={() => removeExpectation(expectation)}>Remove expectation</button> : editingListenerKey === listener.key ? <form className="service-expectation-editor" onSubmit={(event) => markExpected(event, listener)}>
+			{expectation ? <div className="listener-review-actions">{expectation.expiresAt && <button className="secondary-action" type="button" disabled={busy} onClick={() => extendExpectation(expectation)}>Extend 8 hours</button>}<button className="secondary-action" type="button" disabled={busy} onClick={() => removeExpectation(expectation)}>Remove expectation</button></div> : editingListenerKey === listener.key ? <form className="service-expectation-editor" onSubmit={(event) => markExpected(event, listener)}>
 			  <label htmlFor={`listener-label-${listener.key}`}><span>Friendly label</span><input id={`listener-label-${listener.key}`} maxLength={80} autoFocus value={listenerLabel} onChange={(event) => setListenerLabel(event.target.value)} /></label>
-			  <small>Matches {listener.protocol} {listener.port}, {bindScopeLabel(listener.bindScope).toLowerCase()}{ownerConstraints.length ? `, and current owner${ownerConstraints.length === 1 ? "" : "s"}: ${ownerConstraints.join(", ")}` : ""}.</small>
-			  <div><button type="submit" disabled={busy || !listenerLabel.trim()}>{busy ? "Saving…" : "Save expectation"}</button><button className="secondary-action" type="button" disabled={busy} onClick={() => { setEditingListenerKey(null); setListenerLabel(""); }}>Cancel</button></div>
-			</form> : <button className="secondary-action" type="button" disabled={busy} onClick={() => beginExpected(listener)}>Mark expected…</button>}
+			  <label htmlFor={`listener-duration-${listener.key}`}><span>Duration</span><select id={`listener-duration-${listener.key}`} value={listenerDurationHours} onChange={(event) => setListenerDurationHours(Number(event.target.value))}><option value={0}>Permanent</option><option value={1}>1 hour</option><option value={8}>8 hours</option><option value={24}>24 hours</option><option value={168}>7 days</option></select></label>
+			  <small>Matches {listener.protocol} {listener.port}, {bindScopeLabel(listener.bindScope).toLowerCase()}{ownerConstraints.length ? `, and current owner${ownerConstraints.length === 1 ? "" : "s"}: ${ownerConstraints.join(", ")}` : ""}. Temporary expectations expire on the hub even when this browser is closed.</small>
+			  <div><button type="submit" disabled={busy || !listenerLabel.trim()}>{busy ? "Saving…" : listenerDurationHours > 0 ? "Save temporary expectation" : "Save expectation"}</button><button className="secondary-action" type="button" disabled={busy} onClick={() => { setEditingListenerKey(null); setListenerLabel(""); setListenerDurationHours(0); }}>Cancel</button></div>
+			</form> : <div className="listener-review-actions"><button className="secondary-action" type="button" disabled={busy} onClick={() => beginExpected(listener)}>Mark expected…</button><button className="secondary-action" type="button" disabled={busy} onClick={() => beginExpected(listener, 8)}>Expect temporarily…</button></div>}
 		  </article>;
 		})}
 	  </div>}
@@ -720,7 +755,7 @@ function ConnectionsPanel({ deviceId, operatingSystem, connections, workloads, e
 		<summary>Manage expected-service registry ({expectedServices.length})</summary>
 		<p>Expectations are local HAVEN metadata. They do not open ports or change firewall rules.</p>
 		<form className="expectation-form" onSubmit={addManual}><label><span>Friendly label</span><input maxLength={80} value={manualLabel} onChange={(event) => setManualLabel(event.target.value)} placeholder="SSH" /></label><label><span>Protocol</span><select value={manualProtocol} onChange={(event) => setManualProtocol(event.target.value as "TCP" | "UDP")}><option>TCP</option><option>UDP</option></select></label><label><span>Port</span><input type="number" min={1} max={65535} value={manualPort} onChange={(event) => setManualPort(event.target.value)} placeholder="22" /></label><label><span>Expected bind</span><select value={manualScope} onChange={(event) => setManualScope(event.target.value as BindScope)}><option value="any">Any bind</option><option value="local">This host only</option><option value="private">Private address</option><option value="wildcard">All interfaces</option><option value="specific">Specific address</option></select></label><button type="submit" disabled={busy || !manualLabel.trim() || !manualPort}>Add expectation</button></form>
-		{expectedServices.length > 0 && <ul className="registry-list">{expectedServices.map((service) => <li key={service.id}><span><strong>{service.label}</strong><small>{service.protocol} {service.portEnd > service.port ? `${service.port}–${service.portEnd}` : service.port} · {bindScopeLabel(service.bindScope)}{service.processNames?.length ? ` · processes: ${service.processNames.join(", ")}` : ""}{service.workloadNames?.length ? ` · workloads: ${service.workloadNames.join(", ")}` : ""}{service.systemdUnits?.length ? ` · services: ${service.systemdUnits.join(", ")}` : ""}{!expectedServiceOwnerConstrained(service) ? " · owner not constrained" : ""}</small></span><button type="button" disabled={busy} onClick={() => removeExpectation(service)}>Remove</button></li>)}</ul>}
+		{expectedServices.length > 0 && <ul className="registry-list">{expectedServices.map((service) => <li key={service.id}><span><strong>{service.label}</strong><small>{service.protocol} {service.portEnd > service.port ? `${service.port}–${service.portEnd}` : service.port} · {bindScopeLabel(service.bindScope)}{service.processNames?.length ? ` · processes: ${service.processNames.join(", ")}` : ""}{service.workloadNames?.length ? ` · workloads: ${service.workloadNames.join(", ")}` : ""}{service.systemdUnits?.length ? ` · services: ${service.systemdUnits.join(", ")}` : ""}{!expectedServiceOwnerConstrained(service) ? " · owner not constrained" : ""}{service.expiresAt ? ` · temporary, expires ${formatDate(service.expiresAt)}` : ""}</small></span><button type="button" disabled={busy} onClick={() => removeExpectation(service)}>Remove</button></li>)}</ul>}
 	  </details>
 	  <details className="raw-endpoints">
 		<summary>Raw technical details ({connections.length})</summary>

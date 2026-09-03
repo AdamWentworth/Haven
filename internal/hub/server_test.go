@@ -363,10 +363,17 @@ func TestExpectedServiceAndListenerEndpoints(t *testing.T) {
 	}
 
 	create := httptest.NewRecorder()
-	createBody := strings.NewReader(`{"deviceId":"test-device","label":"HAVEN UI","protocol":"TCP","port":8443,"bindScope":"wildcard"}`)
+	expiresAt := time.Now().UTC().Add(time.Hour).Format(time.RFC3339Nano)
+	createBody := strings.NewReader(`{"deviceId":"test-device","label":"HAVEN UI","protocol":"TCP","port":8443,"bindScope":"wildcard","expiresAt":"` + expiresAt + `"}`)
 	server.Handler().ServeHTTP(create, httptest.NewRequest(http.MethodPost, "/api/expected-services", createBody))
-	if create.Code != http.StatusOK || !strings.Contains(create.Body.String(), `"label":"HAVEN UI"`) {
+	if create.Code != http.StatusOK || !strings.Contains(create.Body.String(), `"label":"HAVEN UI"`) || !strings.Contains(create.Body.String(), `"expiresAt":"`) {
 		t.Fatalf("unexpected expected-service create response: %d %s", create.Code, create.Body.String())
+	}
+	tooLate := time.Now().UTC().Add(storage.MaximumExpectedServiceLifetime + time.Hour).Format(time.RFC3339Nano)
+	rejected := httptest.NewRecorder()
+	server.Handler().ServeHTTP(rejected, httptest.NewRequest(http.MethodPost, "/api/expected-services", strings.NewReader(`{"deviceId":"test-device","label":"Too long","protocol":"TCP","port":9000,"bindScope":"wildcard","expiresAt":"`+tooLate+`"}`)))
+	if rejected.Code != http.StatusBadRequest {
+		t.Fatalf("overlong temporary expectations must be rejected: %d %s", rejected.Code, rejected.Body.String())
 	}
 	var expected storage.ExpectedService
 	if err := json.NewDecoder(create.Body).Decode(&expected); err != nil {

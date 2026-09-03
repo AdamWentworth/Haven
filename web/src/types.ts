@@ -177,6 +177,7 @@ export interface ExpectedServiceInput {
   processNames: string[];
   workloadNames: string[];
   systemdUnits: string[];
+	expiresAt?: string | null;
 }
 
 export interface ExpectedService {
@@ -190,6 +191,7 @@ export interface ExpectedService {
   processNames: string[];
   workloadNames: string[];
   systemdUnits: string[];
+	expiresAt: string | null;
   createdAt: string;
   updatedAt: string;
 }

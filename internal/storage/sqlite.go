@@ -347,6 +347,13 @@ var migrations = []migration{
 			`CREATE INDEX push_deliveries_subscription ON push_deliveries (subscription_id, first_queued_at DESC)`,
 		},
 	},
+	{
+		version: 11,
+		statements: []string{
+			`ALTER TABLE expected_services ADD COLUMN expires_at TEXT`,
+			`CREATE INDEX expected_services_expiration ON expected_services (device_id, expires_at)`,
+		},
+	},
 }
 
 func Open(ctx context.Context, path string) (*Store, error) {

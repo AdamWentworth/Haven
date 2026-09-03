@@ -17,7 +17,7 @@ function device(id: string, name: string, address: string, connections: NetworkC
 }
 
 function expected(overrides: Partial<ExpectedService> = {}): ExpectedService {
-  return { id: "svc", deviceId: "device", label: "HTTPS", protocol: "TCP", port: 443, portEnd: 443, bindScope: "wildcard", processNames: [], workloadNames: [], systemdUnits: [], createdAt: at, updatedAt: at, ...overrides };
+  return { id: "svc", deviceId: "device", label: "HTTPS", protocol: "TCP", port: 443, portEnd: 443, bindScope: "wildcard", processNames: [], workloadNames: [], systemdUnits: [], expiresAt: null, createdAt: at, updatedAt: at, ...overrides };
 }
 
 describe("network address facts", () => {
@@ -83,6 +83,13 @@ describe("listener baselines", () => {
     expect(expectedServiceOwnerConstrained(expected({ processNames: ["caddy"] }))).toBe(true);
     expect(expectedServiceOwnerConstrained(expected({ workloadNames: ["gateway"] }))).toBe(true);
     expect(expectedServiceOwnerConstrained(expected({ systemdUnits: ["caddy.service"] }))).toBe(true);
+  });
+
+  it("fails closed after a temporary expectation expires", () => {
+    const listener = logicalListeners([connection()])[0];
+    expect(expectedServiceMatches(listener, expected({ expiresAt: new Date(Date.now() + 60_000).toISOString() }), null)).toBe(true);
+    expect(expectedServiceMatches(listener, expected({ expiresAt: new Date(Date.now() - 60_000).toISOString() }), null)).toBe(false);
+    expect(expectedServiceMatches(listener, expected({ expiresAt: "not-a-timestamp" }), null)).toBe(false);
   });
 
   it("requires a live workload mapping for a workload-constrained baseline", () => {

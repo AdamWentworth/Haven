@@ -66,7 +66,7 @@ func (projector *Projector) Current(ctx context.Context, demoMode bool) ([]model
 			evaluated := posture.Evaluate(*detail.Snapshot, now)
 			detail.Snapshot = &evaluated
 		}
-		expected, err := projector.store.ListExpectedServices(ctx, device.ID)
+		expected, err := projector.store.ListExpectedServicesIncludingExpired(ctx, device.ID)
 		if err != nil {
 			return nil, fmt.Errorf("load alert service baseline for %s: %w", device.ID, err)
 		}
@@ -76,12 +76,13 @@ func (projector *Projector) Current(ctx context.Context, demoMode bool) ([]model
 		}
 		observations = append(observations, DeviceObservation{Device: device, Snapshot: detail.Snapshot, ExpectedServices: expected, Listeners: listeners})
 	}
-	return Derive(observations, events, storage.EnrolledDeviceStaleAfter), nil
+	return Derive(observations, events, storage.EnrolledDeviceStaleAfter, now), nil
 }
 
 // Derive is pure so alert hypotheses can be exercised with fixed evidence in
 // tests. It never performs discovery, threat scoring, or network scanning.
-func Derive(devices []DeviceObservation, events []model.SecurityEvent, freshnessAllowance time.Duration) []model.Alert {
+func Derive(devices []DeviceObservation, events []model.SecurityEvent, freshnessAllowance time.Duration, evaluatedAt time.Time) []model.Alert {
+	evaluatedAt = evaluatedAt.UTC()
 	orderedEvents := append([]model.SecurityEvent(nil), events...)
 	sort.SliceStable(orderedEvents, func(left, right int) bool {
 		if orderedEvents[left].OccurredAt.Equal(orderedEvents[right].OccurredAt) {
@@ -161,8 +162,9 @@ func Derive(devices []DeviceObservation, events []model.SecurityEvent, freshness
 		if device.Snapshot.LinuxBaseline != nil {
 			workloads = device.Snapshot.LinuxBaseline.Workloads
 		}
+		activeServices := activeExpectedServices(device.ExpectedServices, evaluatedAt)
 		for _, listener := range logicalListeners(device.Snapshot.Connections) {
-			if listener.bindScope == storage.BindScopeLocal || anyExpectedServiceMatches(listener, device.ExpectedServices, workloads) {
+			if listener.bindScope == storage.BindScopeLocal || anyExpectedServiceMatches(listener, activeServices, workloads) {
 				continue
 			}
 			startedAt := device.Snapshot.CollectedAt
@@ -172,8 +174,9 @@ func Derive(devices []DeviceObservation, events []model.SecurityEvent, freshness
 					break
 				}
 			}
-			endpointBaselines := matchingEndpointBaselines(listener, device.ExpectedServices)
+			endpointBaselines := matchingEndpointBaselines(listener, activeServices)
 			drift := len(endpointBaselines) > 0
+			expiredExpectation := latestExpiredExpectedServiceMatch(listener, device.ExpectedServices, workloads, evaluatedAt)
 			owners := ownerEvidence(listener, workloads)
 			ownerRevision := "owner-unavailable"
 			if len(owners) > 0 {
@@ -190,7 +193,12 @@ func Derive(devices []DeviceObservation, events []model.SecurityEvent, freshness
 			kind := "new-service"
 			title := "Unreviewed service appeared on " + endpointName
 			summary := "A currently listening non-local service is not covered by an owner-approved baseline. This requires review but is not, by itself, evidence of Internet exposure or compromise."
-			if drift {
+			if expiredExpectation != nil {
+				kind = "expired-service-expectation"
+				title = "Temporary approval expired for " + endpointName
+				summary = "A time-bounded service expectation expired while the listener remained active. Review it again, renew it temporarily, make it permanent, or stop the service."
+				startedAt = expiredExpectation.ExpiresAt.UTC()
+			} else if drift {
 				kind = "service-drift"
 				title = "Service attribution changed for " + endpointName
 				summary = "The port and bind scope match an owner-approved baseline, but its current process, system-service, or workload attribution does not."
@@ -198,6 +206,9 @@ func Derive(devices []DeviceObservation, events []model.SecurityEvent, freshness
 			evidence := bindScopeLabel(listener.bindScope) + " · owner unavailable"
 			if len(owners) > 0 {
 				evidence = bindScopeLabel(listener.bindScope) + " · " + strings.Join(owners, ", ")
+			}
+			if expiredExpectation != nil {
+				evidence = "Expectation \"" + expiredExpectation.Label + "\" expired " + expiredExpectation.ExpiresAt.UTC().Format(time.RFC3339) + " · " + evidence
 			}
 			alerts = append(alerts, model.Alert{
 				ID:         kind + ":" + device.Device.ID + ":" + listener.key,
@@ -310,6 +321,30 @@ func matchingEndpointBaselines(listener logicalListener, services []storage.Expe
 		}
 	}
 	return matching
+}
+
+func activeExpectedServices(services []storage.ExpectedService, evaluatedAt time.Time) []storage.ExpectedService {
+	active := make([]storage.ExpectedService, 0, len(services))
+	for _, service := range services {
+		if service.ExpiresAt == nil || service.ExpiresAt.After(evaluatedAt) {
+			active = append(active, service)
+		}
+	}
+	return active
+}
+
+func latestExpiredExpectedServiceMatch(listener logicalListener, services []storage.ExpectedService, inventory *model.WorkloadInventory, evaluatedAt time.Time) *storage.ExpectedService {
+	var latest *storage.ExpectedService
+	for index := range services {
+		service := &services[index]
+		if service.ExpiresAt == nil || service.ExpiresAt.After(evaluatedAt) || !expectedServiceMatches(listener, *service, inventory) {
+			continue
+		}
+		if latest == nil || service.ExpiresAt.After(*latest.ExpiresAt) {
+			latest = service
+		}
+	}
+	return latest
 }
 
 func endpointMatches(listener logicalListener, service storage.ExpectedService) bool {
