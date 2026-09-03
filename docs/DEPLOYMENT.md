@@ -52,7 +52,7 @@ Backup archives contain security-sensitive private keys and are created with own
 
 ## Native agents
 
-Endpoint agents run directly under Windows Service Control Manager, systemd, or launchd with the smallest privileges their collectors require. The current remote protocol accepts read-only observations through per-device mutual TLS. Remote action execution is not implemented and must not be simulated with a shell or Docker access.
+Endpoint agents run natively with the smallest privileges their collectors require. The current Windows collector is a one-shot executable launched silently by Task Scheduler; Linux uses systemd, and future macOS packaging will use launchd. A future event-driven Windows sensor may use Service Control Manager only when continuous Defender or Windows Event Log monitoring justifies a persistent process. The current remote protocol accepts read-only observations through per-device mutual TLS. Remote action execution is not implemented and must not be simulated with a shell or Docker access.
 
 The Ubuntu application server runs a separate native agent even though it also hosts the hub container. Its stable host identity is independent from both the Linux login name and Docker's ephemeral container hostname. The private deployment extracts the CI-built agent from the same revision-pinned image, enrolls it once as `Ubuntu Application Server`, and schedules reports with the lingering user systemd manager. The reporting service starts without an interactive login, blocks both conventional Docker-socket paths, makes the home and system trees read-only, and writes only its dedicated identity directory.
 
