@@ -171,6 +171,7 @@ Haven/
 │   ├── workload/        # Sanitized, fixed-purpose runtime inventory
 │   └── webui/           # Embedded production assets
 ├── web/                 # React, TypeScript, and Vite source
+├── packaging/           # Generic native service and timer definitions
 ├── docs/                # Architecture, threat model, and publishing policy
 ├── Dockerfile
 └── compose.yaml

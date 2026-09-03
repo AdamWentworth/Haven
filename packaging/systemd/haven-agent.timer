@@ -1,0 +1,12 @@
+[Unit]
+Description=Report native Linux posture to HAVEN every 15 minutes
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=15min
+RandomizedDelaySec=30s
+Persistent=true
+Unit=haven-agent.service
+
+[Install]
+WantedBy=timers.target

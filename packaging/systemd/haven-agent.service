@@ -1,0 +1,27 @@
+[Unit]
+Description=HAVEN native Linux posture agent
+Documentation=https://github.com/AdamWentworth/Haven
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=%h/.local/share/haven/bin/haven-agent report
+TimeoutStartSec=60
+UMask=0077
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectControlGroups=true
+ProtectHome=read-only
+ProtectKernelTunables=true
+ProtectSystem=strict
+ReadWritePaths=%h/.local/share/haven/agent
+InaccessiblePaths=-/run/docker.sock -/var/run/docker.sock
+LockPersonality=true
+MemoryDenyWriteExecute=true
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK
+RestrictNamespaces=true
+RestrictRealtime=true
+RestrictSUIDSGID=true
+SystemCallArchitectures=native
+
