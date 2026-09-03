@@ -62,6 +62,7 @@ main, footer { width: min(1180px, 92vw); margin-inline: auto; }
 .device-button { display: flex; align-items: center; justify-content: space-between; gap: .75rem; min-width: 0; padding: .85rem; border: 1px solid var(--line); border-radius: .8rem; color: inherit; background: rgba(255, 255, 255, .018); text-align: left; cursor: pointer; }
 .device-button:hover, .device-button.selected { border-color: rgba(111, 216, 229, .42); background: rgba(111, 216, 229, .055); }
 .device-button > span:first-child { min-width: 0; }
+.device-identity > span:last-child { min-width: 0; }
 .device-identity, .heading-identity, .hero-identity { display: flex; align-items: center; gap: .75rem; min-width: 0; }
 .device-icon { display: grid; flex: 0 0 auto; width: 2.1rem; height: 2.1rem; place-items: center; border-radius: .65rem; color: var(--cyan); background: rgba(111, 216, 229, .08); }
 .device-icon svg { width: 1.15rem; height: 1.15rem; }
@@ -210,6 +211,7 @@ main, footer { width: min(1180px, 92vw); margin-inline: auto; }
 .action-card button { grid-column: 1 / -1; width: fit-content; }
 .action-card button:disabled { opacity: .5; cursor: wait; }
 .action-history-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 1rem; margin-top: 1rem; padding-top: 1rem; border-top: 1px solid var(--line); }
+.action-history-grid > *, .compact-history li { min-width: 0; }
 .action-history-grid h3 { font-size: .82rem; }
 .compact-history { display: grid; gap: .45rem; margin: 0; padding: 0; list-style: none; }
 .compact-history li { display: flex; align-items: center; justify-content: space-between; gap: .8rem; padding: .65rem; border: 1px solid var(--line); border-radius: .65rem; }
@@ -391,6 +393,7 @@ footer { display: flex; justify-content: space-between; padding: 2.5rem 0 3rem; 
 	.network-device-card dl { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 	.network-device-heading { grid-template-columns: auto 1fr; }
 	.network-device-heading .status-chip { grid-column: 2; width: fit-content; }
+  .device-list { grid-template-columns: 1fr; }
   .section-heading { align-items: start; flex-direction: column; gap: .75rem; }
   .search-field, .search-field input { width: 100%; }
   .finding-heading { grid-template-columns: auto 1fr; }
