@@ -4,6 +4,7 @@ FROM node:24-alpine AS web-build
 WORKDIR /source/web
 COPY web/package.json web/package-lock.json ./
 RUN npm ci
+COPY testdata/ /source/testdata/
 COPY web/ ./
 RUN npm run build
 
