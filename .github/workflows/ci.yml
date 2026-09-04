@@ -137,6 +137,9 @@ jobs:
           if ($source -notmatch 'buildinfo\.Revision=\$revision') {
             throw 'Windows reporter must embed the exact source revision.'
           }
+          if ($source -notmatch 'buildinfo\.AgentInstallation=windows-task') {
+            throw 'Windows background reporter must embed its installation identity for in-place task upgrades.'
+          }
           if ($source -notmatch 'ExpectedSHA256') {
             throw 'Prebuilt Windows reporter installation must require a checksum.'
           }

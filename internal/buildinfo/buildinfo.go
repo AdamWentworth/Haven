@@ -5,3 +5,7 @@ package buildinfo
 const Version = "0.14.0"
 
 var Revision = "development"
+
+// AgentInstallation is stamped only into packaging-specific reporter builds.
+// Interactive binaries retain the safe default.
+var AgentInstallation = "interactive"

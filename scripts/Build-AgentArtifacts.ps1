@@ -25,10 +25,10 @@ $versionMatch = [regex]::Match($versionSource, 'const Version = "([^"]+)"')
 if (-not $versionMatch.Success) { throw 'The HAVEN release version could not be determined.' }
 $version = $versionMatch.Groups[1].Value
 $targets = @(
-    @{ Name = 'haven-agent-windows-amd64.exe'; OS = 'windows'; Architecture = 'amd64'; GUI = $false },
-    @{ Name = 'haven-agent-background-windows-amd64.exe'; OS = 'windows'; Architecture = 'amd64'; GUI = $true },
-    @{ Name = 'haven-agent-linux-amd64'; OS = 'linux'; Architecture = 'amd64'; GUI = $false },
-    @{ Name = 'haven-agent-linux-arm64'; OS = 'linux'; Architecture = 'arm64'; GUI = $false }
+    @{ Name = 'haven-agent-windows-amd64.exe'; OS = 'windows'; Architecture = 'amd64'; GUI = $false; Installation = 'interactive' },
+    @{ Name = 'haven-agent-background-windows-amd64.exe'; OS = 'windows'; Architecture = 'amd64'; GUI = $true; Installation = 'windows-task' },
+    @{ Name = 'haven-agent-linux-amd64'; OS = 'linux'; Architecture = 'amd64'; GUI = $false; Installation = 'interactive' },
+    @{ Name = 'haven-agent-linux-arm64'; OS = 'linux'; Architecture = 'arm64'; GUI = $false; Installation = 'interactive' }
 )
 $originalGOOS = $env:GOOS
 $originalGOARCH = $env:GOARCH
@@ -39,14 +39,14 @@ try {
         $env:GOARCH = $target.Architecture
         $output = Join-Path $resolvedOutput $target.Name
         $linkerFlags = "-s -w -X github.com/AdamWentworth/haven/internal/buildinfo.Revision=$Revision"
-        if ($target.GUI) { $linkerFlags = "-H=windowsgui $linkerFlags" }
+        if ($target.GUI) { $linkerFlags = "-H=windowsgui $linkerFlags -X github.com/AdamWentworth/haven/internal/buildinfo.AgentInstallation=windows-task" }
         Push-Location -LiteralPath $repositoryRoot
         try {
             & go build -trimpath -ldflags $linkerFlags -o $output ./cmd/haven-agent
             if ($LASTEXITCODE -ne 0) { throw "Agent build failed for $($target.Name)." }
         } finally { Pop-Location }
         $hash = (Get-FileHash -LiteralPath $output -Algorithm SHA256).Hash.ToLowerInvariant()
-        $manifest += [ordered]@{ file = $target.Name; os = $target.OS; architecture = $target.Architecture; background = $target.GUI; version = $version; revision = $Revision; sha256 = $hash }
+        $manifest += [ordered]@{ file = $target.Name; os = $target.OS; architecture = $target.Architecture; background = $target.GUI; installation = $target.Installation; version = $version; revision = $Revision; sha256 = $hash }
     }
 } finally {
     $env:GOOS = $originalGOOS
