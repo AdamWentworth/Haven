@@ -4,9 +4,9 @@
 
 HAVEN is a personal security observatory for home devices and networks. It presents native operating-system protections in one understandable console without trying to replace Microsoft Defender, host firewalls, or other trusted security controls.
 
-HAVEN is pre-release software. The current milestone turns its authenticated endpoint, network, and bounded NAS observations into a navigable console while hardening report delivery and release verification; it is not a replacement for native protection.
+HAVEN is pre-release software. The current milestone makes its authenticated endpoint fleet operationally explainable: the hub can distinguish current, legacy, development, and drifted reporter builds without mislabeling maintenance as a security threat. It is not a replacement for native protection.
 
-## Milestone 0.13 — Navigable, Reliable Observatory
+## Milestone 0.14 — Verifiable Endpoint Fleet
 
 The current implementation provides:
 
@@ -14,6 +14,12 @@ The current implementation provides:
 - Read-only Windows collection for Microsoft Defender, Windows Firewall, device posture, and up to 250 established or listening TCP endpoints
 - SQLite posture history with migrations, consistent online backups, a 90-day default retention window, and no historical storage of connection or workload details
 - A native Go agent with one-time enrollment, a unique ECDSA certificate, and TLS 1.3 mutual authentication
+- Authenticated, privacy-bounded agent build evidence containing the public release, immutable revision, platform, installation kind, observed capability manifest, and collection-notice count
+- A fleet lifecycle view that keeps report freshness, build maintenance, collection limitations, and endpoint security posture as separate facts
+- Backward-compatible acceptance of pre-0.14 enrolled reporters, which remain visible as legacy until deliberately updated
+- Exact-version and exact-revision comparison performed by the hub, without creating security alerts or remotely executing endpoint updates
+- Checksummed Windows amd64, Linux amd64, and Linux arm64 agent artifacts produced from an explicit full source revision by CI
+- Idempotent Windows and Linux install/repair workflows plus read-only status commands and identity-preserving uninstall procedures
 - Reproducible Windows Task Scheduler packaging that runs a GUI-subsystem reporter and suppresses console allocation for child collectors, preventing periodic focus theft or window flashes
 - Stable, browser-native routes for Overview, Devices, Network, Appliances, Activity, Settings, and per-device posture, services, and history views
 - A concise network-wide landing page instead of forcing every control and observation into one scrolling dashboard
@@ -159,7 +165,27 @@ After enrollment, install or update the per-user Windows reporting task from an 
 pwsh -NoProfile -File .\scripts\Install-WindowsAgentTask.ps1
 ```
 
-The installer builds a separate GUI-subsystem reporter under the current user's application-data directory and points Task Scheduler directly at it. The interactive `haven-agent.exe` remains available for enrollment and diagnostics, while the scheduled reporter and its fixed PowerShell collector run without allocating a visible console. It preserves an existing task's triggers; a new task reports at logon and every 15 minutes. The task runs at Windows' highest available level so read-only collection can inspect protected posture signals such as BitLocker status; the installer refuses to create a misleading limited task when it is not elevated. Native service packaging with tighter capability separation remains a future hardening milestone.
+The installer builds a separate GUI-subsystem reporter under the current user's application-data directory and points Task Scheduler directly at it. The interactive `haven-agent.exe` remains available for enrollment and diagnostics, while the scheduled reporter and its fixed PowerShell collector run without allocating a visible console. It preserves an existing task's triggers; a new task reports at logon and every 15 minutes. The task runs at Windows' highest available level so read-only collection can inspect protected Windows posture signals; the installer refuses to create a misleading limited task when it is not elevated. An always-running Service Control Manager process remains deliberately deferred until event-driven Defender or Event Log monitoring provides a concrete need for its larger resident attack surface.
+
+The installer stamps the exact source revision into the background reporter. Inspect scheduling and binary-hash evidence without modifying the task, or uninstall the reporter while preserving its enrolled identity, with:
+
+```powershell
+pwsh -NoProfile -File .\scripts\Get-WindowsAgentStatus.ps1
+pwsh -NoProfile -File .\scripts\Uninstall-WindowsAgentTask.ps1
+```
+
+On Linux, the source-based installer provides the same install/repair/status/uninstall lifecycle around the hardened user systemd timer. Uninstall preserves the enrolled identity by default:
+
+```bash
+./scripts/Install-LinuxAgent.sh install
+./scripts/Install-LinuxAgent.sh status
+```
+
+`haven-agent status` reports local enrollment plus public build identity, while `haven-agent version` reports only the build identity. CI publishes checksummed agent binaries as a 30-day workflow artifact for each verified commit. HAVEN does not automatically replace endpoint binaries; an owner or private deployment workflow chooses and verifies the revision being installed.
+
+Both installers also accept a prebuilt CI artifact only when its SHA-256 manifest value is supplied. Windows uses `-AgentBinary` with `-ExpectedSHA256`; Linux uses the `HAVEN_AGENT_BINARY` and `HAVEN_AGENT_SHA256` environment variables. A failed checksum leaves the installed reporter untouched.
+
+Upgrade the hub before installing 0.14 reporters. The 0.14 hub deliberately accepts older metadata-free reports and labels them as legacy; a 0.13 hub's strict decoder does not yet recognize the optional agent-metadata field.
 
 Create portfolio-safe inventory fixtures or a consistent SQLite backup with:
 
@@ -245,6 +271,6 @@ Haven/
 
 ## Current and next security milestone
 
-Milestone 0.7 adds native Linux monitoring and boot-persistent endpoint-agent scheduling. Milestone 0.7.1 makes its network results explainable, 0.7.2 makes report freshness and finding lifecycles explicit, and 0.7.3 correlates host listeners with sanitized Docker port mappings. Milestone 0.7.4 adds deliberate suggested-baseline review; 0.7.5 adds live systemd ownership and service-constrained expectations for Linux listeners. Milestone 0.8 combines the latest authenticated reports into a network-wide coverage, change, and live-relationship view while keeping merely observed private endpoints separate from explicitly enrolled devices. Milestone 0.9 turns current findings, server-classified stale agents, incomplete enrollments, new non-local listeners, and changed service attribution into explainable active alerts. Milestone 0.10 moves that derivation to the hub and adds opt-in, encrypted, durable Web Push delivery with bounded retries and per-destination receipts; its expectation model also supports owner-constrained dynamic ranges and expiring development approvals. Milestone 0.11 adds reproducible console-free Windows scheduled-task packaging and credential-free monitoring of explicitly configured private network appliances. Milestone 0.12 adds optional read-only NAS health through bounded SNMP plus a host-key-pinned, forced-command SSH helper. Milestone 0.13 reorganizes the console around stable routes and strengthens report delivery, freshness semantics, readiness, version evidence, rendered UI tests, and the public release pipeline. A later event-driven Windows sensor may move under Service Control Manager only when real-time Defender and Windows Event Log monitoring justify an always-running process; it must remain outbound-only and use the least privilege its collectors require. HAVEN does not scan the LAN, retain remote endpoints, or claim that an alert proves compromise. See [verification](docs/VERIFICATION.md) for the claim-to-test map. The Ubuntu hub does not execute Windows actions on another machine. GitHub Actions verifies the Go, frontend, dependency, concurrency, vulnerability, Windows process isolation, image, static analysis, and public-repository safety checks on each proposed change.
+Milestone 0.7 adds native Linux monitoring and boot-persistent endpoint-agent scheduling. Milestone 0.7.1 makes its network results explainable, 0.7.2 makes report freshness and finding lifecycles explicit, and 0.7.3 correlates host listeners with sanitized Docker port mappings. Milestone 0.7.4 adds deliberate suggested-baseline review; 0.7.5 adds live systemd ownership and service-constrained expectations for Linux listeners. Milestone 0.8 combines the latest authenticated reports into a network-wide coverage, change, and live-relationship view while keeping merely observed private endpoints separate from explicitly enrolled devices. Milestone 0.9 turns current findings, server-classified stale agents, incomplete enrollments, new non-local listeners, and changed service attribution into explainable active alerts. Milestone 0.10 moves that derivation to the hub and adds opt-in, encrypted, durable Web Push delivery with bounded retries and per-destination receipts; its expectation model also supports owner-constrained dynamic ranges and expiring development approvals. Milestone 0.11 adds reproducible console-free Windows scheduled-task packaging and credential-free monitoring of explicitly configured private network appliances. Milestone 0.12 adds optional read-only NAS health through bounded SNMP plus a host-key-pinned, forced-command SSH helper. Milestone 0.13 reorganizes the console around stable routes and strengthens report delivery, freshness semantics, readiness, version evidence, rendered UI tests, and the public release pipeline. Milestone 0.14 adds authenticated reporter provenance, capability evidence, fleet lifecycle presentation, checksummed cross-platform artifacts, and safe install/repair/status/uninstall workflows while preserving older enrolled reporters. A later event-driven Windows sensor may move under Service Control Manager only when real-time Defender and Windows Event Log monitoring justify an always-running process; it must remain outbound-only and use the least privilege its collectors require. HAVEN does not scan the LAN, retain remote endpoints, or claim that an alert proves compromise. See [verification](docs/VERIFICATION.md) for the claim-to-test map. The Ubuntu hub does not execute Windows actions on another machine. GitHub Actions verifies the Go, frontend, dependency, concurrency, vulnerability, Windows process isolation, agent artifacts, image, static analysis, and public-repository safety checks on each proposed change.
 
 Read the [architecture](docs/ARCHITECTURE.md), [threat model](docs/THREAT_MODEL.md), and [public repository policy](docs/PUBLIC_REPOSITORY.md) before expanding the trust boundary.

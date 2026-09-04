@@ -20,6 +20,7 @@ import (
 	"github.com/AdamWentworth/haven/internal/authn"
 	"github.com/AdamWentworth/haven/internal/buildinfo"
 	"github.com/AdamWentworth/haven/internal/collector"
+	"github.com/AdamWentworth/haven/internal/fleet"
 	"github.com/AdamWentworth/haven/internal/model"
 	"github.com/AdamWentworth/haven/internal/notification"
 	"github.com/AdamWentworth/haven/internal/posture"
@@ -216,6 +217,9 @@ func (server *Server) devices(writer http.ResponseWriter, request *http.Request)
 		return
 	}
 	devices = visibleDevices(devices, server.demoMode)
+	for index := range devices {
+		devices[index] = fleet.Present(devices[index])
+	}
 	server.writeJSON(writer, http.StatusOK, devices)
 }
 
@@ -240,6 +244,7 @@ func (server *Server) deviceDetail(writer http.ResponseWriter, request *http.Req
 		http.NotFound(writer, request)
 		return
 	}
+	detail.Device = fleet.Present(detail.Device)
 	if detail.Snapshot != nil {
 		evaluated := posture.Evaluate(*detail.Snapshot, time.Now().UTC())
 		detail.Snapshot = &evaluated

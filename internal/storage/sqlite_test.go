@@ -554,6 +554,9 @@ func TestEnrollmentReplayRevocationAndBackup(t *testing.T) {
 	if err != nil || liveDetail.Snapshot == nil || len(liveDetail.Snapshot.Connections) != 1 {
 		t.Fatalf("expected the current remote observation to retain live connections in memory: %#v, %v", liveDetail, err)
 	}
+	if liveDetail.Device.Agent != nil {
+		t.Fatal("a pre-0.14 observation must remain compatible and visibly lack agent metadata")
+	}
 	if err := store.AcceptObservation(ctx, device.CertificateSerial, envelope, now); !errors.Is(err, ErrAlreadyAccepted) {
 		t.Fatalf("expected an exact retry to be accepted idempotently, got %v", err)
 	}

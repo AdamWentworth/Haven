@@ -73,6 +73,26 @@ jobs:
         shell: pwsh
         run: ./scripts/Test-PublicRepository.ps1
 
+      - name: Build checksummed endpoint-agent artifacts
+        shell: pwsh
+        run: ./scripts/Build-AgentArtifacts.ps1 -Revision $env:GITHUB_SHA
+
+      - name: Verify endpoint-agent manifest and Linux lifecycle syntax
+        shell: bash
+        run: |
+          (cd artifacts/agents && sha256sum --check SHA256SUMS)
+          test "$(./artifacts/agents/haven-agent-linux-amd64 version | jq -r .revision)" = "${GITHUB_SHA}"
+          test "$(./artifacts/agents/haven-agent-linux-amd64 version | jq -r .version)" = "$(jq -r '.[0].version' artifacts/agents/manifest.json)"
+          bash -n scripts/Install-LinuxAgent.sh
+
+      - name: Upload endpoint-agent artifacts
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: haven-agents-${{ github.sha }}
+          path: artifacts/agents/
+          if-no-files-found: error
+          retention-days: 30
+
   verify-windows-agent:
     name: Verify console-free Windows agent
     runs-on: windows-latest
@@ -110,6 +130,15 @@ jobs:
           }
           if ($source -notmatch 'WindowsBuiltInRole\]::Administrator') {
             throw 'Windows reporter installer must reject unelevated installation.'
+          }
+          if ($source -notmatch 'report --installation windows-task') {
+            throw 'Windows reporter must identify its bounded installation kind.'
+          }
+          if ($source -notmatch 'buildinfo\.Revision=\$revision') {
+            throw 'Windows reporter must embed the exact source revision.'
+          }
+          if ($source -notmatch 'ExpectedSHA256') {
+            throw 'Prebuilt Windows reporter installation must require a checksum.'
           }
 
       - name: Build console-free reporter

@@ -6,7 +6,7 @@ After=network-online.target
 
 [Service]
 Type=oneshot
-ExecStart=%h/.local/share/haven/bin/haven-agent report
+ExecStart=%h/.local/share/haven/bin/haven-agent report --installation systemd-user
 TimeoutStartSec=60
 UMask=0077
 NoNewPrivileges=true
@@ -24,4 +24,3 @@ RestrictNamespaces=true
 RestrictRealtime=true
 RestrictSUIDSGID=true
 SystemCallArchitectures=native
-

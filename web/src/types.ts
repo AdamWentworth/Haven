@@ -226,6 +226,18 @@ export interface DeviceRecord {
   lastCollectedAt: string | null;
   certificateExpiresAt: string | null;
   revokedAt: string | null;
+  agent: AgentMetadata | null;
+}
+
+export interface AgentMetadata {
+  schemaVersion: number;
+  version: string;
+  revision: string;
+  platform: string;
+  installation: string;
+  capabilities: string[];
+  collectionNotices: number;
+  compatibility: "current" | "development" | "version-drift" | "revision-drift";
 }
 
 export interface DeviceDetail {

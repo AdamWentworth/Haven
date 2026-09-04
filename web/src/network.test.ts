@@ -11,7 +11,7 @@ function connection(overrides: Partial<NetworkConnection> = {}): NetworkConnecti
 }
 
 function device(id: string, name: string, address: string, connections: NetworkConnection[]): NetworkDeviceObservation {
-  const record: DeviceRecord = { id, displayName: name, hostName: name.toLowerCase(), operatingSystem: "Test OS", architecture: "amd64", trustState: "enrolled", status: "current", enrolledAt: at, lastSeenAt: at, lastCollectedAt: at, certificateExpiresAt: null, revokedAt: null };
+  const record: DeviceRecord = { id, displayName: name, hostName: name.toLowerCase(), operatingSystem: "Test OS", architecture: "amd64", trustState: "enrolled", status: "current", enrolledAt: at, lastSeenAt: at, lastCollectedAt: at, certificateExpiresAt: null, revokedAt: null, agent: null };
   const snapshot: SecuritySnapshot = { collectedAt: at, device: { deviceId: id, hostName: record.hostName, operatingSystem: record.operatingSystem, architecture: record.architecture, uptimeSeconds: 1 }, defender: null, windowsBaseline: null, linuxBaseline: null, baselineChecks: [], findings: [], firewallProfiles: [], connections: [connection({ localAddress: address, localPort: 65000, state: "Bound", protocol: "UDP", processName: "address-marker" }), ...connections], notices: [] };
   return { device: record, snapshot, expectedServices: [], listenerObservations: [] };
 }

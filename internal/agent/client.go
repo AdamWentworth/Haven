@@ -17,6 +17,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/AdamWentworth/haven/internal/fleet"
 	"github.com/AdamWentworth/haven/internal/model"
 	"github.com/AdamWentworth/haven/internal/storage"
 	"github.com/AdamWentworth/haven/internal/trust"
@@ -144,7 +145,7 @@ func (client *Client) Config() Config {
 	return client.config
 }
 
-func (client *Client) Report(ctx context.Context, snapshot model.SecuritySnapshot) (model.ObservationReceipt, error) {
+func (client *Client) Report(ctx context.Context, snapshot model.SecuritySnapshot, installation ...string) (model.ObservationReceipt, error) {
 	caPEM, err := os.ReadFile(filepath.Join(client.directory, "ca.crt"))
 	if err != nil {
 		return model.ObservationReceipt{}, fmt.Errorf("read agent CA certificate: %w", err)
@@ -171,7 +172,12 @@ func (client *Client) Report(ctx context.Context, snapshot model.SecuritySnapsho
 	if err != nil {
 		return model.ObservationReceipt{}, err
 	}
-	envelope := model.ObservationEnvelope{SchemaVersion: model.ObservationSchemaVersion, ObservationID: observationID, DeviceID: client.config.DeviceID, Sequence: client.config.Sequence, SentAt: time.Now().UTC(), Snapshot: snapshot}
+	installationKind := "interactive"
+	if len(installation) > 0 {
+		installationKind = installation[0]
+	}
+	metadata := fleet.MetadataForSnapshot(snapshot, installationKind)
+	envelope := model.ObservationEnvelope{SchemaVersion: model.ObservationSchemaVersion, ObservationID: observationID, DeviceID: client.config.DeviceID, Sequence: client.config.Sequence, SentAt: time.Now().UTC(), Agent: &metadata, Snapshot: snapshot}
 	payload, err := json.Marshal(envelope)
 	if err != nil {
 		return model.ObservationReceipt{}, fmt.Errorf("encode observation: %w", err)

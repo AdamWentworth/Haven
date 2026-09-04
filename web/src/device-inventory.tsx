@@ -1,5 +1,6 @@
 import { DevicesIcon, LaptopIcon, MonitorIcon, ServerIcon } from "./icons";
 import { formatRelativeTime } from "./format";
+import { fleetPresentation } from "./fleet";
 import type { DeviceRecord } from "./types";
 import { StatusChip, type Tone } from "./ui";
 
@@ -12,11 +13,12 @@ export function DeviceInventory({ devices, selectedId, select, demoMode }: { dev
 			</div>
 			<div className="device-list">
 				{devices.map((device) => {
-					const tone: Tone = device.status === "current" ? "healthy" : device.status === "revoked" ? "danger" : "attention";
+					const lifecycle = fleetPresentation(device);
+					const tone: Tone = lifecycle.tone;
 					return (
 						<button className={`device-button ${selectedId === device.id ? "selected" : ""}`} type="button" key={device.id} onClick={() => select(device.id)} aria-pressed={selectedId === device.id}>
 							<span className="device-identity"><span className="device-icon">{device.operatingSystem.toLowerCase().includes("server") ? <ServerIcon /> : device.displayName.toLowerCase().includes("laptop") ? <LaptopIcon /> : <MonitorIcon />}</span><span><strong>{device.displayName}</strong><small>{device.operatingSystem || "Awaiting first report"}{device.lastCollectedAt ? ` · reported ${formatRelativeTime(device.lastCollectedAt)}` : ""}</small></span></span>
-							<StatusChip label={device.status.replaceAll("-", " ")} tone={tone} />
+							<span className="device-fleet-state"><StatusChip label={lifecycle.label} tone={tone} />{device.agent && <small>Agent {device.agent.version}</small>}</span>
 						</button>
 					);
 				})}

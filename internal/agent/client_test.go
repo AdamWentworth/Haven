@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/AdamWentworth/haven/internal/agent"
+	"github.com/AdamWentworth/haven/internal/buildinfo"
 	"github.com/AdamWentworth/haven/internal/hub"
 	"github.com/AdamWentworth/haven/internal/model"
 	"github.com/AdamWentworth/haven/internal/storage"
@@ -67,7 +68,7 @@ func TestEnrollmentAndMutualTLSReporting(t *testing.T) {
 		t.Fatal(err)
 	}
 	snapshot := model.SecuritySnapshot{CollectedAt: time.Now().UTC(), Device: model.DeviceSummary{HostName: "test-laptop", OperatingSystem: "Test OS", Architecture: "amd64"}, FirewallProfiles: []model.FirewallProfileStatus{}, Connections: []model.NetworkConnection{}, Notices: []model.CollectorNotice{}}
-	if _, err := client.Report(ctx, snapshot); err != nil {
+	if _, err := client.Report(ctx, snapshot, "systemd-user"); err != nil {
 		t.Fatal(err)
 	}
 	if reportAttempts.Load() != 2 {
@@ -79,6 +80,9 @@ func TestEnrollmentAndMutualTLSReporting(t *testing.T) {
 	}
 	if detail.Snapshot == nil || detail.Device.Status != "current" || detail.Snapshot.Device.DeviceID != config.DeviceID {
 		t.Fatalf("unexpected enrolled device state: %#v", detail)
+	}
+	if detail.Device.Agent == nil || detail.Device.Agent.Version != buildinfo.Version || detail.Device.Agent.Installation != "systemd-user" || detail.Device.Agent.SchemaVersion != model.ObservationSchemaVersion {
+		t.Fatalf("agent build evidence was not retained: %#v", detail.Device.Agent)
 	}
 	if err := store.RevokeDevice(ctx, config.DeviceID, time.Now().UTC()); err != nil {
 		t.Fatal(err)

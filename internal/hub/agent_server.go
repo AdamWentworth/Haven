@@ -13,6 +13,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/AdamWentworth/haven/internal/fleet"
 	"github.com/AdamWentworth/haven/internal/model"
 	"github.com/AdamWentworth/haven/internal/posture"
 	"github.com/AdamWentworth/haven/internal/storage"
@@ -157,6 +158,10 @@ func (server *AgentServer) observe(writer http.ResponseWriter, request *http.Req
 	}
 	if envelope.Snapshot.CollectedAt.IsZero() || envelope.Snapshot.CollectedAt.After(now.Add(2*time.Minute)) {
 		server.writeError(writer, http.StatusUnprocessableEntity, "invalid_collection_time", "The collection timestamp is invalid.")
+		return
+	}
+	if !fleet.ValidateMetadata(envelope.Agent) {
+		server.writeError(writer, http.StatusUnprocessableEntity, "invalid_agent_metadata", "The agent build or capability metadata is invalid.")
 		return
 	}
 
