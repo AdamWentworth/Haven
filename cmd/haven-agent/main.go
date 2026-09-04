@@ -132,7 +132,7 @@ func defaultInstallation() string {
 	if os.Getenv("INVOCATION_ID") != "" {
 		return "systemd-user"
 	}
-	return "interactive"
+	return buildinfo.AgentInstallation
 }
 
 func writeJSON(value any) error {

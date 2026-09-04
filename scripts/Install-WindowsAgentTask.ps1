@@ -76,7 +76,7 @@ else {
     if ($LASTEXITCODE -ne 0 -or $revision -notmatch '^[0-9a-f]{40}$') {
         throw 'The HAVEN source revision could not be determined. Refusing to install an unstamped background reporter.'
     }
-    $linkerFlags = "-H=windowsgui -s -w -X github.com/AdamWentworth/haven/internal/buildinfo.Revision=$revision"
+    $linkerFlags = "-H=windowsgui -s -w -X github.com/AdamWentworth/haven/internal/buildinfo.Revision=$revision -X github.com/AdamWentworth/haven/internal/buildinfo.AgentInstallation=windows-task"
     Push-Location -LiteralPath $repositoryRoot
     try {
         & go build -trimpath -ldflags $linkerFlags -o $temporaryAgentPath .\cmd\haven-agent
