@@ -28,6 +28,7 @@ The current implementation provides:
 - Strictly increasing report sequences, timestamp checks, payload limits, rate limits, device revocation, and versioned messages
 - A device inventory and detail view with explicitly synthetic demo fixtures for portfolio work
 - A network-wide coverage view that summarizes report freshness, verified host firewalls, current findings, and unreviewed service exposure across enrolled devices
+- Credential-free monitoring for explicitly configured private network appliances, with bounded TCP/TLS health checks and no LAN discovery
 - Live relationship grouping that distinguishes explicitly enrolled peers, observed-only private endpoints, and Internet destinations grouped by source owner and destination service
 - Cross-device finding lifecycle context without retaining raw remote endpoints, connection history, packet contents, or inferred device trust
 - A hub-owned current-alert view derived only from server-classified report freshness, evaluated posture findings, and owner-reviewed service expectations
@@ -60,6 +61,25 @@ The current implementation provides:
 - Visible collector failures instead of silently treating unavailable information as healthy
 
 The dashboard and agent endpoint both bind to loopback during development. No Docker runtime or deployment is needed for local iteration. A native development hub can collect from its own host; every containerized hub runs in hub-only mode and accepts observations only from explicitly enrolled native agents. Production uses separate, explicitly private listeners. Background alerts require explicit browser permission and a one-time destination enrollment. They use the browser vendor's push service, so delivery metadata leaves the home network; message content is encrypted and intentionally generic. HAVEN installs no privileged tray process or browser extension.
+
+Managed appliances are configured separately from endpoint enrollment. Set `HAVEN_MANAGED_APPLIANCES_FILE` to a private JSON file owned by the deployment system. HAVEN accepts only literal private unicast addresses and explicit TCP ports; hostnames, address ranges, UDP probes, unknown fields, and discovery directives are rejected. A definition resembles the following, with the placeholder replaced only in private deployment configuration:
+
+```json
+{
+  "appliances": [{
+    "id": "home-nas",
+    "displayName": "Home NAS",
+    "kind": "nas",
+    "address": "<private IPv4 address>",
+    "services": [
+      { "id": "smb", "name": "SMB file service", "protocol": "TCP", "port": 445, "tls": false, "required": true },
+      { "id": "management", "name": "Management HTTPS", "protocol": "TCP", "port": 5443, "tls": true, "required": true }
+    ]
+  }]
+}
+```
+
+The hub records only current reachability, bounded error classes, check timestamps, and the public metadata of a presented TLS certificate. It never stores appliance credentials, response bodies, packet payloads, or newly discovered services. A required endpoint must fail two consecutive checks before HAVEN creates an outage alert; visibility-only endpoints do not create availability alerts.
 
 Because HAVEN is pre-release and observation schema 2 is still evolving, hubs and agents should run the same repository revision.
 
@@ -200,6 +220,6 @@ Haven/
 
 ## Current and next security milestone
 
-Milestone 0.7 adds native Linux monitoring and boot-persistent endpoint-agent scheduling. Milestone 0.7.1 makes its network results explainable, 0.7.2 makes report freshness and finding lifecycles explicit, and 0.7.3 correlates host listeners with sanitized Docker port mappings. Milestone 0.7.4 adds deliberate suggested-baseline review; 0.7.5 adds live systemd ownership and service-constrained expectations for Linux listeners. Milestone 0.8 combines the latest authenticated reports into a network-wide coverage, change, and live-relationship view while keeping merely observed private endpoints separate from explicitly enrolled devices. Milestone 0.9 turns current findings, server-classified stale agents, incomplete enrollments, new non-local listeners, and changed service attribution into explainable active alerts. Milestone 0.10 moves that derivation to the hub and adds opt-in, encrypted, durable Web Push delivery with bounded retries and per-destination receipts; its expectation model also supports owner-constrained dynamic ranges and expiring development approvals. Milestone 0.11 begins with reproducible console-free Windows scheduled-task packaging and will add operational notification testing and guided enrollment for additional owner-operated Windows and Linux endpoints. A later event-driven Windows sensor may move under Service Control Manager only when real-time Defender and Windows Event Log monitoring justify an always-running process; it must remain outbound-only and use the least privilege its collectors require. HAVEN does not scan the LAN, retain remote endpoints, or claim that an alert proves compromise. See [verification](docs/VERIFICATION.md) for the claim-to-test map. The Ubuntu hub does not execute Windows actions on another machine. GitHub Actions verifies the Go, frontend, dependency, concurrency, vulnerability, Windows process isolation, image, and public-repository safety checks on each proposed change.
+Milestone 0.7 adds native Linux monitoring and boot-persistent endpoint-agent scheduling. Milestone 0.7.1 makes its network results explainable, 0.7.2 makes report freshness and finding lifecycles explicit, and 0.7.3 correlates host listeners with sanitized Docker port mappings. Milestone 0.7.4 adds deliberate suggested-baseline review; 0.7.5 adds live systemd ownership and service-constrained expectations for Linux listeners. Milestone 0.8 combines the latest authenticated reports into a network-wide coverage, change, and live-relationship view while keeping merely observed private endpoints separate from explicitly enrolled devices. Milestone 0.9 turns current findings, server-classified stale agents, incomplete enrollments, new non-local listeners, and changed service attribution into explainable active alerts. Milestone 0.10 moves that derivation to the hub and adds opt-in, encrypted, durable Web Push delivery with bounded retries and per-destination receipts; its expectation model also supports owner-constrained dynamic ranges and expiring development approvals. Milestone 0.11 adds reproducible console-free Windows scheduled-task packaging and credential-free monitoring of explicitly configured private network appliances. A later event-driven Windows sensor may move under Service Control Manager only when real-time Defender and Windows Event Log monitoring justify an always-running process; it must remain outbound-only and use the least privilege its collectors require. HAVEN does not scan the LAN, retain remote endpoints, or claim that an alert proves compromise. See [verification](docs/VERIFICATION.md) for the claim-to-test map. The Ubuntu hub does not execute Windows actions on another machine. GitHub Actions verifies the Go, frontend, dependency, concurrency, vulnerability, Windows process isolation, image, and public-repository safety checks on each proposed change.
 
 Read the [architecture](docs/ARCHITECTURE.md), [threat model](docs/THREAT_MODEL.md), and [public repository policy](docs/PUBLIC_REPOSITORY.md) before expanding the trust boundary.

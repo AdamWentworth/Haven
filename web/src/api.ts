@@ -1,4 +1,4 @@
-import type { AuditEvent, AuthStatus, DeviceDetail, DeviceRecord, ExpectedService, ExpectedServiceInput, FindingReview, FindingReviewState, HavenAlert, ObservedListener, PasskeyInfo, PushDestination, PushNotificationStatus, RuntimeStatus, SecurityAction, SecurityActionKind, SecurityEvent, SecuritySnapshot } from "./types";
+import type { AuditEvent, AuthStatus, DeviceDetail, DeviceRecord, ExpectedService, ExpectedServiceInput, FindingReview, FindingReviewState, HavenAlert, ManagedApplianceStatus, ObservedListener, PasskeyInfo, PushDestination, PushNotificationStatus, RuntimeStatus, SecurityAction, SecurityActionKind, SecurityEvent, SecuritySnapshot } from "./types";
 import type { SerializedPushSubscription } from "./push";
 
 async function getJSON<T>(path: string, signal?: AbortSignal): Promise<T> {
@@ -48,6 +48,8 @@ export async function collectSnapshot(signal?: AbortSignal): Promise<SecuritySna
 export const getLatestSnapshot = (signal?: AbortSignal) => getJSON<SecuritySnapshot>("/api/security/latest", signal);
 
 export const listDevices = (signal?: AbortSignal) => getJSON<DeviceRecord[]>("/api/devices", signal);
+
+export const listManagedAppliances = (signal?: AbortSignal) => getJSON<ManagedApplianceStatus[]>("/api/appliances", signal);
 
 export const getDevice = (deviceId: string, signal?: AbortSignal) =>
   getJSON<DeviceDetail>(`/api/devices/${encodeURIComponent(deviceId)}`, signal);

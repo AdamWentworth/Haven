@@ -34,6 +34,8 @@ Background delivery is disabled until an authenticated owner explicitly grants b
 
 The network overview is a browser-side projection of the latest authenticated reports. Address matches can explain likely enrolled-device relationships, but they are not cryptographic proof that the peer at an address is the enrolled machine. Unmatched private endpoints remain visibly "observed only," are never promoted to trusted inventory, and are not retained as asset history in this milestone. Internet destinations are grouped to reduce noise rather than classified as benign.
 
+Managed-appliance monitoring is opt-in deployment configuration, not LAN discovery. Configuration parsing accepts only literal private unicast addresses, explicit TCP ports, bounded identifiers, and a fixed schema. The hub retains the declared address plus current reachability, bounded error classification, timestamps, and presented certificate metadata. It does not send credentials, issue application requests, retain response bodies, inspect shares, or promote the appliance to authenticated endpoint status. TLS certificate collection deliberately completes an observation-only handshake and then reports system-chain and address-name validation separately; a private appliance's name mismatch is factual evidence rather than an automatic compromise claim.
+
 ## Principal threats
 
 ### A malicious website accesses the local API

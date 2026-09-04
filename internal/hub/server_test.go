@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/AdamWentworth/haven/internal/alert"
+	"github.com/AdamWentworth/haven/internal/appliance"
 	"github.com/AdamWentworth/haven/internal/authn"
 	"github.com/AdamWentworth/haven/internal/model"
 	"github.com/AdamWentworth/haven/internal/notification"
@@ -232,6 +233,41 @@ func TestDeviceInventoryEndpoints(t *testing.T) {
 	server.Handler().ServeHTTP(detail, httptest.NewRequest(http.MethodGet, "/api/devices/test-device", nil))
 	if detail.Code != http.StatusOK || !strings.Contains(detail.Body.String(), `"hostName":"Test device"`) {
 		t.Fatalf("unexpected device detail: %d %s", detail.Code, detail.Body.String())
+	}
+}
+
+func TestManagedApplianceEndpointAndAlertsUseExplicitStoredChecks(t *testing.T) {
+	server, store := testServer(t)
+	defer store.Close()
+	address := strings.Join([]string{"192", "168", "1", "69"}, ".")
+	definitions := []model.ManagedApplianceDefinition{{
+		ID: "nas", DisplayName: "Test NAS", Kind: "nas", Address: address,
+		Services: []model.ManagedServiceDefinition{{ID: "smb", Name: "SMB", Protocol: "TCP", Port: 445, Required: true}},
+	}}
+	monitor, err := appliance.NewMonitor(context.Background(), store, server.logger, definitions)
+	if err != nil {
+		t.Fatal(err)
+	}
+	server.appliances = monitor
+
+	response := httptest.NewRecorder()
+	server.Handler().ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/api/appliances", nil))
+	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"displayName":"Test NAS"`) || !strings.Contains(response.Body.String(), `"status":"pending"`) {
+		t.Fatalf("unexpected managed appliance response: %d %s", response.Code, response.Body.String())
+	}
+
+	checkedAt := time.Now().UTC()
+	failed := []model.ManagedServiceStatus{{ID: "smb", ErrorClass: "timeout"}}
+	if err := store.RecordManagedApplianceProbe(context.Background(), "nas", failed, checkedAt); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.RecordManagedApplianceProbe(context.Background(), "nas", failed, checkedAt.Add(time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	alerts := httptest.NewRecorder()
+	server.Handler().ServeHTTP(alerts, httptest.NewRequest(http.MethodGet, "/api/alerts", nil))
+	if alerts.Code != http.StatusOK || !strings.Contains(alerts.Body.String(), `"kind":"appliance-unreachable"`) {
+		t.Fatalf("managed appliance alert was not projected: %d %s", alerts.Code, alerts.Body.String())
 	}
 }
 

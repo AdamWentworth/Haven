@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { addPasskey, collectSnapshot, getAuthStatus, getDevice, getLatestSnapshot, getNotificationStatus, getRuntimeStatus, listAlerts, listAuditEvents, listDevices, listEvents, listExpectedServices, listFindingReviews, listObservedListeners, listPasskeys, listSecurityActions, loginWithPasskey, logout, registerPasskey, registerPushDestination, removeExpectedService, removePasskey, removePushDestination, requestSecurityAction, saveExpectedService, saveExpectedServices, saveFindingReview } from "./api";
+import { addPasskey, collectSnapshot, getAuthStatus, getDevice, getLatestSnapshot, getNotificationStatus, getRuntimeStatus, listAlerts, listAuditEvents, listDevices, listEvents, listExpectedServices, listFindingReviews, listManagedAppliances, listObservedListeners, listPasskeys, listSecurityActions, loginWithPasskey, logout, registerPasskey, registerPushDestination, removeExpectedService, removePasskey, removePushDestination, requestSecurityAction, saveExpectedService, saveExpectedServices, saveFindingReview } from "./api";
 import { ActivityIcon, AlertIcon, BellIcon, CheckIcon, ChipIcon, DefenderIcon, DevicesIcon, FirewallIcon, HavenIcon, HelpIcon, LaptopIcon, LockIcon, MonitorIcon, NetworkIcon, RefreshIcon, RemoteAccessIcon, ServerIcon, UpdateIcon, UsersIcon, WorkloadIcon } from "./icons";
 import { bindScopeLabel, canonicalOwnerName, endpoint, endpointScope, expectedServiceMatches, expectedServiceOwnerConstrained, isPrivateNetworkAddress, listenerOwnerSummary, liveNetworkRelationships, logicalListeners, networkServiceLabel, normalizeAddress, workloadAttribution, type LogicalListener, type NetworkDeviceObservation } from "./network";
 import { decodeApplicationServerKey, normalizePushDestinationLabel, serializePushSubscription, supportsBackgroundPush } from "./push";
@@ -20,6 +20,7 @@ import type {
   FirewallProfileStatus,
   HavenAlert,
   LinuxBaseline,
+  ManagedApplianceStatus,
   NetworkConnection,
   ObservedListener,
   PasskeyInfo,
@@ -514,7 +515,7 @@ function PanelHeading({
   );
 }
 
-function NetworkOverview({ devices, events, alerts, selectedId, selectDevice, demoMode }: { devices: NetworkDeviceObservation[]; events: SecurityEvent[]; alerts: HavenAlert[]; selectedId: string; selectDevice: (id: string) => void; demoMode: boolean }) {
+function NetworkOverview({ devices, appliances, events, alerts, selectedId, selectDevice, demoMode }: { devices: NetworkDeviceObservation[]; appliances: ManagedApplianceStatus[]; events: SecurityEvent[]; alerts: HavenAlert[]; selectedId: string; selectDevice: (id: string) => void; demoMode: boolean }) {
 	const summaries = useMemo(() => devices.map((entry) => {
 		const snapshot = entry.snapshot;
 		const listeners = logicalListeners(snapshot?.connections || []);
@@ -537,7 +538,7 @@ function NetworkOverview({ devices, events, alerts, selectedId, selectDevice, de
 		else if (entry.device.status !== "current" || findingAlerts.length > 0 || unreviewed.length > 0) { tone = "attention"; label = entry.device.status !== "current" ? entry.device.status.replaceAll("-", " ") : unreviewed.length > 0 ? "service review" : "finding open"; }
 		return { ...entry, listeners, unreviewed, recentUnreviewed, findingAlerts, firewallKnown, firewallEnabled, establishedConnections, tone, label };
 	}), [alerts, devices]);
-	const relationships = useMemo(() => liveNetworkRelationships(devices), [devices]);
+	const relationships = useMemo(() => liveNetworkRelationships(devices, appliances), [appliances, devices]);
 	const recentChanges = useMemo(() => visibleFindingLifecycles(events, alerts).slice(0, 5), [alerts, events]);
 	const reportingCount = summaries.filter((entry) => entry.device.status === "current" && entry.snapshot).length;
 	const protectedFirewallCount = summaries.filter((entry) => entry.firewallEnabled).length;
@@ -546,16 +547,22 @@ function NetworkOverview({ devices, events, alerts, selectedId, selectDevice, de
 	const unreviewedCount = summaries.reduce((count, entry) => count + entry.unreviewed.length, 0);
 	const activeConnectionCount = summaries.reduce((count, entry) => count + entry.establishedConnections, 0);
 	const observedAssetCount = new Set(relationships.filter((item) => item.peerKind === "observed").flatMap((item) => [item.sourceName, item.targetName].filter((name) => isPrivateNetworkAddress(name)))).size;
+	const applianceHealthyCount = appliances.filter((appliance) => appliance.status === "healthy" || appliance.status === "observed").length;
+	const applianceAttentionCount = appliances.filter((appliance) => appliance.status === "attention").length;
+	const appliancePendingCount = appliances.filter((appliance) => appliance.status === "pending" || appliance.status === "rechecking").length;
+	const applianceAlertCount = alerts.filter((alert) => alert.deviceId.startsWith("appliance:")).length;
+	const applianceReviewCount = Math.max(applianceAttentionCount, applianceAlertCount);
 	const urgent = summaries.some((entry) => entry.tone === "danger");
-	const attention = summaries.some((entry) => entry.tone === "attention") || unreviewedCount > 0;
-	const assuranceTone: Tone = urgent ? "danger" : attention ? "attention" : summaries.some((entry) => entry.tone === "unknown") ? "unknown" : "healthy";
+	const attention = summaries.some((entry) => entry.tone === "attention") || unreviewedCount > 0 || applianceReviewCount > 0;
+	const assuranceTone: Tone = urgent ? "danger" : attention ? "attention" : summaries.some((entry) => entry.tone === "unknown") || appliancePendingCount > 0 ? "unknown" : "healthy";
 	const assuranceLabel = urgent ? "Action recommended" : attention ? "Review available" : assuranceTone === "unknown" ? "Partly verified" : "Observed baseline steady";
 	const attentionReasons = [
 		findingCount > 0 ? `${findingCount} current finding${findingCount === 1 ? "" : "s"}` : "",
 		unreviewedCount > 0 ? `${unreviewedCount} service review${unreviewedCount === 1 ? "" : "s"}` : "",
 		reportingCount < summaries.length ? `${summaries.length - reportingCount} device${summaries.length - reportingCount === 1 ? "" : "s"} not current` : "",
+		applianceReviewCount > 0 ? `${applianceReviewCount} appliance alert${applianceReviewCount === 1 ? "" : "s"}` : "",
 	].filter(Boolean);
-	const attentionItemCount = findingCount + unreviewedCount + summaries.length - reportingCount;
+	const attentionItemCount = findingCount + unreviewedCount + summaries.length - reportingCount + applianceReviewCount;
 	const visibleRelationships = relationships.slice(0, 12);
 
 	return (
@@ -565,7 +572,7 @@ function NetworkOverview({ devices, events, alerts, selectedId, selectDevice, de
 			</PanelHeading>
 			<div className={`network-assurance ${assuranceTone}`}>
 				<span className="network-assurance-icon">{urgent || attention ? <AlertIcon size={20} /> : <CheckIcon size={20} />}</span>
-				<div><strong>{assuranceLabel}</strong><p>{urgent ? "At least one reporting device has a high finding or firewall problem." : attention ? `${attentionReasons.join(" · ")} ${attentionItemCount === 1 ? "remains" : "remain"} visible across enrolled devices.` : assuranceTone === "unknown" ? "No urgent issue is derived, but one or more devices has incomplete current evidence." : "Every reporting device has a verified firewall and no unreviewed non-local services or current findings."}</p></div>
+				<div><strong>{assuranceLabel}</strong><p>{urgent ? "At least one reporting device has a high finding or firewall problem." : attention ? `${attentionReasons.join(" · ")} ${attentionItemCount === 1 ? "remains" : "remain"} visible across monitored systems.` : assuranceTone === "unknown" ? "No urgent issue is derived, but one or more devices has incomplete current evidence." : "Every reporting device matches its reviewed baseline, and every required managed-appliance service is reachable."}</p></div>
 				<StatusChip label={assuranceLabel} tone={assuranceTone} />
 			</div>
 			<div className="network-metrics" aria-label="Network coverage summary">
@@ -573,13 +580,15 @@ function NetworkOverview({ devices, events, alerts, selectedId, selectDevice, de
 				<article><span>Protected firewalls</span><strong>{protectedFirewallCount}/{knownFirewallCount || summaries.length}</strong><small>{knownFirewallCount === summaries.length ? "verified devices" : `${summaries.length - knownFirewallCount} not verified`}</small></article>
 				<article><span>Open findings</span><strong>{findingCount}</strong><small>across current posture</small></article>
 				<article><span>Service reviews</span><strong>{unreviewedCount}</strong><small>non-local listeners</small></article>
+				<article><span>Managed appliances</span><strong>{applianceHealthyCount}/{appliances.length}</strong><small>{appliances.length ? "hub-observed healthy" : "none configured"}</small></article>
 			</div>
 			<section className="network-alert-watch" aria-labelledby="network-alerts-title">
 				<div className="network-subheading"><div><p className="eyebrow">ACTIVE ALERTS</p><h3 id="network-alerts-title">What currently needs attention</h3></div><span>{alerts.length} active</span></div>
 				<p className="network-privacy-note">Alerts come only from authenticated report freshness, evaluated posture findings, and owner-reviewed service baselines. An alert is a review prompt—not a claim that an attack occurred.</p>
 				{alerts.length === 0 ? <p className="alert-watch-clear"><CheckIcon size={18} /><span><strong>No active alerts.</strong><small>Current reports match the reviewed baseline.</small></span></p> : <ol className="network-alert-list">{alerts.slice(0, 8).map((alert) => {
 					const tone: Tone = alert.severity === "high" ? "danger" : alert.severity === "medium" ? "attention" : "configured";
-					return <li key={alert.id}><button type="button" onClick={() => selectDevice(alert.deviceId)}><span className={`alert-watch-icon ${alert.severity}`}><AlertIcon size={17} /></span><span><strong>{alert.title}</strong><small>{alert.deviceName} · active since {formatRelativeTime(alert.startedAt)} · {alert.evidence}</small><em>{alert.summary}</em></span><StatusChip label={alert.severity} tone={tone} /></button></li>;
+					const endpointDevice = !alert.deviceId.startsWith("appliance:");
+					return <li key={alert.id}><button type="button" onClick={() => { if (endpointDevice) selectDevice(alert.deviceId); }}><span className={`alert-watch-icon ${alert.severity}`}><AlertIcon size={17} /></span><span><strong>{alert.title}</strong><small>{alert.deviceName} · active since {formatRelativeTime(alert.startedAt)} · {alert.evidence}</small><em>{alert.summary}</em></span><StatusChip label={alert.severity} tone={tone} /></button></li>;
 				})}</ol>}
 				{alerts.length > 8 && <p className="network-overflow-note">Showing 8 of {alerts.length} current alerts.</p>}
 			</section>
@@ -602,13 +611,27 @@ function NetworkOverview({ devices, events, alerts, selectedId, selectDevice, de
 					})}</ol>}
 				</section>
 			</div>
+			<section className="network-appliances" aria-labelledby="managed-appliances-title">
+				<div className="network-subheading"><div><p className="eyebrow">EXPLICITLY CONFIGURED · AGENTLESS</p><h3 id="managed-appliances-title">Managed appliances</h3></div><span>{appliances.length} monitored</span></div>
+				<p className="network-privacy-note">The hub checks only the private addresses and ports declared in private deployment configuration. It does not discover services, authenticate to the appliance, retain response bodies, or scan the LAN.</p>
+				{appliances.length === 0 ? <p className="activity-empty"><strong>No managed appliances configured.</strong><span>Network appliances remain observed-only until explicitly added by the owner.</span></p> : <div className="appliance-grid">{appliances.map((appliance) => {
+					const tone: Tone = appliance.status === "healthy" || appliance.status === "observed" ? "healthy" : appliance.status === "attention" ? "attention" : appliance.status === "rechecking" ? "configured" : "unknown";
+					return <article className="appliance-card" key={appliance.id}>
+						<header><span className="device-icon"><ServerIcon /></span><span><strong>{appliance.displayName}</strong><small>{appliance.kind.toUpperCase()} · {appliance.address} · checked {formatRelativeTime(appliance.lastCheckedAt)}</small></span><StatusChip label={appliance.status} tone={tone} /></header>
+						<ul>{appliance.services.map((service) => {
+							const serviceTone: Tone = service.reachable ? "healthy" : !service.lastCheckedAt ? "unknown" : service.required && service.consecutiveFailures >= 2 ? "attention" : "configured";
+							return <li key={service.id}><span><strong>{service.name}</strong><small>{service.protocol} {service.port}{service.tls ? " · TLS" : ""}{service.required ? " · required" : " · visibility only"}</small>{service.certificate && <small>Certificate valid until {formatDate(service.certificate.notAfter)} · {service.certificate.nameValid ? "address matches" : "address does not match certificate name"}</small>}</span><StatusChip label={service.reachable ? "reachable" : !service.lastCheckedAt ? "pending" : "not reached"} tone={serviceTone} /></li>;
+						})}</ul>
+					</article>;
+				})}</div>}
+			</section>
 			<section className="network-flows" aria-labelledby="network-flows-title">
 				<div className="network-subheading"><div><p className="eyebrow">LIVE RELATIONSHIPS</p><h3 id="network-flows-title">Who is talking to what</h3></div><span>{activeConnectionCount} endpoint-reported · {observedAssetCount} observed-only private asset{observedAssetCount === 1 ? "" : "s"}</span></div>
 				<p className="network-privacy-note">This is not a LAN scan. An observed-only asset is a private endpoint contacted by an enrolled device; it is neither trusted nor enrolled automatically. Internet connections are grouped by source process and destination service to reduce noise.</p>
 				{visibleRelationships.length === 0 ? <p className="activity-empty"><strong>No live relationships were returned.</strong><span>They will reappear after the next agent report and are never reconstructed from historical connection logs.</span></p> : <ol className="network-flow-list">{visibleRelationships.map((relationship) => {
 					const service = networkServiceLabel(relationship.protocol, relationship.port);
-					const label = relationship.peerKind === "enrolled" ? "enrolled" : relationship.peerKind === "observed" ? "observed only" : "external group";
-					const tone: Tone = relationship.peerKind === "enrolled" ? "healthy" : relationship.peerKind === "observed" ? "configured" : "unknown";
+					const label = relationship.peerKind === "enrolled" ? "enrolled" : relationship.peerKind === "managed" ? "managed" : relationship.peerKind === "observed" ? "observed only" : "external group";
+					const tone: Tone = relationship.peerKind === "enrolled" ? "healthy" : relationship.peerKind === "managed" ? "configured" : relationship.peerKind === "observed" ? "configured" : "unknown";
 					return <li key={relationship.key}><span className={`network-flow-icon ${relationship.peerKind}`}><NetworkIcon size={17} /></span><div><strong>{relationship.sourceName} <span aria-hidden="true">→</span> {relationship.targetName}</strong><small>{relationship.owners.join(", ")} · {relationship.protocol} {relationship.port}{service ? ` (${service})` : ""} · {relationship.connectionCount} connection{relationship.connectionCount === 1 ? "" : "s"}{relationship.peerKind === "external" && relationship.destinationCount > 1 ? ` to ${relationship.destinationCount} destinations` : ""}</small></div><StatusChip label={label} tone={tone} /></li>;
 				})}</ol>}
 				{relationships.length > visibleRelationships.length && <p className="network-overflow-note">Showing the 12 highest-context relationship groups; {relationships.length - visibleRelationships.length} additional external group{relationships.length - visibleRelationships.length === 1 ? " is" : "s are"} summarized out of this overview.</p>}
@@ -903,7 +926,7 @@ function AwaitingAgents({ devices, runtime, passkeys, actions, audit, error, sel
       <PasskeyPanel passkeys={passkeys} add={addOwnerPasskey} remove={removeOwnerPasskey} busy={actionBusy} />
       <ActionCenter actions={actions} audit={audit} capabilities={runtime?.actionCapabilities || []} run={() => undefined} busy={actionBusy} />
     </main>
-    <footer><span>HAVEN milestone 0.10 · Durable alerts</span><span>Observe continuously. Act deliberately.</span></footer>
+    <footer><span>HAVEN milestone 0.11 · Managed appliances</span><span>Observe continuously. Act deliberately.</span></footer>
   </>;
 }
 
@@ -999,7 +1022,7 @@ function BaselinePanel({ checks, collectedAt, platform }: { checks: BaselineChec
   );
 }
 
-function Application({ snapshot, devices, networkDevices, events, networkEvents, alerts, runtime, notificationStatus, selectedDevice, selectDevice, refresh, refreshing, error, demoMode, alertsEnabled, alertsSupported, enableAlerts, disableAlerts, reviews, expectedServices, listenerObservations, audit, actions, passkeys, reviewFinding, saveServiceExpectation, saveServiceExpectations, removeServiceExpectation, runAction, addOwnerPasskey, removeOwnerPasskey, actionBusy, signOut }: { snapshot: SecuritySnapshot; devices: DeviceRecord[]; networkDevices: NetworkDeviceObservation[]; events: SecurityEvent[]; networkEvents: SecurityEvent[]; alerts: HavenAlert[]; runtime: RuntimeStatus | null; notificationStatus: PushNotificationStatus | null; selectedDevice: DeviceRecord | null; selectDevice: (id: string) => void; refresh: () => void; refreshing: boolean; error: string | null; demoMode: boolean; alertsEnabled: boolean; alertsSupported: boolean; enableAlerts: (label?: string) => void; disableAlerts: () => void; reviews: FindingReview[]; expectedServices: ExpectedService[]; listenerObservations: ObservedListener[]; audit: AuditEvent[]; actions: SecurityAction[]; passkeys: PasskeyInfo[]; reviewFinding: (finding: SecurityFinding, state: FindingReviewState) => void; saveServiceExpectation: (service: ExpectedServiceInput) => void; saveServiceExpectations: (services: ExpectedServiceInput[]) => void; removeServiceExpectation: (service: ExpectedService) => void; runAction: (kind: SecurityActionKind) => void; addOwnerPasskey: () => void; removeOwnerPasskey: (passkey: PasskeyInfo) => void; actionBusy: boolean; signOut: () => void }) {
+function Application({ snapshot, devices, networkDevices, appliances, events, networkEvents, alerts, runtime, notificationStatus, selectedDevice, selectDevice, refresh, refreshing, error, demoMode, alertsEnabled, alertsSupported, enableAlerts, disableAlerts, reviews, expectedServices, listenerObservations, audit, actions, passkeys, reviewFinding, saveServiceExpectation, saveServiceExpectations, removeServiceExpectation, runAction, addOwnerPasskey, removeOwnerPasskey, actionBusy, signOut }: { snapshot: SecuritySnapshot; devices: DeviceRecord[]; networkDevices: NetworkDeviceObservation[]; appliances: ManagedApplianceStatus[]; events: SecurityEvent[]; networkEvents: SecurityEvent[]; alerts: HavenAlert[]; runtime: RuntimeStatus | null; notificationStatus: PushNotificationStatus | null; selectedDevice: DeviceRecord | null; selectDevice: (id: string) => void; refresh: () => void; refreshing: boolean; error: string | null; demoMode: boolean; alertsEnabled: boolean; alertsSupported: boolean; enableAlerts: (label?: string) => void; disableAlerts: () => void; reviews: FindingReview[]; expectedServices: ExpectedService[]; listenerObservations: ObservedListener[]; audit: AuditEvent[]; actions: SecurityAction[]; passkeys: PasskeyInfo[]; reviewFinding: (finding: SecurityFinding, state: FindingReviewState) => void; saveServiceExpectation: (service: ExpectedServiceInput) => void; saveServiceExpectations: (services: ExpectedServiceInput[]) => void; removeServiceExpectation: (service: ExpectedService) => void; runAction: (kind: SecurityActionKind) => void; addOwnerPasskey: () => void; removeOwnerPasskey: (passkey: PasskeyInfo) => void; actionBusy: boolean; signOut: () => void }) {
   const isLinux = snapshot.linuxBaseline !== null || /linux|ubuntu/i.test(snapshot.device.operatingSystem);
   const defenderHealthy = snapshot.defender?.antivirusEnabled === true
     && snapshot.defender.realTimeProtectionEnabled === true
@@ -1030,7 +1053,7 @@ function Application({ snapshot, devices, networkDevices, events, networkEvents,
         {demoMode && <p className="demo-banner" role="status"><strong>Synthetic demo mode.</strong> Every device and observation on this page is invented. HAVEN is not showing or collecting data from this computer.</p>}
         {!demoMode && <p className="context-banner"><strong>Continuous, read-only monitoring.</strong> {runtime?.localCollection ? `HAVEN observes this computer every ${runtime.monitor.enabled ? formatInterval(runtime.monitor.intervalSeconds) : "configured interval"}.` : "A native agent reports this endpoint's security posture to the private HAVEN hub on its own schedule; this page checks the hub for a newer report every minute."} The current-posture sections always come from the latest observation. The activity section retains only the latest lifecycle for each finding, while routine unchanged observations stay quiet.</p>}
         {error && <p className="inline-error" role="alert">{error}</p>}
-        <NetworkOverview devices={networkDevices} events={networkEvents} alerts={alerts} selectedId={selectedDevice?.id || snapshot.device.deviceId || ""} selectDevice={selectDevice} demoMode={demoMode} />
+		<NetworkOverview devices={networkDevices} appliances={appliances} events={networkEvents} alerts={alerts} selectedId={selectedDevice?.id || snapshot.device.deviceId || ""} selectDevice={selectDevice} demoMode={demoMode} />
         <section className="hero" aria-labelledby="device-name">
           <div className="hero-identity"><span className="hero-device-icon">{snapshot.device.operatingSystem.toLowerCase().includes("server") ? <ServerIcon size={28} /> : selectedDevice?.displayName.toLowerCase().includes("laptop") ? <LaptopIcon size={28} /> : <MonitorIcon size={28} />}</span><div><p className="eyebrow">{selectedDevice?.trustState === "local" ? "THIS DEVICE" : "DEVICE OBSERVATION"}</p><h1 id="device-name">{selectedDevice?.displayName || snapshot.device.hostName}</h1><p className="device-detail">{snapshot.device.hostName} · {snapshot.device.operatingSystem} · {snapshot.device.architecture} · {formatDuration(snapshot.device.uptimeSeconds)}</p></div></div>
           <div className="collection-time"><span>Last observation</span><strong>{formatRelativeTime(snapshot.collectedAt)}</strong><time dateTime={snapshot.collectedAt}>{formatDate(snapshot.collectedAt)}</time></div>
@@ -1050,7 +1073,7 @@ function Application({ snapshot, devices, networkDevices, events, networkEvents,
 		<FirewallPanel profiles={snapshot.firewallProfiles} isLinux={isLinux} />
 		<ConnectionsPanel deviceId={selectedDevice?.id || snapshot.device.deviceId || ""} operatingSystem={snapshot.device.operatingSystem} connections={snapshot.connections} workloads={workloadInventory} expectedServices={expectedServices} observations={listenerObservations} saveExpectation={saveServiceExpectation} saveExpectations={saveServiceExpectations} removeExpectation={removeServiceExpectation} busy={actionBusy} />
       </main>
-	  <footer><span>HAVEN milestone 0.10 · Durable alerts</span><span>Observe continuously. Act deliberately.</span></footer>
+	  <footer><span>HAVEN milestone 0.11 · Managed appliances</span><span>Observe continuously. Act deliberately.</span></footer>
     </>
   );
 }
@@ -1060,6 +1083,7 @@ export function App() {
   const [snapshot, setSnapshot] = useState<SecuritySnapshot | null>(null);
   const [devices, setDevices] = useState<DeviceRecord[]>([]);
   const [networkDevices, setNetworkDevices] = useState<NetworkDeviceObservation[]>([]);
+  const [appliances, setAppliances] = useState<ManagedApplianceStatus[]>([]);
   const [events, setEvents] = useState<SecurityEvent[]>([]);
   const [currentAlerts, setCurrentAlerts] = useState<HavenAlert[]>([]);
   const [reviews, setReviews] = useState<FindingReview[]>([]);
@@ -1090,7 +1114,7 @@ export function App() {
   const refresh = useCallback(async (signal?: AbortSignal) => {
     setRefreshing(true);
     try {
-      const [initialInventory, runtimeStatus, activity, activeAlerts, pushStatus] = await Promise.all([listDevices(signal), getRuntimeStatus(signal), listEvents(undefined, signal), listAlerts(signal), getNotificationStatus(signal)]);
+		const [initialInventory, runtimeStatus, activity, activeAlerts, pushStatus, managedAppliances] = await Promise.all([listDevices(signal), getRuntimeStatus(signal), listEvents(undefined, signal), listAlerts(signal), getNotificationStatus(signal), listManagedAppliances(signal)]);
       let inventory = initialInventory;
       let observed: { id: string; snapshot: SecuritySnapshot } | null;
       if (runtimeStatus.demoMode || runtimeStatus.localCollection) {
@@ -1104,6 +1128,7 @@ export function App() {
       setSnapshot(observed?.snapshot || null);
       setDevices(inventory);
       setNetworkDevices(networkObservations);
+      setAppliances(managedAppliances);
       setEvents(activity);
       setCurrentAlerts(activeAlerts);
       setRuntime(runtimeStatus);
@@ -1289,6 +1314,7 @@ export function App() {
       setSnapshot(null);
       setDevices([]);
       setNetworkDevices([]);
+      setAppliances([]);
       setEvents([]);
       setCurrentAlerts([]);
       setReviews([]);
@@ -1404,7 +1430,7 @@ export function App() {
     const controller = new AbortController();
     const poll = async () => {
       try {
-        const [inventory, runtimeStatus, activity, activeAlerts, pushStatus] = await Promise.all([listDevices(controller.signal), getRuntimeStatus(controller.signal), listEvents(undefined, controller.signal), listAlerts(controller.signal), getNotificationStatus(controller.signal)]);
+		const [inventory, runtimeStatus, activity, activeAlerts, pushStatus, managedAppliances] = await Promise.all([listDevices(controller.signal), getRuntimeStatus(controller.signal), listEvents(undefined, controller.signal), listAlerts(controller.signal), getNotificationStatus(controller.signal), listManagedAppliances(controller.signal)]);
         let observed: { id: string; snapshot: SecuritySnapshot } | null;
         if (runtimeStatus.demoMode || runtimeStatus.localCollection) {
           const latest = await getLatestSnapshot(controller.signal);
@@ -1415,6 +1441,7 @@ export function App() {
         const networkObservations = await loadNetworkObservations(inventory, runtimeStatus.demoMode, controller.signal);
         setDevices(inventory);
         setNetworkDevices(networkObservations);
+        setAppliances(managedAppliances);
         setEvents(activity);
         setCurrentAlerts(activeAlerts);
         setRuntime(runtimeStatus);
@@ -1457,5 +1484,5 @@ export function App() {
 
   const selectedDevice = devices.find((device) => device.id === selectedId) || null;
   const selectedEvents = selectedId ? events.filter((event) => event.deviceId === selectedId) : events;
-	return <Application snapshot={snapshot} devices={devices} networkDevices={networkDevices} events={selectedEvents} networkEvents={events} alerts={currentAlerts} runtime={runtime} notificationStatus={notificationStatus} selectedDevice={selectedDevice} selectDevice={(id) => void selectDevice(id)} refresh={() => void refreshView()} refreshing={refreshing} error={error} demoMode={demoMode} alertsEnabled={alertsEnabled} alertsSupported={alertsSupported} enableAlerts={(label) => void enableAlerts(label)} disableAlerts={() => void disableAlerts()} reviews={reviews} expectedServices={expectedServices} listenerObservations={listenerObservations} audit={audit} actions={actions} passkeys={passkeys} reviewFinding={(finding, state) => void reviewFinding(finding, state)} saveServiceExpectation={(service) => void saveServiceExpectation(service)} saveServiceExpectations={(services) => void saveServiceBaseline(services)} removeServiceExpectation={(service) => void removeServiceExpectation(service)} runAction={(kind) => void runAction(kind)} addOwnerPasskey={() => void addOwnerPasskey()} removeOwnerPasskey={(passkey) => void removeOwnerPasskey(passkey)} actionBusy={actionBusy} signOut={() => void signOut()} />;
+	return <Application snapshot={snapshot} devices={devices} networkDevices={networkDevices} appliances={appliances} events={selectedEvents} networkEvents={events} alerts={currentAlerts} runtime={runtime} notificationStatus={notificationStatus} selectedDevice={selectedDevice} selectDevice={(id) => void selectDevice(id)} refresh={() => void refreshView()} refreshing={refreshing} error={error} demoMode={demoMode} alertsEnabled={alertsEnabled} alertsSupported={alertsSupported} enableAlerts={(label) => void enableAlerts(label)} disableAlerts={() => void disableAlerts()} reviews={reviews} expectedServices={expectedServices} listenerObservations={listenerObservations} audit={audit} actions={actions} passkeys={passkeys} reviewFinding={(finding, state) => void reviewFinding(finding, state)} saveServiceExpectation={(service) => void saveServiceExpectation(service)} saveServiceExpectations={(services) => void saveServiceBaseline(services)} removeServiceExpectation={(service) => void removeServiceExpectation(service)} runAction={(kind) => void runAction(kind)} addOwnerPasskey={() => void addOwnerPasskey()} removeOwnerPasskey={(passkey) => void removeOwnerPasskey(passkey)} actionBusy={actionBusy} signOut={() => void signOut()} />;
 }

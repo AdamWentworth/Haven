@@ -20,6 +20,7 @@ import (
 
 	"github.com/AdamWentworth/haven/internal/action"
 	"github.com/AdamWentworth/haven/internal/alert"
+	"github.com/AdamWentworth/haven/internal/appliance"
 	"github.com/AdamWentworth/haven/internal/authn"
 	"github.com/AdamWentworth/haven/internal/collector"
 	"github.com/AdamWentworth/haven/internal/hub"
@@ -275,10 +276,25 @@ func run(logger *slog.Logger) error {
 	if err != nil {
 		return err
 	}
+	var managedApplianceMonitor *appliance.Monitor
+	if configurationPath := strings.TrimSpace(os.Getenv("HAVEN_MANAGED_APPLIANCES_FILE")); configurationPath != "" {
+		definitions, err := appliance.LoadDefinitions(configurationPath)
+		if err != nil {
+			return err
+		}
+		managedApplianceMonitor, err = appliance.NewMonitor(startupContext, store, logger, definitions)
+		if err != nil {
+			return err
+		}
+		logger.Info("credential-free managed-appliance monitoring configured", "appliances", len(definitions), "interval", collectionInterval.String())
+	}
 
 	uiAddress := configuredAddress("HAVEN_LISTEN_ADDRESS", "127.0.0.1:5080")
 	agentAddress := configuredAddress("HAVEN_AGENT_LISTEN_ADDRESS", "127.0.0.1:5443")
 	serverOptions := []hub.ServerOption{hub.WithLocalCollection(localCollection), hub.WithAlertProjector(alert.NewProjector(store))}
+	if managedApplianceMonitor != nil {
+		serverOptions = append(serverOptions, hub.WithManagedAppliances(managedApplianceMonitor))
+	}
 	if demoMode {
 		serverOptions = append(serverOptions, hub.WithDemoMode())
 		logger.Info("synthetic demo mode enabled")
@@ -333,6 +349,9 @@ func run(logger *slog.Logger) error {
 	if !demoMode {
 		go dashboard.RunNotificationMonitor(runtimeContext, hub.NotificationEvaluationPeriod)
 		logger.Info("durable background alert evaluation enabled", "interval", hub.NotificationEvaluationPeriod.String())
+	}
+	if !demoMode && managedApplianceMonitor != nil {
+		go dashboard.RunManagedApplianceMonitor(runtimeContext, collectionInterval)
 	}
 
 	serverErrors := make(chan error, 2)

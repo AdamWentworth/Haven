@@ -4,8 +4,10 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"sort"
 	"time"
 
+	"github.com/AdamWentworth/haven/internal/appliance"
 	"github.com/AdamWentworth/haven/internal/model"
 	"github.com/AdamWentworth/haven/internal/notification"
 	"github.com/AdamWentworth/haven/internal/storage"
@@ -25,10 +27,32 @@ func (server *Server) currentAlerts(writer http.ResponseWriter, request *http.Re
 }
 
 func (server *Server) projectCurrentAlerts(ctx context.Context) ([]model.Alert, error) {
-	if server.alertProjector == nil {
-		return []model.Alert{}, nil
+	alerts := []model.Alert{}
+	if server.alertProjector != nil {
+		projected, err := server.alertProjector.Current(ctx, server.demoMode)
+		if err != nil {
+			return nil, err
+		}
+		alerts = append(alerts, projected...)
 	}
-	return server.alertProjector.Current(ctx, server.demoMode)
+	if server.appliances != nil && !server.demoMode {
+		statuses, err := server.appliances.Status(ctx)
+		if err != nil {
+			return nil, err
+		}
+		alerts = append(alerts, appliance.DeriveAlerts(statuses, time.Now().UTC())...)
+	}
+	sort.SliceStable(alerts, func(left, right int) bool {
+		order := map[string]int{"high": 0, "medium": 1, "low": 2}
+		if order[alerts[left].Severity] != order[alerts[right].Severity] {
+			return order[alerts[left].Severity] < order[alerts[right].Severity]
+		}
+		if !alerts[left].StartedAt.Equal(alerts[right].StartedAt) {
+			return alerts[left].StartedAt.After(alerts[right].StartedAt)
+		}
+		return alerts[left].ID < alerts[right].ID
+	})
+	return alerts, nil
 }
 
 func (server *Server) notificationStatus(writer http.ResponseWriter, request *http.Request) {

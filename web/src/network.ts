@@ -2,6 +2,7 @@ import type {
   BindScope,
   DeviceRecord,
   ExpectedService,
+  ManagedApplianceStatus,
   NetworkConnection,
   ObservedListener,
   SecuritySnapshot,
@@ -31,7 +32,7 @@ export interface NetworkRelationship {
   key: string;
   sourceName: string;
   targetName: string;
-  peerKind: "enrolled" | "observed" | "external";
+  peerKind: "enrolled" | "managed" | "observed" | "external";
   protocol: string;
   port: number;
   owners: string[];
@@ -196,8 +197,9 @@ export function networkServiceLabel(protocol: string, port: number) {
   return labels[`${protocol.toUpperCase()}:${port}`] || "";
 }
 
-export function liveNetworkRelationships(devices: NetworkDeviceObservation[]) {
-  const addressOwners = new Map<string, NetworkDeviceObservation>();
+export function liveNetworkRelationships(devices: NetworkDeviceObservation[], appliances: ManagedApplianceStatus[] = []) {
+	const addressOwners = new Map<string, NetworkDeviceObservation>();
+	const managedAddresses = new Map(appliances.map((appliance) => [normalizeAddress(appliance.address), appliance]));
   for (const device of devices) {
     for (const connection of device.snapshot?.connections || []) {
       const address = normalizeAddress(connection.localAddress);
@@ -213,15 +215,16 @@ export function liveNetworkRelationships(devices: NetworkDeviceObservation[]) {
       if (connection.state.toLowerCase() !== "established") continue;
       const remoteAddress = normalizeAddress(connection.remoteAddress);
       if (!remoteAddress || connection.remotePort < 1 || isLoopbackAddress(remoteAddress) || isUnspecifiedAddress(remoteAddress) || isMulticastAddress(remoteAddress)) continue;
-      const peerDevice = addressOwners.get(remoteAddress);
-      if (peerDevice?.device.id === localDevice.device.id) continue;
-      const peerKind: NetworkRelationship["peerKind"] = peerDevice ? "enrolled" : isPrivateNetworkAddress(remoteAddress) ? "observed" : "external";
-      const peerName = peerDevice?.device.displayName || (peerKind === "observed" ? remoteAddress : "Internet");
+			const peerDevice = addressOwners.get(remoteAddress);
+			if (peerDevice?.device.id === localDevice.device.id) continue;
+			const managedAppliance = peerDevice ? undefined : managedAddresses.get(remoteAddress);
+			const peerKind: NetworkRelationship["peerKind"] = peerDevice ? "enrolled" : managedAppliance ? "managed" : isPrivateNetworkAddress(remoteAddress) ? "observed" : "external";
+			const peerName = peerDevice?.device.displayName || managedAppliance?.displayName || (peerKind === "observed" ? remoteAddress : "Internet");
       const owner = connection.processName || connection.systemdUnit || "Not attributed";
       const protocol = connection.protocol.toUpperCase();
       const inbound = listenerPorts.has(`${protocol}:${connection.localPort}`);
       const servicePort = inbound ? connection.localPort : connection.remotePort;
-      const peerIdentity = peerDevice ? `device:${peerDevice.device.id}` : peerKind === "observed" ? `asset:${remoteAddress}` : `internet:${canonicalOwnerName(owner)}`;
+			const peerIdentity = peerDevice ? `device:${peerDevice.device.id}` : managedAppliance ? `appliance:${managedAppliance.id}` : peerKind === "observed" ? `asset:${remoteAddress}` : `internet:${canonicalOwnerName(owner)}`;
       const localIdentity = `device:${localDevice.device.id}`;
       const key = `${inbound ? `${peerIdentity}|${localIdentity}` : `${localIdentity}|${peerIdentity}`}|${protocol}:${servicePort}`;
       const localEndpoint = endpoint(connection.localAddress, connection.localPort);
@@ -245,7 +248,7 @@ export function liveNetworkRelationships(devices: NetworkDeviceObservation[]) {
     }
   }
 
-  const order = { enrolled: 0, observed: 1, external: 2 } satisfies Record<NetworkRelationship["peerKind"], number>;
+	const order = { enrolled: 0, managed: 1, observed: 2, external: 3 } satisfies Record<NetworkRelationship["peerKind"], number>;
   return [...grouped.values()].map((relationship): NetworkRelationship => {
     const { owners, connections, destinations, ...identity } = relationship;
     return { ...identity, owners: [...owners].sort(), connectionCount: connections.size, destinationCount: destinations.size };

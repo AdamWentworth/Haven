@@ -88,7 +88,7 @@ export interface SecurityEvent {
 }
 
 export type AlertSeverity = "high" | "medium" | "low";
-export type AlertKind = "finding" | "stale-agent" | "awaiting-agent" | "new-service" | "service-drift";
+export type AlertKind = "finding" | "stale-agent" | "awaiting-agent" | "new-service" | "service-drift" | "expired-service-expectation" | "appliance-stale" | "appliance-unreachable" | "appliance-service" | "appliance-certificate";
 
 export interface HavenAlert {
   id: string;
@@ -231,6 +231,43 @@ export interface DeviceRecord {
 export interface DeviceDetail {
   device: DeviceRecord;
   snapshot: SecuritySnapshot | null;
+}
+
+export interface ManagedApplianceStatus {
+  id: string;
+  displayName: string;
+  kind: string;
+  address: string;
+  status: "pending" | "rechecking" | "attention" | "observed" | "healthy";
+  configuredAt: string;
+  lastCheckedAt: string | null;
+  services: ManagedServiceStatus[];
+}
+
+export interface ManagedServiceStatus {
+  id: string;
+  name: string;
+  protocol: "TCP";
+  port: number;
+  tls: boolean;
+  required: boolean;
+  reachable: boolean;
+  consecutiveFailures: number;
+  firstCheckedAt: string | null;
+  lastCheckedAt: string | null;
+  lastChangedAt: string | null;
+  errorClass?: string;
+  certificate?: ManagedCertificateStatus;
+}
+
+export interface ManagedCertificateStatus {
+  subject: string;
+  issuer: string;
+  fingerprint: string;
+  notBefore: string;
+  notAfter: string;
+  systemTrust: boolean;
+  nameValid: boolean;
 }
 
 export interface RuntimeStatus {

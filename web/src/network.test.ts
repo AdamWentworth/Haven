@@ -172,6 +172,13 @@ describe("live relationship projection", () => {
     expect(liveNetworkRelationships([windows]).find((item) => item.port === 445)).toMatchObject({ targetName: observedAddress, peerKind: "observed" });
   });
 
+	 it("labels an explicitly configured private peer as a managed appliance", () => {
+		 const managedAddress = syntheticPrivateIPv4(10, 20, 30, 69);
+		 const windows = device("windows", "Windows Workstation", "192.0.2.64", [connection({ localAddress: "192.0.2.64", localPort: 53000, remoteAddress: managedAddress, remotePort: 445, state: "Established", processName: "System" })]);
+		 const appliances = [{ id: "nas", displayName: "Home NAS", kind: "nas", address: managedAddress, status: "healthy" as const, configuredAt: new Date().toISOString(), lastCheckedAt: new Date().toISOString(), services: [] }];
+		 expect(liveNetworkRelationships([windows], appliances).find((item) => item.port === 445)).toMatchObject({ targetName: "Home NAS", peerKind: "managed" });
+	 });
+
   it("groups Internet destinations without exposing their addresses", () => {
     const windows = device("windows", "Windows Workstation", "192.0.2.64", [
       connection({ localAddress: "192.0.2.64", localPort: 53000, remoteAddress: "203.0.113.10", remotePort: 443, state: "Established", processName: "chrome" }),

@@ -354,6 +354,43 @@ var migrations = []migration{
 			`CREATE INDEX expected_services_expiration ON expected_services (device_id, expires_at)`,
 		},
 	},
+	{
+		version: 12,
+		statements: []string{
+			`CREATE TABLE managed_appliances (
+				id TEXT PRIMARY KEY,
+				display_name TEXT NOT NULL,
+				kind TEXT NOT NULL,
+				address TEXT NOT NULL,
+				configured_at TEXT NOT NULL
+			)`,
+			`CREATE TABLE managed_appliance_services (
+				appliance_id TEXT NOT NULL REFERENCES managed_appliances(id) ON DELETE CASCADE,
+				service_id TEXT NOT NULL,
+				name TEXT NOT NULL,
+				protocol TEXT NOT NULL,
+				port INTEGER NOT NULL,
+				tls INTEGER NOT NULL,
+				required INTEGER NOT NULL,
+				reachable INTEGER,
+				consecutive_failures INTEGER NOT NULL DEFAULT 0,
+				first_checked_at TEXT,
+				last_checked_at TEXT,
+				last_changed_at TEXT,
+				error_class TEXT NOT NULL DEFAULT '',
+				certificate_subject TEXT,
+				certificate_issuer TEXT,
+				certificate_fingerprint TEXT,
+				certificate_not_before TEXT,
+				certificate_not_after TEXT,
+				certificate_system_trust INTEGER,
+				certificate_name_valid INTEGER,
+				PRIMARY KEY (appliance_id, service_id)
+			)`,
+			`CREATE INDEX managed_appliance_services_checked
+				ON managed_appliance_services (appliance_id, last_checked_at)`,
+		},
+	},
 }
 
 func Open(ctx context.Context, path string) (*Store, error) {

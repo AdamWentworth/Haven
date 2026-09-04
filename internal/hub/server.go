@@ -16,6 +16,7 @@ import (
 
 	"github.com/AdamWentworth/haven/internal/action"
 	"github.com/AdamWentworth/haven/internal/alert"
+	"github.com/AdamWentworth/haven/internal/appliance"
 	"github.com/AdamWentworth/haven/internal/authn"
 	"github.com/AdamWentworth/haven/internal/collector"
 	"github.com/AdamWentworth/haven/internal/model"
@@ -36,6 +37,7 @@ type Server struct {
 	actions         *action.Service
 	alertProjector  *alert.Projector
 	notifications   *notification.Service
+	appliances      *appliance.Monitor
 
 	collectionMutex sync.Mutex
 	latestMutex     sync.RWMutex
@@ -70,6 +72,10 @@ func WithNotifications(service *notification.Service) ServerOption {
 	return func(server *Server) { server.notifications = service }
 }
 
+func WithManagedAppliances(monitor *appliance.Monitor) ServerOption {
+	return func(server *Server) { server.appliances = monitor }
+}
+
 func NewServer(
 	securityCollector collector.Collector,
 	store *storage.Store,
@@ -100,6 +106,7 @@ func (server *Server) Handler() http.Handler {
 	mux.Handle("GET /api/security/latest", server.protected(http.HandlerFunc(server.latestSecuritySnapshot)))
 	mux.Handle("GET /api/devices", server.protected(http.HandlerFunc(server.devices)))
 	mux.Handle("GET /api/devices/{deviceID}", server.protected(http.HandlerFunc(server.deviceDetail)))
+	mux.Handle("GET /api/appliances", server.protected(http.HandlerFunc(server.managedAppliances)))
 	mux.Handle("POST /api/devices/{deviceID}/revoke", server.mutating(http.HandlerFunc(server.revokeDevice)))
 	mux.Handle("GET /api/events", server.protected(http.HandlerFunc(server.securityEvents)))
 	mux.Handle("GET /api/alerts", server.protected(http.HandlerFunc(server.currentAlerts)))
@@ -118,6 +125,21 @@ func (server *Server) Handler() http.Handler {
 	mux.Handle("POST /api/notifications/unsubscribe", server.mutating(http.HandlerFunc(server.unsubscribeNotifications)))
 	mux.HandleFunc("/", server.webApplication)
 	return server.securityHeaders(mux)
+}
+
+func (server *Server) managedAppliances(writer http.ResponseWriter, request *http.Request) {
+	writer.Header().Set("Cache-Control", "no-store")
+	if server.appliances == nil || server.demoMode {
+		server.writeJSON(writer, http.StatusOK, []model.ManagedApplianceStatus{})
+		return
+	}
+	statuses, err := server.appliances.Status(request.Context())
+	if err != nil {
+		server.logger.Error("could not list managed appliances", "error", err)
+		http.Error(writer, "could not list managed appliances", http.StatusInternalServerError)
+		return
+	}
+	server.writeJSON(writer, http.StatusOK, statuses)
 }
 
 func (server *Server) health(writer http.ResponseWriter, _ *http.Request) {
@@ -307,6 +329,31 @@ func (server *Server) RunMonitor(ctx context.Context, interval time.Duration) {
 		case <-ticker.C:
 			server.runScheduledCollection(ctx)
 		}
+	}
+}
+
+// RunManagedApplianceMonitor performs bounded checks only against explicitly
+// configured private endpoints. It does not discover addresses or ports.
+func (server *Server) RunManagedApplianceMonitor(ctx context.Context, interval time.Duration) {
+	if server.demoMode || server.appliances == nil || interval <= 0 {
+		return
+	}
+	server.runManagedApplianceProbe(ctx)
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			server.runManagedApplianceProbe(ctx)
+		}
+	}
+}
+
+func (server *Server) runManagedApplianceProbe(ctx context.Context) {
+	if err := server.appliances.Probe(ctx); err != nil && ctx.Err() == nil {
+		server.logger.Error("managed-appliance checks could not be recorded", "error", err)
 	}
 }
 
