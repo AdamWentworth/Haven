@@ -1,7 +1,7 @@
 import { useState, type FormEvent } from "react";
 import { accountProviders, accountSummary, dateInputValue, emptyAccountProfile, factorLabel, reviewedAtFromInput, statusLabel } from "./account-security";
-import { AlertIcon, CheckIcon, LockIcon, UsersIcon } from "./icons";
-import { formatDate } from "./format";
+import { AlertIcon, LockIcon, UsersIcon } from "./icons";
+import { formatCalendarDate } from "./format";
 import type { AccountCategory, AccountFactor, AccountProfile, AccountProfileInput, BackupCodesStatus, PasswordStatus, RecoveryStatus, TwoStepStatus } from "./types";
 import { StatusChip, type Tone } from "./ui";
 import { ProviderBrand } from "./provider-brand";
@@ -85,8 +85,8 @@ function AccountCard({ profile, demoMode, edit, remove }: { profile: AccountProf
 		<div className="account-factor-list">{profile.factors.length > 0 ? profile.factors.map((factor) => <span key={factor}>{factorLabel(factor)}</span>) : <span className="muted-factor">No second-factor method recorded</span>}</div>
 		{profile.reviewDetails && profile.reviewDetails.length > 0 && <div className="account-review-details"><h4>Review details</h4><ul>{profile.reviewDetails.map((detail, index) => <li key={`${detail}-${index}`}>{detail}</li>)}</ul></div>}
 		{profile.notes && <div className="account-card-notes"><strong>Context note</strong><p>{profile.notes}</p></div>}
-		{profile.suggestions.length > 0 ? <div className="account-suggestions"><h4><AlertIcon size={17} /> Suggestions</h4><ul>{profile.suggestions.map((suggestion) => <li key={suggestion.id}><StatusChip label={suggestion.priority} tone={priorityTone(suggestion.priority)} /><span><strong>{suggestion.title}</strong><small>{suggestion.summary}</small></span></li>)}</ul></div> : <p className="account-good"><CheckIcon size={18} /><span>No improvement suggestion follows from the status you recorded.</span></p>}
-		<div className="account-card-footer"><small>{profile.lastReviewedAt ? `Security reviewed ${formatDate(profile.lastReviewedAt)}` : "No security review date recorded"}</small>{!demoMode && <div><button type="button" className="text-button" onClick={edit}>Edit</button><button type="button" className="text-button danger-text" onClick={remove}>Remove</button></div>}</div>
+		{profile.suggestions.length > 0 && <div className="account-suggestions"><h4><AlertIcon size={17} /> Suggestions</h4><ul>{profile.suggestions.map((suggestion) => <li key={suggestion.id}><StatusChip label={suggestion.priority} tone={priorityTone(suggestion.priority)} /><span><strong>{suggestion.title}</strong><small>{suggestion.summary}</small></span></li>)}</ul></div>}
+		<div className="account-card-footer"><small>{profile.lastReviewedAt ? `Reviewed ${formatCalendarDate(profile.lastReviewedAt)}` : "Not reviewed yet"}</small>{!demoMode && <div><button type="button" className="text-button" onClick={edit}>Edit</button><button type="button" className="text-button danger-text" onClick={remove}>Remove</button></div>}</div>
 	</article>;
 }
 

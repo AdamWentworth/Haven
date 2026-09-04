@@ -7,6 +7,14 @@ export function formatDate(value: string | null | undefined, fallback = "Not rep
 	return Number.isNaN(date.valueOf()) ? fallback : date.toLocaleString();
 }
 
+export function formatCalendarDate(value: string | null | undefined, fallback = "Not reported") {
+	if (!value) return fallback;
+	const date = new Date(value);
+	return Number.isNaN(date.valueOf())
+		? fallback
+		: new Intl.DateTimeFormat(undefined, { year: "numeric", month: "short", day: "numeric", timeZone: "UTC" }).format(date);
+}
+
 export function formatRelativeTime(value: string | null | undefined, fallback = "not reported") {
 	if (!value) return fallback;
 	const timestamp = new Date(value).valueOf();

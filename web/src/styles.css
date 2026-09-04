@@ -402,7 +402,7 @@ main, footer { width: min(1180px, 92vw); margin-inline: auto; }
 .account-metrics small { color: var(--muted); font-size: .65rem; }
 .account-boundary { margin: .9rem 0 0; color: var(--muted); font-size: .75rem; line-height: 1.55; }
 .account-boundary strong { color: #cfe7d9; }
-.account-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .75rem; margin-top: 1rem; }
+.account-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: start; gap: .75rem; margin-top: 1rem; }
 .account-card { min-width: 0; padding: 1.1rem; border: 1px solid var(--line); border-top: 2px solid rgba(111, 216, 229, .42); border-radius: 1rem; background: rgba(16, 25, 27, .9); box-shadow: 0 12px 35px rgba(0, 0, 0, .12); }
 .account-card-heading, .account-card-heading > div { display: flex; align-items: center; gap: .7rem; min-width: 0; }
 .account-card-heading { justify-content: space-between; }
@@ -443,7 +443,6 @@ main, footer { width: min(1180px, 92vw); margin-inline: auto; }
 .account-suggestions strong, .account-suggestions small { display: block; }
 .account-suggestions strong { font-size: .7rem; }
 .account-suggestions small { margin-top: .2rem; color: var(--muted); font-size: .63rem; line-height: 1.45; }
-.account-good { display: flex; align-items: center; gap: .5rem; margin: .8rem 0 0; color: var(--green); font-size: .7rem; }
 .account-card-footer { display: flex; align-items: center; justify-content: space-between; gap: .75rem; margin-top: .85rem; padding-top: .75rem; border-top: 1px solid var(--line); }
 .account-card-footer > small { color: var(--muted); font-size: .61rem; }
 .account-card-footer > div { display: flex; gap: .25rem; }
