@@ -16,16 +16,16 @@ jobs:
 
     steps:
       - name: Check out repository
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       - name: Set up Go
-        uses: actions/setup-go@v7
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
         with:
           go-version-file: go.mod
           cache: true
 
       - name: Set up Node.js
-        uses: actions/setup-node@v6
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6
         with:
           node-version: 24
           cache: npm
@@ -50,8 +50,15 @@ jobs:
       - name: Verify Go module checksums
         run: go mod verify
 
-      - name: Test Go packages
-        run: go test ./...
+      - name: Test Go packages with an internal coverage floor
+        shell: bash
+        run: |
+          coverage_file="$(mktemp)"
+          trap 'rm -f "${coverage_file}"' EXIT
+          go test -coverprofile="${coverage_file}" ./internal/...
+          coverage="$(go tool cover -func="${coverage_file}" | awk '/^total:/ { gsub(/%/, "", $3); print $3 }')"
+          echo "Internal Go statement coverage: ${coverage}%"
+          awk -v coverage="${coverage}" 'BEGIN { if (coverage + 0 < 55) exit 1 }'
 
       - name: Run Go race detector
         run: go test -race ./...
@@ -73,10 +80,10 @@ jobs:
 
     steps:
       - name: Check out repository
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       - name: Set up Go
-        uses: actions/setup-go@v7
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7
         with:
           go-version-file: go.mod
           cache: true
@@ -128,7 +135,7 @@ jobs:
 
     steps:
       - name: Check out repository
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       - name: Log in to GHCR
         run: echo "${{ github.token }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin

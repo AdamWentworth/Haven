@@ -22,7 +22,13 @@ import (
 	"github.com/AdamWentworth/haven/internal/trust"
 )
 
-const maximumResponseBody = 1 << 20
+const (
+	maximumResponseBody   = 1 << 20
+	maximumReportAttempts = 3
+	reportRequestTimeout  = 10 * time.Second
+)
+
+var reportRetryDelays = [...]time.Duration{250 * time.Millisecond, time.Second}
 
 type Config struct {
 	HubURL      string `json:"hubUrl"`
@@ -170,25 +176,60 @@ func (client *Client) Report(ctx context.Context, snapshot model.SecuritySnapsho
 	if err != nil {
 		return model.ObservationReceipt{}, fmt.Errorf("encode observation: %w", err)
 	}
-	request, err := http.NewRequestWithContext(ctx, http.MethodPost, client.config.HubURL+"/v1/observations", bytes.NewReader(payload))
-	if err != nil {
-		return model.ObservationReceipt{}, fmt.Errorf("create observation request: %w", err)
+	httpClient := &http.Client{Transport: &http.Transport{TLSClientConfig: tlsConfig}, Timeout: reportRequestTimeout}
+	var lastError error
+	for attempt := 0; attempt < maximumReportAttempts; attempt++ {
+		request, err := http.NewRequestWithContext(ctx, http.MethodPost, client.config.HubURL+"/v1/observations", bytes.NewReader(payload))
+		if err != nil {
+			return model.ObservationReceipt{}, fmt.Errorf("create observation request: %w", err)
+		}
+		request.Header.Set("Content-Type", "application/json")
+		request.Header.Set("Accept", "application/json")
+		response, err := httpClient.Do(request)
+		if err != nil {
+			lastError = fmt.Errorf("report observation: %w", err)
+		} else if response.StatusCode == http.StatusAccepted {
+			var receipt model.ObservationReceipt
+			decodeErr := decodeResponse(response, &receipt)
+			response.Body.Close()
+			if decodeErr != nil {
+				return model.ObservationReceipt{}, decodeErr
+			}
+			if receipt.ObservationID != envelope.ObservationID || receipt.AcceptedAt.IsZero() {
+				return model.ObservationReceipt{}, errors.New("hub returned an invalid observation receipt")
+			}
+			return receipt, nil
+		} else if retryableReportStatus(response.StatusCode) {
+			lastError = responseError(response)
+			response.Body.Close()
+		} else {
+			requestError := responseError(response)
+			response.Body.Close()
+			return model.ObservationReceipt{}, requestError
+		}
+
+		if attempt < len(reportRetryDelays) {
+			if err := waitForReportRetry(ctx, reportRetryDelays[attempt]); err != nil {
+				return model.ObservationReceipt{}, err
+			}
+		}
 	}
-	request.Header.Set("Content-Type", "application/json")
-	request.Header.Set("Accept", "application/json")
-	response, err := (&http.Client{Transport: &http.Transport{TLSClientConfig: tlsConfig}, Timeout: 30 * time.Second}).Do(request)
-	if err != nil {
-		return model.ObservationReceipt{}, fmt.Errorf("report observation: %w", err)
+	return model.ObservationReceipt{}, lastError
+}
+
+func retryableReportStatus(status int) bool {
+	return status == http.StatusTooManyRequests || status >= http.StatusInternalServerError
+}
+
+func waitForReportRetry(ctx context.Context, delay time.Duration) error {
+	timer := time.NewTimer(delay)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return fmt.Errorf("report observation: %w", ctx.Err())
+	case <-timer.C:
+		return nil
 	}
-	defer response.Body.Close()
-	if response.StatusCode != http.StatusAccepted {
-		return model.ObservationReceipt{}, responseError(response)
-	}
-	var receipt model.ObservationReceipt
-	if err := decodeResponse(response, &receipt); err != nil {
-		return model.ObservationReceipt{}, err
-	}
-	return receipt, nil
 }
 
 func validatedHubURL(value string) (string, error) {

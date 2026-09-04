@@ -24,6 +24,7 @@ var (
 	ErrEnrollmentInvalid = errors.New("enrollment token is invalid, expired, or already used")
 	ErrUnknownDevice     = errors.New("client certificate is not enrolled")
 	ErrRevokedDevice     = errors.New("device has been revoked")
+	ErrAlreadyAccepted   = errors.New("observation was already accepted")
 	ErrReplay            = errors.New("observation sequence has already been accepted")
 )
 
@@ -487,6 +488,13 @@ func (store *Store) Close() error {
 	return store.database.Close()
 }
 
+// Ping verifies that the persistence layer required by every useful hub
+// operation is responsive. It is intentionally small enough for readiness
+// probes and does not mutate state.
+func (store *Store) Ping(ctx context.Context) error {
+	return store.database.PingContext(ctx)
+}
+
 func (store *Store) SaveSnapshot(ctx context.Context, snapshot model.SecuritySnapshot) error {
 	deviceID := snapshot.Device.DeviceID
 	if deviceID == "" {
@@ -687,6 +695,27 @@ func (store *Store) AcceptObservation(
 	}
 	if envelope.DeviceID != deviceID {
 		return ErrUnknownDevice
+	}
+	var acceptedDeviceID, acceptedCollectedAt string
+	var acceptedSequence sql.NullInt64
+	err = transaction.QueryRowContext(
+		ctx,
+		`SELECT device_id, sequence, collected_at
+		 FROM device_observations WHERE observation_id = ?`,
+		envelope.ObservationID,
+	).Scan(&acceptedDeviceID, &acceptedSequence, &acceptedCollectedAt)
+	if err == nil {
+		collectedAt, parseErr := parseDatabaseTime(acceptedCollectedAt)
+		if parseErr != nil {
+			return fmt.Errorf("read accepted observation timestamp: %w", parseErr)
+		}
+		if acceptedDeviceID == deviceID && acceptedSequence.Valid && acceptedSequence.Int64 == envelope.Sequence && collectedAt.Equal(envelope.Snapshot.CollectedAt.UTC()) {
+			return ErrAlreadyAccepted
+		}
+		return ErrReplay
+	}
+	if !errors.Is(err, sql.ErrNoRows) {
+		return fmt.Errorf("check observation idempotency key: %w", err)
 	}
 	if envelope.Sequence <= lastSequence {
 		return ErrReplay
@@ -1449,7 +1478,7 @@ func scanDevice(row rowScanner, now time.Time) (model.DeviceRecord, error) {
 // EnrolledDeviceStaleAfter is the server-owned freshness allowance used when
 // classifying an enrolled endpoint. Clients receive this value from the
 // authenticated runtime endpoint instead of duplicating the threshold.
-const EnrolledDeviceStaleAfter = 20 * time.Minute
+const EnrolledDeviceStaleAfter = 35 * time.Minute
 
 func deviceStatus(device model.DeviceRecord, now time.Time) string {
 	if device.RevokedAt != nil || device.TrustState == "revoked" {

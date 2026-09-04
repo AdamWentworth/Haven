@@ -18,6 +18,7 @@ import (
 	"github.com/AdamWentworth/haven/internal/alert"
 	"github.com/AdamWentworth/haven/internal/appliance"
 	"github.com/AdamWentworth/haven/internal/authn"
+	"github.com/AdamWentworth/haven/internal/buildinfo"
 	"github.com/AdamWentworth/haven/internal/collector"
 	"github.com/AdamWentworth/haven/internal/model"
 	"github.com/AdamWentworth/haven/internal/notification"
@@ -142,10 +143,19 @@ func (server *Server) managedAppliances(writer http.ResponseWriter, request *htt
 	server.writeJSON(writer, http.StatusOK, statuses)
 }
 
-func (server *Server) health(writer http.ResponseWriter, _ *http.Request) {
-	server.writeJSON(writer, http.StatusOK, map[string]any{
-		"status":         "ready",
+func (server *Server) health(writer http.ResponseWriter, request *http.Request) {
+	status := http.StatusOK
+	readiness := "ready"
+	if err := server.store.Ping(request.Context()); err != nil {
+		status = http.StatusServiceUnavailable
+		readiness = "not-ready"
+		server.logger.Error("readiness check failed", "error", err)
+	}
+	server.writeJSON(writer, status, map[string]any{
+		"status":         readiness,
 		"service":        "HAVEN",
+		"version":        buildinfo.Version,
+		"revision":       buildinfo.Revision,
 		"agentIngestion": "mutual-tls",
 		"timestamp":      time.Now().UTC(),
 	})
@@ -159,6 +169,8 @@ func (server *Server) runtimeStatus(writer http.ResponseWriter, _ *http.Request)
 	server.writeJSON(writer, http.StatusOK, map[string]any{
 		"status":                          "ready",
 		"service":                         "HAVEN",
+		"version":                         buildinfo.Version,
+		"revision":                        buildinfo.Revision,
 		"agentIngestion":                  "mutual-tls",
 		"demoMode":                        server.demoMode,
 		"localCollection":                 server.localCollection,

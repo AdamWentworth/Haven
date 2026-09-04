@@ -168,6 +168,12 @@ func (server *AgentServer) observe(writer http.ResponseWriter, request *http.Req
 		now,
 	)
 	switch {
+	case errors.Is(err, storage.ErrAlreadyAccepted):
+		server.writeJSON(writer, http.StatusAccepted, model.ObservationReceipt{
+			ObservationID: envelope.ObservationID,
+			AcceptedAt:    now,
+		})
+		return
 	case errors.Is(err, storage.ErrReplay):
 		server.writeError(writer, http.StatusConflict, "replay_rejected", "This observation sequence has already been accepted.")
 		return

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { actionableFindings, visibleFindingLifecycles } from "./App";
+import { actionableFindings, visibleFindingLifecycles } from "./findings";
 import type { FindingReview, HavenAlert, SecurityEvent, SecurityFinding } from "./types";
 
 const finding = (id: string): SecurityFinding => ({

@@ -1,16 +1,22 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { addPasskey, collectSnapshot, getAuthStatus, getDevice, getLatestSnapshot, getNotificationStatus, getRuntimeStatus, listAlerts, listAuditEvents, listDevices, listEvents, listExpectedServices, listFindingReviews, listManagedAppliances, listObservedListeners, listPasskeys, listSecurityActions, loginWithPasskey, logout, registerPasskey, registerPushDestination, removeExpectedService, removePasskey, removePushDestination, requestSecurityAction, saveExpectedService, saveExpectedServices, saveFindingReview } from "./api";
+import { suggestedBaseline } from "./baseline";
+import { AuthenticationGate } from "./authentication-gate";
+import { DeviceInventory } from "./device-inventory";
+import { actionableFindings, visibleFindingLifecycles } from "./findings";
+import { booleanValue, formatBytes, formatDate, formatDuration, formatInterval, formatPortBinding, formatRelativeTime, formatTimeRemaining, policyValue } from "./format";
 import { ActivityIcon, AlertIcon, BellIcon, CheckIcon, ChipIcon, DefenderIcon, DevicesIcon, FirewallIcon, HavenIcon, HelpIcon, LaptopIcon, LockIcon, MonitorIcon, NetworkIcon, RefreshIcon, RemoteAccessIcon, ServerIcon, UpdateIcon, UsersIcon, WorkloadIcon } from "./icons";
 import { componentHealthTone, coverageTone, healthStatusLabel, managedHealthTone, storageSetDetail, storageSetLabel } from "./appliance-health";
-import { bindScopeLabel, canonicalOwnerName, endpoint, endpointScope, expectedServiceMatches, expectedServiceOwnerConstrained, isPrivateNetworkAddress, listenerOwnerSummary, liveNetworkRelationships, logicalListeners, networkServiceLabel, normalizeAddress, workloadAttribution, type LogicalListener, type NetworkDeviceObservation } from "./network";
+import { AppNavigation, DeviceNavigation, PageIntro } from "./navigation";
+import { bindScopeLabel, endpoint, endpointScope, expectedServiceMatches, expectedServiceOwnerConstrained, isPrivateNetworkAddress, listenerOwnerSummary, liveNetworkRelationships, logicalListeners, networkServiceLabel, normalizeAddress, workloadAttribution, type LogicalListener, type NetworkDeviceObservation } from "./network";
 import { decodeApplicationServerKey, normalizePushDestinationLabel, serializePushSubscription, supportsBackgroundPush } from "./push";
+import { type AppRoute, type DeviceSection, useAppRoute } from "./routing";
 import type {
   BaselineCheck,
   AuditEvent,
   ActionCapability,
   AuthStatus,
   BindScope,
-  ContainerPortBinding,
   ContainerWorkload,
   DefenderStatus,
   DeviceRecord,
@@ -35,14 +41,8 @@ import type {
   SecurityFinding,
   WorkloadInventory,
 } from "./types";
+import { StatusChip, type Accent, type Tone } from "./ui";
 
-type Tone = "healthy" | "configured" | "attention" | "danger" | "unknown";
-type Accent = "green" | "blue" | "amber" | "cyan";
-
-interface ChipProps {
-  label: string;
-  tone: Tone;
-}
 
 async function loadNetworkObservations(inventory: DeviceRecord[], demoMode: boolean, signal?: AbortSignal) {
   const visible = inventory.filter((device) => device.trustState !== "revoked");
@@ -64,287 +64,6 @@ async function latestEnrolledObservation(inventory: DeviceRecord[], preferredId:
   if (!selected) return null;
   const detail = await getDevice(selected.id, signal);
   return detail.snapshot ? { id: selected.id, snapshot: detail.snapshot } : null;
-}
-
-function AuthenticationGate({ status, authenticate }: { status: AuthStatus; authenticate: (bootstrapCode?: string, label?: string) => Promise<void> }) {
-  const [bootstrapCode, setBootstrapCode] = useState("");
-  const [label, setLabel] = useState("This device");
-  const [useLocalCode, setUseLocalCode] = useState(!status.configured);
-  const [working, setWorking] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const passkeysSupported = typeof window !== "undefined" && !!window.PublicKeyCredential && !!navigator.credentials;
-
-  const proceed = async () => {
-    setWorking(true);
-    setError(null);
-    try {
-      await authenticate(useLocalCode ? bootstrapCode.trim() : undefined, label.trim());
-    } catch (reason) {
-      setError(reason instanceof Error ? reason.message : "The passkey provider could not complete the request.");
-    } finally {
-      setWorking(false);
-    }
-  };
-
-  if (status.useConfiguredOrigin) {
-    return <main className="auth-shell"><section className="auth-card"><span className="brand-mark"><HavenIcon /></span><p className="eyebrow">TRUSTED PRIVATE ORIGIN</p><h1>Open HAVEN at its trusted address</h1><p>Passkeys require HAVEN's exact configured origin. Your data stays on your private network; only the browser address changes.</p><a className="primary-action" href={status.origin}>Continue to {status.origin}</a></section></main>;
-  }
-
-  return (
-    <main className="auth-shell">
-      <section className="auth-card" aria-labelledby="auth-title">
-        <span className="brand-mark"><HavenIcon /></span>
-        <p className="eyebrow">HAVEN ACTION CENTER</p>
-        <h1 id="auth-title">{useLocalCode ? (status.configured ? "Recover passkey access" : "Create the first owner passkey") : "Unlock with a passkey"}</h1>
-        <p>{useLocalCode ? "Generate a short-lived enrollment code on the machine that hosts HAVEN, then paste it here. This is required only to create or recover owner access—not whenever HAVEN starts." : "Use any passkey already registered to HAVEN. Your browser and operating system choose the available provider, such as Windows Hello, Touch ID, a phone, or a hardware security key."}</p>
-        {useLocalCode && <><label className="auth-field"><span>Passkey label</span><input value={label} maxLength={60} onChange={(event) => setLabel(event.target.value)} autoComplete="off" /></label><label className="auth-field"><span>One-time enrollment code</span><input value={bootstrapCode} onChange={(event) => setBootstrapCode(event.target.value)} autoComplete="one-time-code" spellCheck={false} /></label></>}
-        {error && <p className="inline-error" role="alert">{error}</p>}
-        {!passkeysSupported && <p className="inline-error" role="alert">This browser does not expose the passkey APIs HAVEN needs.</p>}
-        <button className="primary-action" type="button" onClick={() => void proceed()} disabled={working || !passkeysSupported || (useLocalCode && bootstrapCode.trim() === "")}>{working ? "Waiting for your passkey provider…" : useLocalCode ? "Create HAVEN passkey" : "Continue with a passkey"}</button>
-        {status.configured && <button className="text-action" type="button" onClick={() => { setUseLocalCode((value) => !value); setError(null); }}>{useLocalCode ? "Return to passkey sign-in" : "Lost access? Use a local recovery code"}</button>}
-        <p className="auth-footnote">No HAVEN password is stored. A trusted-browser session lasts up to 30 days; sensitive controls still require a fresh passkey confirmation.</p>
-      </section>
-    </main>
-  );
-}
-
-function DeviceInventory({ devices, selectedId, select, demoMode }: { devices: DeviceRecord[]; selectedId: string; select: (id: string) => void; demoMode: boolean }) {
-  return (
-    <section className="device-inventory" aria-labelledby="devices-title">
-      <div className="inventory-heading">
-        <div className="heading-identity"><span className="section-icon cyan"><DevicesIcon /></span><div><p className="eyebrow">{demoMode ? "SYNTHETIC INVENTORY" : "TRUSTED INVENTORY"}</p><h2 id="devices-title">{demoMode ? "Demo devices" : "Devices"}</h2></div></div>
-        <span>{devices.length} known</span>
-      </div>
-      <div className="device-list">
-        {devices.map((device) => {
-          const tone: Tone = device.status === "current" ? "healthy" : device.status === "revoked" ? "danger" : "attention";
-          return (
-            <button className={`device-button ${selectedId === device.id ? "selected" : ""}`} type="button" key={device.id} onClick={() => select(device.id)} aria-pressed={selectedId === device.id}>
-              <span className="device-identity"><span className="device-icon">{device.operatingSystem.toLowerCase().includes("server") ? <ServerIcon /> : device.displayName.toLowerCase().includes("laptop") ? <LaptopIcon /> : <MonitorIcon />}</span><span><strong>{device.displayName}</strong><small>{device.operatingSystem || "Awaiting first report"}{device.lastCollectedAt ? ` · reported ${formatRelativeTime(device.lastCollectedAt)}` : ""}</small></span></span>
-              <StatusChip label={device.status.replaceAll("-", " ")} tone={tone} />
-            </button>
-          );
-        })}
-      </div>
-    </section>
-  );
-}
-
-function StatusChip({ label, tone }: ChipProps) {
-  return <span className={`status-chip ${tone}`}>{label}</span>;
-}
-
-function formatDate(value: string | null | undefined, fallback = "Not reported") {
-  if (!value) return fallback;
-  const date = new Date(value);
-  return Number.isNaN(date.valueOf()) ? fallback : date.toLocaleString();
-}
-
-function formatRelativeTime(value: string | null | undefined, fallback = "not reported") {
-  if (!value) return fallback;
-  const timestamp = new Date(value).valueOf();
-  if (!Number.isFinite(timestamp)) return fallback;
-  const elapsedSeconds = Math.max(0, Math.floor((Date.now() - timestamp) / 1000));
-  if (elapsedSeconds < 10) return "just now";
-  if (elapsedSeconds < 60) return `${elapsedSeconds}s ago`;
-  const elapsedMinutes = Math.floor(elapsedSeconds / 60);
-  if (elapsedMinutes < 60) return `${elapsedMinutes} min ago`;
-  const elapsedHours = Math.floor(elapsedMinutes / 60);
-  if (elapsedHours < 48) return `${elapsedHours} hr ago`;
-  return `${Math.floor(elapsedHours / 24)} days ago`;
-}
-
-function formatTimeRemaining(value: string) {
-  const remainingSeconds = Math.max(0, Math.ceil((new Date(value).valueOf() - Date.now()) / 1000));
-  if (remainingSeconds < 60) return "less than 1 min";
-  const minutes = Math.ceil(remainingSeconds / 60);
-  if (minutes < 60) return `${minutes} min`;
-  const hours = Math.ceil(minutes / 60);
-  if (hours < 48) return `${hours} hr`;
-  return `${Math.ceil(hours / 24)} days`;
-}
-
-function formatDuration(value: number | null) {
-  if (value === null || !Number.isFinite(value)) return "Uptime unavailable";
-  const totalHours = Math.floor(value / 3600);
-  const days = Math.floor(totalHours / 24);
-  const hours = totalHours % 24;
-  return days > 0 ? `${days}d ${hours}h uptime` : `${hours}h uptime`;
-}
-
-function formatInterval(seconds: number) {
-  if (seconds < 60) return `${seconds}s`;
-  const minutes = Math.round(seconds / 60);
-  return minutes < 60 ? `${minutes} min` : `${Math.round(minutes / 60)} hr`;
-}
-
-function formatBytes(value: number | null | undefined) {
-  if (value === null || value === undefined || !Number.isFinite(value)) return "Not reported";
-  const units = ["B", "KiB", "MiB", "GiB", "TiB"];
-  let size = Math.max(0, value);
-  let unit = 0;
-  while (size >= 1024 && unit < units.length - 1) { size /= 1024; unit += 1; }
-  return `${size >= 10 || unit === 0 ? size.toFixed(0) : size.toFixed(1)} ${units[unit]}`;
-}
-
-function booleanValue(value: boolean | null) {
-  if (value === true) return { label: "On", className: "value-good" };
-  if (value === false) return { label: "Off", className: "value-bad" };
-  return { label: "Unavailable", className: "value-muted" };
-}
-
-interface BaselineSuggestion {
-	id: string;
-	title: string;
-	description: string;
-	listenerKeys: string[];
-	services: ExpectedServiceInput[];
-}
-
-const workloadLabels: Record<string, string> = {
-	frontend_nginx: "PokeGoNexus public web ingress",
-	binderledger_api: "BinderLedger API",
-	binderledger_web: "BinderLedger web",
-	haven_dns: "HAVEN private DNS",
-	haven_hub: "HAVEN agent hub",
-	haven_proxy: "HAVEN HTTPS console",
-	winrift_api: "WinRift API",
-	winrift_web: "WinRift web",
-};
-
-function readableIdentifier(value: string) {
-	return value.replace(/[_-]+/g, " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
-}
-
-function knownSystemdLabel(unit: string) {
-	if (unit === "systemd-resolved.service") return "systemd-resolved local DNS";
-	if (unit === "binderledger-localhost-proxy@8081.service") return "BinderLedger localhost proxy";
-	return "";
-}
-
-export function suggestedBaseline(deviceId: string, operatingSystem: string, listeners: LogicalListener[], inventory: WorkloadInventory | null, expectedServices: ExpectedService[]) {
-	const suggestions: BaselineSuggestion[] = [];
-	const isWindows = /windows/i.test(operatingSystem);
-	const unreviewed = listeners.filter((listener) => !expectedServices.some((service) => expectedServiceMatches(listener, service, inventory)));
-	const exactLabels = isWindows ? new Map<string, string>([
-		["TCP:135", "Windows RPC Endpoint Mapper"],
-		["TCP:139", "Windows file sharing (NetBIOS)"],
-		["TCP:445", "Windows file sharing (SMB)"],
-		["TCP:3389", "Remote Desktop"],
-		["TCP:5040", "Windows Connected Devices"],
-		["TCP:5357", "Windows device discovery (WSD)"],
-		["TCP:8096", "Jellyfin"],
-	]) : new Map<string, string>([
-		["TCP:22", "OpenSSH"],
-		["UDP:546", "DHCPv6 client"],
-		["UDP:5353", "mDNS discovery"],
-		["UDP:51822", "WireGuard VPN"],
-	]);
-
-	for (const listener of unreviewed) {
-		const attributions = workloadAttribution(listener, inventory);
-		if (attributions.length === 1) {
-			const workload = attributions[0].workload;
-			const title = workloadLabels[workload.name] || readableIdentifier(workload.name);
-			suggestions.push({
-				id: `workload:${listener.key}:${workload.name}`,
-				title,
-				description: `${listener.protocol} ${listener.port} · ${bindScopeLabel(listener.bindScope)} · currently published by Docker workload ${workload.name}${listenerOwnerSummary(listener) ? ` · ${listenerOwnerSummary(listener)}` : ""}.`,
-				listenerKeys: [listener.key],
-				services: [{ deviceId, label: title, protocol: listener.protocol, port: listener.port, portEnd: listener.port, bindScope: listener.bindScope, processNames: listener.processes, workloadNames: [workload.name], systemdUnits: listener.systemdUnits }],
-			});
-			continue;
-		}
-		const knownUnitLabels = listener.systemdUnits.map(knownSystemdLabel);
-		if (knownUnitLabels.length > 0 && knownUnitLabels.every(Boolean) && new Set(knownUnitLabels).size === 1) {
-			const title = knownUnitLabels[0];
-			suggestions.push({
-				id: `systemd:${listener.key}:${listener.systemdUnits.join(",")}`,
-				title,
-				description: `${listener.protocol} ${listener.port} · ${bindScopeLabel(listener.bindScope)} · ${listenerOwnerSummary(listener)}.`,
-				listenerKeys: [listener.key],
-				services: [{ deviceId, label: title, protocol: listener.protocol, port: listener.port, portEnd: listener.port, bindScope: listener.bindScope, processNames: listener.processes, workloadNames: [], systemdUnits: listener.systemdUnits }],
-			});
-			continue;
-		}
-		if (listener.bindScope === "local") continue;
-		const title = exactLabels.get(`${listener.protocol}:${listener.port}`);
-		if (!title) continue;
-		suggestions.push({
-			id: `native:${listener.key}`,
-			title,
-			description: `${listener.protocol} ${listener.port} · ${bindScopeLabel(listener.bindScope)}${listenerOwnerSummary(listener) ? ` · ${listenerOwnerSummary(listener)}` : ""}.`,
-			listenerKeys: [listener.key],
-			services: [{ deviceId, label: title, protocol: listener.protocol, port: listener.port, portEnd: listener.port, bindScope: listener.bindScope, processNames: listener.processes, workloadNames: [], systemdUnits: listener.systemdUnits }],
-		});
-	}
-
-	if (isWindows) {
-		const systemProcesses = new Set(["system", "svchost", "services", "lsass", "wininit", "winlogon", "spoolsv"]);
-		const exactSuggestionKeys = new Set(suggestions.flatMap((suggestion) => suggestion.listenerKeys));
-		const dynamicByScope = new Map<LogicalListener["bindScope"], LogicalListener[]>();
-		for (const listener of unreviewed) {
-			const processes = listener.processes.map((process) => canonicalOwnerName(process, true));
-			if (exactSuggestionKeys.has(listener.key) || listener.protocol !== "TCP" || listener.port < 49152 || listener.port > 65535 || processes.length === 0 || !processes.every((process) => systemProcesses.has(process))) continue;
-			dynamicByScope.set(listener.bindScope, [...(dynamicByScope.get(listener.bindScope) || []), listener]);
-		}
-		for (const [scope, grouped] of dynamicByScope) {
-			const processes = [...new Set(grouped.flatMap((listener) => listener.processes.map((process) => canonicalOwnerName(process, true))))].sort();
-			suggestions.push({
-				id: `windows-rpc:${scope}:${processes.join(",")}`,
-				title: "Windows dynamic RPC services",
-				description: `Groups ${grouped.length} current listener${grouped.length === 1 ? "" : "s"} in TCP 49152–65535, but only while owned by reviewed Windows system processes: ${processes.join(", ")}.`,
-				listenerKeys: grouped.map((listener) => listener.key),
-				services: [{ deviceId, label: "Windows dynamic RPC services", protocol: "TCP", port: 49152, portEnd: 65535, bindScope: scope, processNames: processes, workloadNames: [], systemdUnits: [] }],
-			});
-		}
-	} else {
-		const containerdByScope = new Map<LogicalListener["bindScope"], LogicalListener[]>();
-		for (const listener of unreviewed) {
-			const units = listener.systemdUnits.map((unit) => canonicalOwnerName(unit));
-			if (listener.protocol !== "TCP" || listener.port < 32768 || listener.port > 60999 || units.length === 0 || !units.every((unit) => unit === "containerd.service")) continue;
-			containerdByScope.set(listener.bindScope, [...(containerdByScope.get(listener.bindScope) || []), listener]);
-		}
-		for (const [scope, grouped] of containerdByScope) {
-			const processes = [...new Set(grouped.flatMap((listener) => listener.processes))].sort();
-			suggestions.push({
-				id: `containerd:${scope}`,
-				title: "containerd internal runtime listeners",
-				description: `Covers ${grouped.length} current TCP listener${grouped.length === 1 ? "" : "s"} in the Linux ephemeral range 32768–60999, but only while owned by containerd.service${processes.length ? ` and process${processes.length === 1 ? "" : "es"} ${processes.join(", ")}` : ""}.`,
-				listenerKeys: grouped.map((listener) => listener.key),
-				services: [{ deviceId, label: "containerd internal runtime listeners", protocol: "TCP", port: 32768, portEnd: 60999, bindScope: scope, processNames: processes, workloadNames: [], systemdUnits: ["containerd.service"] }],
-			});
-		}
-		const avahiByScope = new Map<LogicalListener["bindScope"], LogicalListener[]>();
-		for (const listener of unreviewed) {
-			const units = listener.systemdUnits.map((unit) => canonicalOwnerName(unit));
-			if (listener.protocol !== "UDP" || listener.port < 32768 || listener.port > 60999 || units.length === 0 || !units.every((unit) => unit === "avahi-daemon.service")) continue;
-			avahiByScope.set(listener.bindScope, [...(avahiByScope.get(listener.bindScope) || []), listener]);
-		}
-		for (const [scope, grouped] of avahiByScope) {
-			const processes = [...new Set(grouped.flatMap((listener) => listener.processes))].sort();
-			suggestions.push({
-				id: `avahi-dynamic:${scope}`,
-				title: "Avahi dynamic mDNS sockets",
-				description: `Covers ${grouped.length} current UDP socket${grouped.length === 1 ? "" : "s"} in this host's Linux dynamic range 32768–60999, but only while attributed to avahi-daemon.service${processes.length ? ` and process${processes.length === 1 ? "" : "es"} ${processes.join(", ")}` : ""}.`,
-				listenerKeys: grouped.map((listener) => listener.key),
-				services: [{ deviceId, label: "Avahi dynamic mDNS sockets", protocol: "UDP", port: 32768, portEnd: 60999, bindScope: scope, processNames: processes, workloadNames: [], systemdUnits: ["avahi-daemon.service"] }],
-			});
-		}
-	}
-
-	return suggestions;
-}
-
-function formatPortBinding(binding: ContainerPortBinding) {
-	if (!binding.published) return `${binding.containerPort}/${binding.protocol.toLowerCase()} · container only`;
-	const address = normalizeAddress(binding.hostAddress || "") || "*";
-	const host = address.includes(":") ? `[${address}]` : address;
-	return `${host}:${binding.hostPort} → ${binding.containerPort}/${binding.protocol.toLowerCase()}`;
-}
-
-function policyValue(value?: string) {
-  return !value || value === "NotConfigured" ? "System default" : value;
 }
 
 function SummaryCard({
@@ -547,7 +266,9 @@ function ApplianceHealthPanel({ health }: { health: ManagedHealthStatus }) {
 	</section>;
 }
 
-function NetworkOverview({ devices, appliances, events, alerts, selectedId, selectDevice, demoMode }: { devices: NetworkDeviceObservation[]; appliances: ManagedApplianceStatus[]; events: SecurityEvent[]; alerts: HavenAlert[]; selectedId: string; selectDevice: (id: string) => void; demoMode: boolean }) {
+type NetworkView = "overview" | "network" | "appliances";
+
+function NetworkOverview({ devices, appliances, events, alerts, selectedId, selectDevice, demoMode, view }: { devices: NetworkDeviceObservation[]; appliances: ManagedApplianceStatus[]; events: SecurityEvent[]; alerts: HavenAlert[]; selectedId: string; selectDevice: (id: string) => void; demoMode: boolean; view: NetworkView }) {
 	const summaries = useMemo(() => devices.map((entry) => {
 		const snapshot = entry.snapshot;
 		const listeners = logicalListeners(snapshot?.connections || []);
@@ -579,7 +300,7 @@ function NetworkOverview({ devices, appliances, events, alerts, selectedId, sele
 	const unreviewedCount = summaries.reduce((count, entry) => count + entry.unreviewed.length, 0);
 	const activeConnectionCount = summaries.reduce((count, entry) => count + entry.establishedConnections, 0);
 	const observedAssetCount = new Set(relationships.filter((item) => item.peerKind === "observed").flatMap((item) => [item.sourceName, item.targetName].filter((name) => isPrivateNetworkAddress(name)))).size;
-	const applianceHealthyCount = appliances.filter((appliance) => appliance.status === "healthy" || appliance.status === "observed").length;
+	const applianceReachableCount = appliances.filter((appliance) => appliance.lastCheckedAt && appliance.status !== "attention" && appliance.services.filter((service) => service.required).every((service) => service.reachable)).length;
 	const applianceAttentionCount = appliances.filter((appliance) => appliance.status === "attention").length;
 	const appliancePendingCount = appliances.filter((appliance) => appliance.status === "pending" || appliance.status === "rechecking").length;
 	const applianceAlertCount = alerts.filter((alert) => alert.deviceId.startsWith("appliance:")).length;
@@ -598,13 +319,14 @@ function NetworkOverview({ devices, appliances, events, alerts, selectedId, sele
 	const visibleRelationships = relationships.slice(0, 12);
 
 	return (
-		<section className="panel network-overview-panel" aria-labelledby="network-overview-title">
-			<PanelHeading eyebrow="HOME NETWORK" title="Network overview" id="network-overview-title" icon={<NetworkIcon />} accent="cyan">
-				{demoMode ? "Synthetic relationships across the demo inventory" : "Latest authenticated reports; live connection details are not retained as history"}
+		<section className={`panel network-overview-panel network-view-${view}`} aria-labelledby={`${view}-view-title`}>
+			<PanelHeading eyebrow={view === "appliances" ? "MANAGED APPLIANCES" : "HOME NETWORK"} title={view === "overview" ? "Security at a glance" : view === "network" ? "Network activity" : "Appliance health"} id={`${view}-view-title`} icon={view === "appliances" ? <ServerIcon /> : <NetworkIcon />} accent="cyan">
+				{view === "appliances" ? "Health from explicitly configured private devices" : demoMode ? "Synthetic relationships across the demo inventory" : "Latest authenticated reports; live connection details are not retained as history"}
 			</PanelHeading>
+			{view === "overview" && <>
 			<div className={`network-assurance ${assuranceTone}`}>
 				<span className="network-assurance-icon">{urgent || attention ? <AlertIcon size={20} /> : <CheckIcon size={20} />}</span>
-				<div><strong>{assuranceLabel}</strong><p>{urgent ? "At least one reporting device has a high finding or firewall problem." : attention ? `${attentionReasons.join(" · ")} ${attentionItemCount === 1 ? "remains" : "remain"} visible across monitored systems.` : assuranceTone === "unknown" ? "No urgent issue is derived, but one or more devices has incomplete current evidence." : "Every reporting device matches its reviewed baseline, and every required managed-appliance service is reachable."}</p></div>
+				<div><strong>{assuranceLabel}</strong><p>{urgent ? "At least one reporting device has a high finding or firewall problem." : attention ? `${attentionReasons.join(" · ")} ${attentionItemCount === 1 ? "remains" : "remain"} visible across monitored systems.` : assuranceTone === "unknown" ? "No urgent issue is derived, but one or more devices has incomplete current evidence." : "Every reporting device matches its reviewed baseline, and no required managed-appliance service is failing."}</p></div>
 				<StatusChip label={assuranceLabel} tone={assuranceTone} />
 			</div>
 			<div className="network-metrics" aria-label="Network coverage summary">
@@ -612,7 +334,7 @@ function NetworkOverview({ devices, appliances, events, alerts, selectedId, sele
 				<article><span>Protected firewalls</span><strong>{protectedFirewallCount}/{knownFirewallCount || summaries.length}</strong><small>{knownFirewallCount === summaries.length ? "verified devices" : `${summaries.length - knownFirewallCount} not verified`}</small></article>
 				<article><span>Open findings</span><strong>{findingCount}</strong><small>across current posture</small></article>
 				<article><span>Service reviews</span><strong>{unreviewedCount}</strong><small>non-local listeners</small></article>
-				<article><span>Managed appliances</span><strong>{applianceHealthyCount}/{appliances.length}</strong><small>{appliances.length ? "hub-observed healthy" : "none configured"}</small></article>
+				<article><span>Appliances reachable</span><strong>{applianceReachableCount}/{appliances.length}</strong><small>{appliances.length ? "required services reachable" : "none configured"}</small></article>
 			</div>
 			<section className="network-alert-watch" aria-labelledby="network-alerts-title">
 				<div className="network-subheading"><div><p className="eyebrow">ACTIVE ALERTS</p><h3 id="network-alerts-title">What currently needs attention</h3></div><span>{alerts.length} active</span></div>
@@ -624,7 +346,16 @@ function NetworkOverview({ devices, appliances, events, alerts, selectedId, sele
 				})}</ol>}
 				{alerts.length > 8 && <p className="network-overflow-note">Showing 8 of {alerts.length} current alerts.</p>}
 			</section>
-			<div className="network-overview-columns">
+			<section className="network-subsection overview-changes" aria-labelledby="network-changes-title">
+				<div className="network-subheading"><div><p className="eyebrow">CHANGE WATCH</p><h3 id="network-changes-title">Recent security changes</h3></div><span>latest lifecycle</span></div>
+				{recentChanges.length === 0 ? <p className="activity-empty"><strong>No finding transitions yet.</strong><span>Routine unchanged reports remain quiet.</span></p> : <ol className="network-change-list">{recentChanges.map(({ event }) => {
+					const resolved = event.kind === "resolved";
+					const tone: Tone = resolved ? "healthy" : event.severity === "high" ? "danger" : event.severity === "medium" ? "attention" : "configured";
+					return <li key={event.id}><span className={`network-change-mark ${resolved ? "resolved" : event.severity}`} /> <div><strong>{resolved ? `Resolved: ${event.title}` : event.title}</strong><small>{event.deviceName} · {formatRelativeTime(event.occurredAt)}</small></div><StatusChip label={resolved ? "resolved" : event.severity} tone={tone} /></li>;
+				})}</ol>}
+			</section>
+			</>}
+			{view === "network" && <>
 				<section className="network-subsection" aria-labelledby="network-devices-title">
 					<div className="network-subheading"><div><p className="eyebrow">ENROLLED DEVICES</p><h3 id="network-devices-title">Security coverage</h3></div><span>{summaries.length} trusted</span></div>
 					<div className="network-device-grid">
@@ -634,15 +365,8 @@ function NetworkOverview({ devices, appliances, events, alerts, selectedId, sele
 						</button>)}
 					</div>
 				</section>
-				<section className="network-subsection" aria-labelledby="network-changes-title">
-					<div className="network-subheading"><div><p className="eyebrow">CHANGE WATCH</p><h3 id="network-changes-title">Recent security changes</h3></div><span>latest lifecycle</span></div>
-					{recentChanges.length === 0 ? <p className="activity-empty"><strong>No finding transitions yet.</strong><span>Routine unchanged reports remain quiet.</span></p> : <ol className="network-change-list">{recentChanges.map(({ event }) => {
-						const resolved = event.kind === "resolved";
-						const tone: Tone = resolved ? "healthy" : event.severity === "high" ? "danger" : event.severity === "medium" ? "attention" : "configured";
-						return <li key={event.id}><span className={`network-change-mark ${resolved ? "resolved" : event.severity}`} /> <div><strong>{resolved ? `Resolved: ${event.title}` : event.title}</strong><small>{event.deviceName} · {formatRelativeTime(event.occurredAt)}</small></div><StatusChip label={resolved ? "resolved" : event.severity} tone={tone} /></li>;
-					})}</ol>}
-				</section>
-			</div>
+			</>}
+			{view === "appliances" &&
 			<section className="network-appliances" aria-labelledby="managed-appliances-title">
 				<div className="network-subheading"><div><p className="eyebrow">EXPLICITLY CONFIGURED · AGENTLESS</p><h3 id="managed-appliances-title">Managed appliances</h3></div><span>{appliances.length} monitored</span></div>
 				<p className="network-privacy-note">The hub checks only addresses and ports declared in private deployment configuration. Optional health collection uses file-backed credentials, a pinned host key, and a fixed read-only command; credentials, filenames, shares, disk serials, and raw responses are never returned or retained.</p>
@@ -659,6 +383,8 @@ function NetworkOverview({ devices, appliances, events, alerts, selectedId, sele
 					</article>;
 				})}</div>}
 			</section>
+			}
+			{view === "network" &&
 			<section className="network-flows" aria-labelledby="network-flows-title">
 				<div className="network-subheading"><div><p className="eyebrow">LIVE RELATIONSHIPS</p><h3 id="network-flows-title">Who is talking to what</h3></div><span>{activeConnectionCount} endpoint-reported · {observedAssetCount} observed-only private asset{observedAssetCount === 1 ? "" : "s"}</span></div>
 				<p className="network-privacy-note">This is not a LAN scan. An observed-only asset is a private endpoint contacted by an enrolled device; it is neither trusted nor enrolled automatically. Internet connections are grouped by source process and destination service to reduce noise.</p>
@@ -670,6 +396,7 @@ function NetworkOverview({ devices, appliances, events, alerts, selectedId, sele
 				})}</ol>}
 				{relationships.length > visibleRelationships.length && <p className="network-overflow-note">Showing the 12 highest-context relationship groups; {relationships.length - visibleRelationships.length} additional external group{relationships.length - visibleRelationships.length === 1 ? " is" : "s are"} summarized out of this overview.</p>}
 			</section>
+			}
 		</section>
 	);
 }
@@ -855,15 +582,6 @@ function baselineIcon(id: string) {
   return <HelpIcon />;
 }
 
-export function actionableFindings(findings: SecurityFinding[], reviews: FindingReview[], now = new Date()): SecurityFinding[] {
-  return findings.filter((finding) => {
-    const currentReview = reviews.find((review) => review.findingId === finding.id);
-    if (!currentReview) return true;
-    if (currentReview.state === "accepted-risk") return false;
-    return currentReview.state !== "snoozed" || !currentReview.snoozedUntil || new Date(currentReview.snoozedUntil) <= now;
-  });
-}
-
 function FindingsPanel({ findings, checks, reviews, review }: { findings: SecurityFinding[]; checks: BaselineCheck[]; reviews: FindingReview[]; review: (finding: SecurityFinding, state: FindingReviewState) => void }) {
   const ordered = actionableFindings(findings, reviews).sort((left, right) => ({ high: 0, medium: 1, low: 2 }[left.severity] - { high: 0, medium: 1, low: 2 }[right.severity]));
   const unknown = checks.filter((check) => check.status === "unknown").length;
@@ -960,38 +678,8 @@ function AwaitingAgents({ devices, runtime, passkeys, actions, audit, error, sel
       <PasskeyPanel passkeys={passkeys} add={addOwnerPasskey} remove={removeOwnerPasskey} busy={actionBusy} />
       <ActionCenter actions={actions} audit={audit} capabilities={runtime?.actionCapabilities || []} run={() => undefined} busy={actionBusy} />
     </main>
-    <footer><span>HAVEN milestone 0.11 · Managed appliances</span><span>Observe continuously. Act deliberately.</span></footer>
+    <footer><span>HAVEN {runtime?.version || "development"} · Agent enrollment</span><span>Observe continuously. Act deliberately.</span></footer>
   </>;
-}
-
-interface FindingLifecycle {
-  event: SecurityEvent;
-  openedAt: string | null;
-}
-
-function latestFindingLifecycles(events: SecurityEvent[]) {
-  const ordered = [...events].sort((left, right) => new Date(right.occurredAt).valueOf() - new Date(left.occurredAt).valueOf() || right.id - left.id);
-  const seen = new Set<string>();
-  const lifecycles: FindingLifecycle[] = [];
-  for (const event of ordered) {
-    const key = `${event.deviceId}:${event.findingId}`;
-    if (seen.has(key)) continue;
-    seen.add(key);
-    const opened = event.kind === "opened" ? event : ordered.find((candidate) => candidate.deviceId === event.deviceId && candidate.findingId === event.findingId && candidate.kind === "opened" && new Date(candidate.occurredAt) <= new Date(event.occurredAt));
-    lifecycles.push({ event, openedAt: opened?.occurredAt || null });
-  }
-  return lifecycles.sort((left, right) => Number(left.event.kind === "resolved") - Number(right.event.kind === "resolved") || new Date(right.event.occurredAt).valueOf() - new Date(left.event.occurredAt).valueOf());
-}
-
-const retiredFindingIDs = new Set(["drive-encryption", "openssh-running"]);
-
-export function visibleFindingLifecycles(events: SecurityEvent[], alerts: HavenAlert[]): FindingLifecycle[] {
-  const activeKeys = new Set(alerts.filter((alert) => alert.kind === "finding").map((alert) => {
-    const prefix = `finding:${alert.deviceId}:`;
-    const findingId = alert.id.startsWith(prefix) ? alert.id.slice(prefix.length) : alert.id;
-    return `${alert.deviceId}:${findingId}`;
-  }));
-  return latestFindingLifecycles(events).filter(({ event }) => !retiredFindingIDs.has(event.findingId) && (event.kind === "resolved" || activeKeys.has(`${event.deviceId}:${event.findingId}`)));
 }
 
 function ActivityPanel({ events, alerts }: { events: SecurityEvent[]; alerts: HavenAlert[] }) {
@@ -1056,7 +744,46 @@ function BaselinePanel({ checks, collectedAt, platform }: { checks: BaselineChec
   );
 }
 
-function Application({ snapshot, devices, networkDevices, appliances, events, networkEvents, alerts, runtime, notificationStatus, selectedDevice, selectDevice, refresh, refreshing, error, demoMode, alertsEnabled, alertsSupported, enableAlerts, disableAlerts, reviews, expectedServices, listenerObservations, audit, actions, passkeys, reviewFinding, saveServiceExpectation, saveServiceExpectations, removeServiceExpectation, runAction, addOwnerPasskey, removeOwnerPasskey, actionBusy, signOut }: { snapshot: SecuritySnapshot; devices: DeviceRecord[]; networkDevices: NetworkDeviceObservation[]; appliances: ManagedApplianceStatus[]; events: SecurityEvent[]; networkEvents: SecurityEvent[]; alerts: HavenAlert[]; runtime: RuntimeStatus | null; notificationStatus: PushNotificationStatus | null; selectedDevice: DeviceRecord | null; selectDevice: (id: string) => void; refresh: () => void; refreshing: boolean; error: string | null; demoMode: boolean; alertsEnabled: boolean; alertsSupported: boolean; enableAlerts: (label?: string) => void; disableAlerts: () => void; reviews: FindingReview[]; expectedServices: ExpectedService[]; listenerObservations: ObservedListener[]; audit: AuditEvent[]; actions: SecurityAction[]; passkeys: PasskeyInfo[]; reviewFinding: (finding: SecurityFinding, state: FindingReviewState) => void; saveServiceExpectation: (service: ExpectedServiceInput) => void; saveServiceExpectations: (services: ExpectedServiceInput[]) => void; removeServiceExpectation: (service: ExpectedService) => void; runAction: (kind: SecurityActionKind) => void; addOwnerPasskey: () => void; removeOwnerPasskey: (passkey: PasskeyInfo) => void; actionBusy: boolean; signOut: () => void }) {
+interface ApplicationProps {
+	snapshot: SecuritySnapshot;
+	devices: DeviceRecord[];
+	networkDevices: NetworkDeviceObservation[];
+	appliances: ManagedApplianceStatus[];
+	events: SecurityEvent[];
+	networkEvents: SecurityEvent[];
+	alerts: HavenAlert[];
+	runtime: RuntimeStatus | null;
+	notificationStatus: PushNotificationStatus | null;
+	selectedDevice: DeviceRecord | null;
+	selectDevice: (id: string) => void;
+	refresh: () => void;
+	refreshing: boolean;
+	error: string | null;
+	demoMode: boolean;
+	alertsEnabled: boolean;
+	alertsSupported: boolean;
+	enableAlerts: (label?: string) => void;
+	disableAlerts: () => void;
+	reviews: FindingReview[];
+	expectedServices: ExpectedService[];
+	listenerObservations: ObservedListener[];
+	audit: AuditEvent[];
+	actions: SecurityAction[];
+	passkeys: PasskeyInfo[];
+	reviewFinding: (finding: SecurityFinding, state: FindingReviewState) => void;
+	saveServiceExpectation: (service: ExpectedServiceInput) => void;
+	saveServiceExpectations: (services: ExpectedServiceInput[]) => void;
+	removeServiceExpectation: (service: ExpectedService) => void;
+	runAction: (kind: SecurityActionKind) => void;
+	addOwnerPasskey: () => void;
+	removeOwnerPasskey: (passkey: PasskeyInfo) => void;
+	actionBusy: boolean;
+	signOut: () => void;
+	route: AppRoute;
+	navigate: (route: AppRoute) => void;
+}
+
+function Application({ snapshot, devices, networkDevices, appliances, events, networkEvents, alerts, runtime, notificationStatus, selectedDevice, selectDevice, refresh, refreshing, error, demoMode, alertsEnabled, alertsSupported, enableAlerts, disableAlerts, reviews, expectedServices, listenerObservations, audit, actions, passkeys, reviewFinding, saveServiceExpectation, saveServiceExpectations, removeServiceExpectation, runAction, addOwnerPasskey, removeOwnerPasskey, actionBusy, signOut, route, navigate }: ApplicationProps) {
   const isLinux = snapshot.linuxBaseline !== null || /linux|ubuntu/i.test(snapshot.device.operatingSystem);
   const defenderHealthy = snapshot.defender?.antivirusEnabled === true
     && snapshot.defender.realTimeProtectionEnabled === true
@@ -1070,11 +797,60 @@ function Application({ snapshot, devices, networkDevices, appliances, events, ne
 	const unreviewedListeners = listeners.filter((listener) => listener.bindScope !== "local" && !expectedServices.some((service) => expectedServiceMatches(listener, service, workloadInventory))).length;
 	const findingCount = (snapshot.findings || []).length;
 	const unknownChecks = (snapshot.baselineChecks || []).filter((check) => check.status === "unknown").length;
+	const selectedDeviceId = selectedDevice?.id || snapshot.device.deviceId || "";
+	const deviceSection: DeviceSection = route.page === "device" ? route.section || "overview" : "overview";
+	const openDevice = (deviceId: string) => {
+		navigate({ page: "device", deviceId, section: "overview" });
+		selectDevice(deviceId);
+	};
+	const openOverview = (event: React.MouseEvent<HTMLAnchorElement>) => {
+		if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+		event.preventDefault();
+		navigate({ page: "overview" });
+	};
+
+	const deviceSummary = <>
+		<section className="hero" aria-labelledby="device-name">
+			<div className="hero-identity"><span className="hero-device-icon">{snapshot.device.operatingSystem.toLowerCase().includes("server") ? <ServerIcon size={28} /> : selectedDevice?.displayName.toLowerCase().includes("laptop") ? <LaptopIcon size={28} /> : <MonitorIcon size={28} />}</span><div><p className="eyebrow">{selectedDevice?.trustState === "local" ? "THIS DEVICE" : "DEVICE OBSERVATION"}</p><h1 id="device-name">{selectedDevice?.displayName || snapshot.device.hostName}</h1><p className="device-detail">{snapshot.device.hostName} · {snapshot.device.operatingSystem} · {snapshot.device.architecture} · {formatDuration(snapshot.device.uptimeSeconds)}</p></div></div>
+			<div className="collection-time"><span>Last observation</span><strong>{formatRelativeTime(snapshot.collectedAt)}</strong><time dateTime={snapshot.collectedAt}>{formatDate(snapshot.collectedAt)}</time></div>
+		</section>
+		<section className="summary-grid" aria-label="Security summary">
+			<SummaryCard icon={isLinux ? <ChipIcon /> : <DefenderIcon />} accent="blue" title={isLinux ? "Host posture" : "Protection"} label={isLinux ? (findingCount > 0 ? `${findingCount} to review` : unknownChecks > 0 ? `${unknownChecks} unverified` : "No findings") : snapshot.defender ? (defenderHealthy ? "Protected" : "Attention") : "Unavailable"} tone={isLinux ? (findingCount > 0 ? "attention" : unknownChecks > 0 ? "unknown" : "healthy") : snapshot.defender ? (defenderHealthy ? "healthy" : "attention") : "unknown"}>{isLinux ? (findingCount > 0 ? `AppArmor and automatic updates are platform protections, but ${findingCount} current finding${findingCount === 1 ? " still needs" : "s still need"} review.` : unknownChecks > 0 ? "No action is derived from the verified signals, but some checks remain unknown." : "No actionable finding was derived from the latest verified Linux signals.") : snapshot.defender ? (defenderHealthy ? "Antivirus and real-time monitoring are active." : "One or more protection signals are off or unavailable.") : "Defender status was not returned."}</SummaryCard>
+			<SummaryCard icon={<FirewallIcon />} accent="amber" title="Firewall" label={firewallsKnown ? (firewallsEnabled ? "Enabled" : "Attention") : "Unavailable"} tone={firewallsKnown ? (firewallsEnabled ? "healthy" : "danger") : "unknown"}>{firewallsKnown ? (isLinux ? `${snapshot.firewallProfiles[0].name} is ${firewallsEnabled ? "enabled" : "disabled"} as the host firewall provider.` : firewallsEnabled ? `All ${snapshot.firewallProfiles.length} Windows Firewall profiles are enabled.` : "At least one Windows Firewall profile is disabled.") : "Firewall status was not returned."}</SummaryCard>
+			<SummaryCard icon={<NetworkIcon />} accent="cyan" title="Network" label={unreviewedListeners > 0 ? `${unreviewedListeners} unreviewed` : `${listeners.length} classified/local`} tone={unreviewedListeners > 0 ? "attention" : "healthy"}>{listeners.length} logical listener{listeners.length === 1 ? "" : "s"} ({broadListeners} on all interfaces) and {established} active connection{established === 1 ? "" : "s"}. Bind scope is not proof of Internet reachability.</SummaryCard>
+			<SummaryCard icon={<ActivityIcon />} accent="green" title="Monitor" label={runtime?.localCollection && runtime.monitor.enabled ? `Every ${formatInterval(runtime.monitor.intervalSeconds)}` : formatRelativeTime(snapshot.collectedAt)} tone={selectedDevice?.status === "stale" || runtime?.monitor.lastCollectionError ? "attention" : "healthy"}>{runtime?.localCollection ? (runtime.monitor.lastCollectionError || (runtime.monitor.lastSuccessfulAt ? `Last automatic observation succeeded ${formatDate(runtime.monitor.lastSuccessfulAt)}.` : "Automatic monitoring is starting.")) : `Latest authenticated report was collected ${formatDate(snapshot.collectedAt)}. The view checks for newer hub data every minute.`}</SummaryCard>
+		</section>
+	</>;
+
+	let page: React.ReactNode;
+	if (route.page === "overview") {
+		page = <><PageIntro eyebrow="PERSONAL SECURITY OBSERVATORY" title="Home security overview">Current alerts, coverage, and meaningful changes across trusted devices and explicitly configured appliances.</PageIntro><NetworkOverview devices={networkDevices} appliances={appliances} events={networkEvents} alerts={alerts} selectedId={selectedDeviceId} selectDevice={openDevice} demoMode={demoMode} view="overview" /></>;
+	} else if (route.page === "devices") {
+		page = <><PageIntro eyebrow="TRUSTED INVENTORY" title="Devices">Choose an enrolled endpoint to inspect its current posture, services, connections, and history.</PageIntro><DeviceInventory devices={devices} selectedId={selectedDeviceId} select={openDevice} demoMode={demoMode} /></>;
+	} else if (route.page === "network") {
+		page = <><PageIntro eyebrow="LIVE OBSERVATION" title="Network">Current device coverage and relationship summaries without packet capture or retained remote endpoints.</PageIntro><NetworkOverview devices={networkDevices} appliances={appliances} events={networkEvents} alerts={alerts} selectedId={selectedDeviceId} selectDevice={openDevice} demoMode={demoMode} view="network" /></>;
+	} else if (route.page === "appliances") {
+		page = <><PageIntro eyebrow="READ-ONLY HEALTH" title="Appliances">Bounded reachability and health evidence from devices explicitly configured by the owner.</PageIntro><NetworkOverview devices={networkDevices} appliances={appliances} events={networkEvents} alerts={alerts} selectedId={selectedDeviceId} selectDevice={openDevice} demoMode={demoMode} view="appliances" /></>;
+	} else if (route.page === "activity") {
+		page = <><PageIntro eyebrow="EVENTS AND DECISIONS" title="Activity">Finding transitions, deliberate control requests, and privacy-bounded owner decisions.</PageIntro><ActivityPanel events={networkEvents} alerts={alerts} />{!demoMode && <ActionCenter actions={actions} audit={audit} capabilities={runtime?.actionCapabilities || []} run={runAction} busy={actionBusy} />}</>;
+	} else if (route.page === "settings") {
+		page = <><PageIntro eyebrow="OWNER ACCESS" title="Settings">Manage this browser's alert destination and the passkeys that protect HAVEN.</PageIntro>{!demoMode ? <><NotificationPanel status={notificationStatus} supported={alertsSupported} enabled={alertsEnabled} busy={actionBusy} enable={enableAlerts} disable={disableAlerts} /><PasskeyPanel passkeys={passkeys} add={addOwnerPasskey} remove={removeOwnerPasskey} busy={actionBusy} /></> : <p className="demo-banner" role="status">Authentication and notification settings are unavailable in synthetic demo mode.</p>}<section className="panel about-panel" aria-labelledby="about-title"><PanelHeading eyebrow="APPLICATION" title="About HAVEN" id="about-title" icon={<HavenIcon />} accent="green">Private, explainable security visibility</PanelHeading><dl className="details-grid"><div><dt>Version</dt><dd>{runtime?.version || "development"}</dd></div><div><dt>Revision</dt><dd>{runtime?.revision && runtime.revision !== "development" ? runtime.revision.slice(0, 12) : "development"}</dd></div><div><dt>Collection</dt><dd>Read-only by default</dd></div><div><dt>Storage</dt><dd>Private SQLite hub</dd></div></dl></section></>;
+	} else {
+		page = <>
+			<div className="device-page-heading"><a href="/devices" onClick={(event) => { if (event.button === 0 && !event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey) { event.preventDefault(); navigate({ page: "devices" }); } }}>← All devices</a><DeviceNavigation deviceId={selectedDeviceId} current={deviceSection} navigate={navigate} /></div>
+			{deviceSummary}
+			{deviceSection === "overview" && <FindingsPanel findings={snapshot.findings || []} checks={snapshot.baselineChecks || []} reviews={reviews} review={reviewFinding} />}
+			{deviceSection === "posture" && <>{(snapshot.baselineChecks || []).length > 0 && <BaselinePanel checks={snapshot.baselineChecks || []} collectedAt={snapshot.collectedAt} platform={isLinux ? "Linux" : "Windows"} />}{snapshot.notices.length > 0 && <section className="panel notices-panel" aria-labelledby="notices-title"><PanelHeading eyebrow="COLLECTION NOTES" title="Some signals could not be verified" id="notices-title" icon={<AlertIcon />} accent="amber">A collection limitation is not automatically a security problem</PanelHeading><ul className="notices-list">{snapshot.notices.map((notice, index) => <li className="notice" key={`${notice.source}-${index}`}><strong>{notice.source}: </strong>{notice.message}</li>)}</ul></section>}{isLinux && snapshot.linuxBaseline ? <LinuxPanel baseline={snapshot.linuxBaseline} /> : <DefenderPanel defender={snapshot.defender} />}<FirewallPanel profiles={snapshot.firewallProfiles} isLinux={isLinux} /></>}
+			{deviceSection === "services" && <>{isLinux && <WorkloadsPanel inventory={snapshot.linuxBaseline?.workloads ?? null} />}<ConnectionsPanel deviceId={selectedDeviceId} operatingSystem={snapshot.device.operatingSystem} connections={snapshot.connections} workloads={workloadInventory} expectedServices={expectedServices} observations={listenerObservations} saveExpectation={saveServiceExpectation} saveExpectations={saveServiceExpectations} removeExpectation={removeServiceExpectation} busy={actionBusy} /></>}
+			{deviceSection === "history" && <ActivityPanel events={events} alerts={alerts} />}
+		</>;
+	}
 
   return (
     <>
       <header className="topbar">
-        <a className="brand" href="/" aria-label="HAVEN home"><span className="brand-mark"><HavenIcon /></span><span><strong>HAVEN</strong><small>Personal Security Observatory</small></span></a>
+        <a className="brand" href="/" aria-label="HAVEN home" onClick={openOverview}><span className="brand-mark"><HavenIcon /></span><span><strong>HAVEN</strong><small>Personal Security Observatory</small></span></a>
+        <AppNavigation current={route.page} navigate={navigate} />
         <div className="topbar-actions">
           <span className={`local-pill ${demoMode ? "demo-pill" : ""}`}><span className="local-dot" />{demoMode ? "Synthetic demo" : runtime?.localCollection ? "Local monitor" : "Agent hub"}</span>
           {!demoMode && alertsSupported && <button className={`desktop-alert-button ${alertsEnabled ? "enabled" : ""}`} type="button" onClick={alertsEnabled ? disableAlerts : () => enableAlerts()} disabled={actionBusy} aria-label={alertsEnabled ? "Disable background alerts on this browser" : "Enable background alerts on this browser"}><BellIcon size={15} /><span>{alertsEnabled ? "Push alerts on" : "Enable push"}</span></button>}
@@ -1083,36 +859,17 @@ function Application({ snapshot, devices, networkDevices, appliances, events, ne
         </div>
       </header>
       <main>
-        <DeviceInventory devices={devices} selectedId={selectedDevice?.id || snapshot.device.deviceId || ""} select={selectDevice} demoMode={demoMode} />
         {demoMode && <p className="demo-banner" role="status"><strong>Synthetic demo mode.</strong> Every device and observation on this page is invented. HAVEN is not showing or collecting data from this computer.</p>}
-        {!demoMode && <p className="context-banner"><strong>Continuous, read-only monitoring.</strong> {runtime?.localCollection ? `HAVEN observes this computer every ${runtime.monitor.enabled ? formatInterval(runtime.monitor.intervalSeconds) : "configured interval"}.` : "A native agent reports this endpoint's security posture to the private HAVEN hub on its own schedule; this page checks the hub for a newer report every minute."} The current-posture sections always come from the latest observation. The activity section retains only the latest lifecycle for each finding, while routine unchanged observations stay quiet.</p>}
         {error && <p className="inline-error" role="alert">{error}</p>}
-		<NetworkOverview devices={networkDevices} appliances={appliances} events={networkEvents} alerts={alerts} selectedId={selectedDevice?.id || snapshot.device.deviceId || ""} selectDevice={selectDevice} demoMode={demoMode} />
-        <section className="hero" aria-labelledby="device-name">
-          <div className="hero-identity"><span className="hero-device-icon">{snapshot.device.operatingSystem.toLowerCase().includes("server") ? <ServerIcon size={28} /> : selectedDevice?.displayName.toLowerCase().includes("laptop") ? <LaptopIcon size={28} /> : <MonitorIcon size={28} />}</span><div><p className="eyebrow">{selectedDevice?.trustState === "local" ? "THIS DEVICE" : "DEVICE OBSERVATION"}</p><h1 id="device-name">{selectedDevice?.displayName || snapshot.device.hostName}</h1><p className="device-detail">{snapshot.device.hostName} · {snapshot.device.operatingSystem} · {snapshot.device.architecture} · {formatDuration(snapshot.device.uptimeSeconds)}</p></div></div>
-          <div className="collection-time"><span>Last observation</span><strong>{formatRelativeTime(snapshot.collectedAt)}</strong><time dateTime={snapshot.collectedAt}>{formatDate(snapshot.collectedAt)}</time></div>
-        </section>
-        <section className="summary-grid" aria-label="Security summary">
-		  <SummaryCard icon={isLinux ? <ChipIcon /> : <DefenderIcon />} accent="blue" title={isLinux ? "Host posture" : "Protection"} label={isLinux ? (findingCount > 0 ? `${findingCount} to review` : unknownChecks > 0 ? `${unknownChecks} unverified` : "No findings") : snapshot.defender ? (defenderHealthy ? "Protected" : "Attention") : "Unavailable"} tone={isLinux ? (findingCount > 0 ? "attention" : unknownChecks > 0 ? "unknown" : "healthy") : snapshot.defender ? (defenderHealthy ? "healthy" : "attention") : "unknown"}>{isLinux ? (findingCount > 0 ? `AppArmor and automatic updates are platform protections, but ${findingCount} current finding${findingCount === 1 ? " still needs" : "s still need"} review.` : unknownChecks > 0 ? "No action is derived from the verified signals, but some checks remain unknown." : "No actionable finding was derived from the latest verified Linux signals.") : snapshot.defender ? (defenderHealthy ? "Antivirus and real-time monitoring are active." : "One or more protection signals are off or unavailable.") : "Defender status was not returned."}</SummaryCard>
-          <SummaryCard icon={<FirewallIcon />} accent="amber" title="Firewall" label={firewallsKnown ? (firewallsEnabled ? "Enabled" : "Attention") : "Unavailable"} tone={firewallsKnown ? (firewallsEnabled ? "healthy" : "danger") : "unknown"}>{firewallsKnown ? (isLinux ? `${snapshot.firewallProfiles[0].name} is ${firewallsEnabled ? "enabled" : "disabled"} as the host firewall provider.` : firewallsEnabled ? `All ${snapshot.firewallProfiles.length} Windows Firewall profiles are enabled.` : "At least one Windows Firewall profile is disabled.") : "Firewall status was not returned."}</SummaryCard>
-		  <SummaryCard icon={<NetworkIcon />} accent="cyan" title="Network" label={unreviewedListeners > 0 ? `${unreviewedListeners} unreviewed` : `${listeners.length} classified/local`} tone={unreviewedListeners > 0 ? "attention" : "healthy"}>{listeners.length} logical listener{listeners.length === 1 ? "" : "s"} ({broadListeners} on all interfaces) and {established} active connection{established === 1 ? "" : "s"}. Bind scope is not proof of Internet reachability.</SummaryCard>
-          <SummaryCard icon={<ActivityIcon />} accent="green" title="Monitor" label={runtime?.localCollection && runtime.monitor.enabled ? `Every ${formatInterval(runtime.monitor.intervalSeconds)}` : formatRelativeTime(snapshot.collectedAt)} tone={selectedDevice?.status === "stale" || runtime?.monitor.lastCollectionError ? "attention" : "healthy"}>{runtime?.localCollection ? (runtime.monitor.lastCollectionError || (runtime.monitor.lastSuccessfulAt ? `Last automatic observation succeeded ${formatDate(runtime.monitor.lastSuccessfulAt)}.` : "Automatic monitoring is starting.")) : `Latest authenticated report was collected ${formatDate(snapshot.collectedAt)}. The view checks for newer hub data every minute.`}</SummaryCard>
-        </section>
-        {!demoMode && <><NotificationPanel status={notificationStatus} supported={alertsSupported} enabled={alertsEnabled} busy={actionBusy} enable={enableAlerts} disable={disableAlerts} /><PasskeyPanel passkeys={passkeys} add={addOwnerPasskey} remove={removeOwnerPasskey} busy={actionBusy} /><ActionCenter actions={actions} audit={audit} capabilities={runtime?.actionCapabilities || []} run={runAction} busy={actionBusy} /></>}
-        <ActivityPanel events={events} alerts={alerts} />
-        {(snapshot.baselineChecks || []).length > 0 && <><FindingsPanel findings={snapshot.findings || []} checks={snapshot.baselineChecks || []} reviews={reviews} review={reviewFinding} /><BaselinePanel checks={snapshot.baselineChecks || []} collectedAt={snapshot.collectedAt} platform={isLinux ? "Linux" : "Windows"} /></>}
-        {snapshot.notices.length > 0 && <section className="panel notices-panel" aria-labelledby="notices-title"><PanelHeading eyebrow="COLLECTION NOTES" title="Some signals could not be verified" id="notices-title" icon={<AlertIcon />} accent="amber">A collection limitation is not automatically a security problem</PanelHeading><ul className="notices-list">{snapshot.notices.map((notice, index) => <li className="notice" key={`${notice.source}-${index}`}><strong>{notice.source}: </strong>{notice.message}</li>)}</ul></section>}
-        {isLinux && snapshot.linuxBaseline ? <LinuxPanel baseline={snapshot.linuxBaseline} /> : <DefenderPanel defender={snapshot.defender} />}
-		{isLinux && <WorkloadsPanel inventory={snapshot.linuxBaseline?.workloads ?? null} />}
-		<FirewallPanel profiles={snapshot.firewallProfiles} isLinux={isLinux} />
-		<ConnectionsPanel deviceId={selectedDevice?.id || snapshot.device.deviceId || ""} operatingSystem={snapshot.device.operatingSystem} connections={snapshot.connections} workloads={workloadInventory} expectedServices={expectedServices} observations={listenerObservations} saveExpectation={saveServiceExpectation} saveExpectations={saveServiceExpectations} removeExpectation={removeServiceExpectation} busy={actionBusy} />
+        {page}
       </main>
-	  <footer><span>HAVEN milestone 0.11 · Managed appliances</span><span>Observe continuously. Act deliberately.</span></footer>
+	  <footer><span>HAVEN {runtime?.version || "development"} · Navigable console</span><span>Observe continuously. Act deliberately.</span></footer>
     </>
   );
 }
 
 export function App() {
+  const { route, navigate } = useAppRoute();
   const [authentication, setAuthentication] = useState<AuthStatus | null>(null);
   const [snapshot, setSnapshot] = useState<SecuritySnapshot | null>(null);
   const [devices, setDevices] = useState<DeviceRecord[]>([]);
@@ -1128,13 +885,13 @@ export function App() {
   const [passkeys, setPasskeys] = useState<PasskeyInfo[]>([]);
   const [runtime, setRuntime] = useState<RuntimeStatus | null>(null);
   const [notificationStatus, setNotificationStatus] = useState<PushNotificationStatus | null>(null);
-  const [selectedId, setSelectedId] = useState("");
+  const [selectedId, setSelectedId] = useState(route.deviceId || "");
   const [demoMode, setDemoMode] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [actionBusy, setActionBusy] = useState(false);
   const [inventoryLoaded, setInventoryLoaded] = useState(false);
-  const selectedIdRef = useRef("");
+  const selectedIdRef = useRef(route.deviceId || "");
   const alertsSupported = supportsBackgroundPush();
   const [alertsEnabled, setAlertsEnabled] = useState(false);
 
@@ -1434,14 +1191,19 @@ export function App() {
     return () => { active = false; };
   }, [alertsSupported, authentication?.authenticated, notificationStatus?.available]);
 
-	useEffect(() => {
-		if (!authentication?.authenticated || !inventoryLoaded || demoMode) return;
+  useEffect(() => {
+    if (!authentication?.authenticated || !inventoryLoaded || demoMode) return;
     const controller = new AbortController();
     void loadControls(selectedId, controller.signal).catch((reason) => {
       if (!(reason instanceof DOMException && reason.name === "AbortError")) setError(reason instanceof Error ? reason.message : "The action center could not be loaded.");
     });
     return () => controller.abort();
 	}, [authentication?.authenticated, demoMode, inventoryLoaded, loadControls, selectedId]);
+
+  useEffect(() => {
+    if (!authentication?.authenticated || !inventoryLoaded || route.page !== "device" || !route.deviceId || route.deviceId === selectedIdRef.current) return;
+    void selectDevice(route.deviceId);
+  }, [authentication?.authenticated, inventoryLoaded, route.deviceId, route.page, selectDevice]);
 
 	useEffect(() => {
 		if (!authentication?.authenticated || !inventoryLoaded || demoMode) return;
@@ -1518,5 +1280,5 @@ export function App() {
 
   const selectedDevice = devices.find((device) => device.id === selectedId) || null;
   const selectedEvents = selectedId ? events.filter((event) => event.deviceId === selectedId) : events;
-	return <Application snapshot={snapshot} devices={devices} networkDevices={networkDevices} appliances={appliances} events={selectedEvents} networkEvents={events} alerts={currentAlerts} runtime={runtime} notificationStatus={notificationStatus} selectedDevice={selectedDevice} selectDevice={(id) => void selectDevice(id)} refresh={() => void refreshView()} refreshing={refreshing} error={error} demoMode={demoMode} alertsEnabled={alertsEnabled} alertsSupported={alertsSupported} enableAlerts={(label) => void enableAlerts(label)} disableAlerts={() => void disableAlerts()} reviews={reviews} expectedServices={expectedServices} listenerObservations={listenerObservations} audit={audit} actions={actions} passkeys={passkeys} reviewFinding={(finding, state) => void reviewFinding(finding, state)} saveServiceExpectation={(service) => void saveServiceExpectation(service)} saveServiceExpectations={(services) => void saveServiceBaseline(services)} removeServiceExpectation={(service) => void removeServiceExpectation(service)} runAction={(kind) => void runAction(kind)} addOwnerPasskey={() => void addOwnerPasskey()} removeOwnerPasskey={(passkey) => void removeOwnerPasskey(passkey)} actionBusy={actionBusy} signOut={() => void signOut()} />;
+	return <Application snapshot={snapshot} devices={devices} networkDevices={networkDevices} appliances={appliances} events={selectedEvents} networkEvents={events} alerts={currentAlerts} runtime={runtime} notificationStatus={notificationStatus} selectedDevice={selectedDevice} selectDevice={(id) => void selectDevice(id)} refresh={() => void refreshView()} refreshing={refreshing} error={error} demoMode={demoMode} alertsEnabled={alertsEnabled} alertsSupported={alertsSupported} enableAlerts={(label) => void enableAlerts(label)} disableAlerts={() => void disableAlerts()} reviews={reviews} expectedServices={expectedServices} listenerObservations={listenerObservations} audit={audit} actions={actions} passkeys={passkeys} reviewFinding={(finding, state) => void reviewFinding(finding, state)} saveServiceExpectation={(service) => void saveServiceExpectation(service)} saveServiceExpectations={(services) => void saveServiceBaseline(services)} removeServiceExpectation={(service) => void removeServiceExpectation(service)} runAction={(kind) => void runAction(kind)} addOwnerPasskey={() => void addOwnerPasskey()} removeOwnerPasskey={(passkey) => void removeOwnerPasskey(passkey)} actionBusy={actionBusy} signOut={() => void signOut()} route={route} navigate={navigate} />;
 }

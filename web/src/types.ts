@@ -340,6 +340,8 @@ export interface ManagedCertificateStatus {
 export interface RuntimeStatus {
   status: string;
   service: string;
+  version: string;
+  revision: string;
   agentIngestion: string;
   demoMode: boolean;
   localCollection: boolean;

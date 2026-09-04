@@ -18,6 +18,7 @@ import (
 	"github.com/AdamWentworth/haven/internal/alert"
 	"github.com/AdamWentworth/haven/internal/appliance"
 	"github.com/AdamWentworth/haven/internal/authn"
+	"github.com/AdamWentworth/haven/internal/buildinfo"
 	"github.com/AdamWentworth/haven/internal/model"
 	"github.com/AdamWentworth/haven/internal/notification"
 	"github.com/AdamWentworth/haven/internal/storage"
@@ -83,6 +84,25 @@ func TestHealthEndpointHasSecurityHeaders(t *testing.T) {
 	if !strings.Contains(response.Body.String(), `"agentIngestion":"mutual-tls"`) {
 		t.Fatal("health response must disclose the agent trust mode")
 	}
+	if !strings.Contains(response.Body.String(), `"version":"`+buildinfo.Version+`"`) {
+		t.Fatal("health response must disclose the release version")
+	}
+}
+
+func TestHealthEndpointReportsPersistenceReadiness(t *testing.T) {
+	server, store := testServer(t)
+	if err := store.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	response := httptest.NewRecorder()
+	server.Handler().ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/api/health", nil))
+	if response.Code != http.StatusServiceUnavailable {
+		t.Fatalf("expected closed persistence to make the hub not ready, got HTTP %d", response.Code)
+	}
+	if !strings.Contains(response.Body.String(), `"status":"not-ready"`) {
+		t.Fatalf("unexpected readiness body: %s", response.Body.String())
+	}
 }
 
 func TestRuntimePublishesServerOwnedDeviceFreshnessAllowance(t *testing.T) {
@@ -95,7 +115,9 @@ func TestRuntimePublishesServerOwnedDeviceFreshnessAllowance(t *testing.T) {
 		t.Fatalf("unexpected status: %d", response.Code)
 	}
 	var runtime struct {
-		DeviceFreshnessAllowanceSeconds int64 `json:"deviceFreshnessAllowanceSeconds"`
+		DeviceFreshnessAllowanceSeconds int64  `json:"deviceFreshnessAllowanceSeconds"`
+		Version                         string `json:"version"`
+		Revision                        string `json:"revision"`
 	}
 	if err := json.NewDecoder(response.Body).Decode(&runtime); err != nil {
 		t.Fatal(err)
@@ -103,6 +125,9 @@ func TestRuntimePublishesServerOwnedDeviceFreshnessAllowance(t *testing.T) {
 	want := int64(storage.EnrolledDeviceStaleAfter / time.Second)
 	if runtime.DeviceFreshnessAllowanceSeconds != want {
 		t.Fatalf("frontend freshness fact drifted from server policy: got %d, want %d", runtime.DeviceFreshnessAllowanceSeconds, want)
+	}
+	if runtime.Version != buildinfo.Version || runtime.Revision == "" {
+		t.Fatalf("runtime build identity is incomplete: %#v", runtime)
 	}
 }
 
@@ -504,10 +529,13 @@ func TestWebFallbackServesApplication(t *testing.T) {
 	defer store.Close()
 
 	response := httptest.NewRecorder()
-	server.Handler().ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/devices/example", nil))
+	server.Handler().ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/devices/example/history", nil))
 
 	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), "HAVEN") {
 		t.Fatalf("unexpected web response: %d %s", response.Code, response.Body.String())
+	}
+	if response.Header().Get("Cache-Control") != "no-store" {
+		t.Fatal("deep-link index fallback must not be cached")
 	}
 }
 

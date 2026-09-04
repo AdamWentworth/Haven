@@ -4,9 +4,11 @@ import (
 	"context"
 	"io"
 	"log/slog"
+	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -30,7 +32,15 @@ func TestEnrollmentAndMutualTLSReporting(t *testing.T) {
 		t.Fatal(err)
 	}
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	server := httptest.NewUnstartedServer(hub.NewAgentServer(store, pki, logger).Handler())
+	agentHandler := hub.NewAgentServer(store, pki, logger).Handler()
+	var reportAttempts atomic.Int32
+	server := httptest.NewUnstartedServer(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		if request.URL.Path == "/v1/observations" && reportAttempts.Add(1) == 1 {
+			http.Error(writer, "temporary failure", http.StatusServiceUnavailable)
+			return
+		}
+		agentHandler.ServeHTTP(writer, request)
+	}))
 	server.TLS = trust.ServerTLSConfig(pki)
 	server.StartTLS()
 	defer server.Close()
@@ -59,6 +69,9 @@ func TestEnrollmentAndMutualTLSReporting(t *testing.T) {
 	snapshot := model.SecuritySnapshot{CollectedAt: time.Now().UTC(), Device: model.DeviceSummary{HostName: "test-laptop", OperatingSystem: "Test OS", Architecture: "amd64"}, FirewallProfiles: []model.FirewallProfileStatus{}, Connections: []model.NetworkConnection{}, Notices: []model.CollectorNotice{}}
 	if _, err := client.Report(ctx, snapshot); err != nil {
 		t.Fatal(err)
+	}
+	if reportAttempts.Load() != 2 {
+		t.Fatalf("expected one bounded retry after a transient hub failure, got %d attempts", reportAttempts.Load())
 	}
 	detail, err := store.DeviceDetail(ctx, config.DeviceID, time.Now().UTC())
 	if err != nil {

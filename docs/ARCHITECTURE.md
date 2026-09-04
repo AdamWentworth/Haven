@@ -27,7 +27,7 @@ The hub must not provide a general-purpose remote shell. Future actions are fixe
 | UI | React, TypeScript, and Vite | Responsive browser access and maintainable dashboard state |
 | Storage | SQLite in WAL mode | One hub process owns the database; no database port or second service |
 | Hub packaging | Hardened Docker image and Compose | Matches the application server's operating model |
-| Agent packaging | Windows Service, systemd, and launchd | Host visibility without privileged containers |
+| Agent packaging | Windows Task Scheduler today, systemd today, and launchd later | Host visibility without privileged containers |
 | Device authentication | Unique revocable certificates using mutual TLS | No shared household agent credential |
 | User access | Private HTTPS plus application authentication | Network location alone is not an identity |
 | Background alerts | Standards-based Web Push and a service worker | Cross-platform delivery without a privileged tray process or always-open page |
@@ -37,7 +37,7 @@ PostgreSQL becomes appropriate if HAVEN needs multiple hub writers, multiple hub
 
 ## Current milestone boundary
 
-Milestone 0.12 extends the authenticated native-agent hub with bounded, read-only NAS health evidence:
+Milestone 0.13 extends the authenticated native-agent hub with a routed console and reliability guardrails while retaining bounded, read-only NAS health evidence:
 
 - `haven-hub` serves a loopback dashboard, owns SQLite, and exposes a separate loopback TLS 1.3 agent listener. Native development may enable local collection; a containerized production hub disables it and never treats its ephemeral container hostname as a device.
 - Enrollment uses a short-lived, one-time 256-bit token plus an ECDSA P-256 certificate request. The trusted CA certificate is transferred out of band.
@@ -60,6 +60,10 @@ Milestone 0.12 extends the authenticated native-agent hub with bounded, read-onl
 - Network overview data does not grant trust, enroll a device, resolve a hostname, probe an address, or scan the LAN. Raw remote endpoints remain live-only and disappear after a hub restart until agents report again.
 - The hub derives active alerts only from server-classified device freshness, current evaluated findings, owner finding reviews, persistent listener appearance timestamps, and owner-approved service expectations. Accepted-risk findings and currently snoozed findings stay visible in endpoint posture with their local review metadata but leave the interruptive active-alert projection; acknowledgements and expired snoozes remain active. The authenticated browser consumes that projection rather than implementing a second policy. A protocol/port/scope match whose current owner no longer satisfies its approved process, workload, or systemd-unit constraint is reported as service drift rather than silently trusted. Optional expectation expirations are enforced from hub time; if the same owner-constrained listener remains active, its exact expiration creates a new review and delivery instance.
 - The authenticated runtime response publishes the server's device-freshness allowance. The browser does not independently guess the stale threshold.
+- A 15-minute reporter is considered current for 35 minutes, tolerating one missed invocation plus scheduling jitter before creating a stale-device alert.
+- Transient report failures receive at most three attempts with bounded delay. Every attempt carries the same certificate-bound observation ID and sequence; an exact duplicate is idempotent, while a reused sequence or conflicting identity remains a rejected replay.
+- `/api/health` is a database-backed readiness probe, not an unconditional liveness claim. Health and runtime responses publish the shared release version and immutable build revision.
+- The web console uses stable History API routes with server-side index fallback, allowing direct links without duplicating application state.
 - The hub reevaluates alerts every minute independently of dashboard activity. It queues one delivery per medium/high alert instance and enrolled push destination, persists the receipt before retrying, expires retries when the alert is no longer current, and leaves low-severity alerts visible without interruption.
 - A browser explicitly grants notification permission and registers a standards-based Web Push subscription. Its capability endpoint and encryption keys are AES-GCM encrypted at rest using a random key outside SQLite; the VAPID identity is stored beside that key in the private state directory. The push endpoint never appears in an authenticated status response, audit detail, or log.
 - The outbound sender accepts HTTPS hostnames on the standard port only, resolves every destination address before connecting, rejects private, loopback, link-local, multicast, and non-global addresses, and refuses redirects. This keeps a registered push endpoint from becoming a general server-side request primitive.

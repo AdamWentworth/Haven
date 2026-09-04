@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { suggestedBaseline } from "./App";
+import { suggestedBaseline } from "./baseline";
 import { expectedServiceMatches, logicalListeners } from "./network";
 import type { ExpectedService, NetworkConnection } from "./types";
 

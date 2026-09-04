@@ -6,7 +6,11 @@ HAVEN treats security statements as testable claims. A green test does not prove
 
 | Claim | Evidence boundary | Automated guardrail |
 | --- | --- | --- |
-| A 15-minute agent is not stale during ordinary scheduling jitter | Server-owned freshness policy and authenticated `last_seen_at` | Go storage boundary tests at 16 and 21 minutes; runtime API test prevents the browser threshold from drifting from the server |
+| One missed 15-minute agent run does not create a false stale alert | Server-owned freshness policy and authenticated `last_seen_at` | Go storage boundary tests at 34 and 36 minutes; runtime API test prevents the browser threshold from drifting from the server |
+| A transient report failure does not silently discard a valid observation | Certificate-bound observation ID and monotonic sequence | Agent integration tests require a bounded retry after a transient hub response; storage tests accept only the exact duplicate idempotently and reject conflicting sequence reuse |
+| Hub readiness is not declared when persistence is unavailable | SQLite connection required by every useful hub operation | Health endpoint tests close persistence and require HTTP 503 plus `not-ready` rather than an unconditional success |
+| The displayed release can be tied to the deployed source | Shared build version and linker-injected revision | Health/runtime API tests require both values; frontend Settings and footer render the authenticated runtime identity |
+| Direct navigation does not lose console state or bypass route validation | History API routes plus server index fallback | Rendered React tests exercise top-level, device, and deep-linked history routes; parser tests cover encoded identifiers, unsupported sections, and malformed escapes |
 | IPv4 and IPv6 wildcard sockets represent one logical service when protocol, port, and scope match | Current endpoint report | Frontend listener-grouping tests require one logical listener with two raw sockets |
 | An owner-constrained expectation cannot hide a differently owned service | Current process, systemd-unit, and sanitized workload attribution plus owner-approved configuration | Go and TypeScript consume the same contract fixtures and require every observed owner category to be approved, including mixed-owner listeners; Docker's own service unit is accepted as runtime support evidence for legacy Docker-workload rules, while unrelated services still drift; only an explicitly owner-free port rule is unconstrained |
 | A mirrored enrolled-device connection is one relationship | Latest authenticated reports from both endpoints | Frontend relationship tests require correct inbound SSH direction and one canonical socket identity |
@@ -55,7 +59,7 @@ Set-Location ..
 pwsh -NoProfile -File .\scripts\Test-PublicRepository.ps1
 ```
 
-The frontend coverage gate applies to the live network and browser-protocol modules rather than presentational React markup. Go tests cover the server-owned alert and delivery policy. CI additionally runs Go's race detector and the Go vulnerability database scanner across every reachable package. Production deployment remains blocked until all gates pass and an immutable image is published for the exact commit.
+The frontend coverage gate includes every executable TypeScript and React module, with higher per-module thresholds for the security-sensitive network and browser-push projections. Rendered UI tests exercise navigation and automatically detectable serious accessibility problems. Go tests cover the server-owned alert, storage, retry, readiness, and delivery policies. CI additionally runs Go's race detector, the Go vulnerability database scanner, and CodeQL for Go and TypeScript. Production deployment remains blocked until all gates pass and an immutable image is published for the exact commit.
 
 Web Push behavior follows the [W3C Push API](https://www.w3.org/TR/push-api/), [RFC 8030 delivery protocol](https://www.rfc-editor.org/rfc/rfc8030), and [RFC 8291 message encryption](https://www.rfc-editor.org/rfc/rfc8291). The service worker uses the browser's standard push event and persistent notification boundary; it does not cache HAVEN's authenticated pages or observations.
 

@@ -1,6 +1,6 @@
 # syntax=docker/dockerfile:1
 
-FROM node:24-alpine AS web-build
+FROM node:24-alpine@sha256:e67514e5d0f6c46656005e1b693b2ec9d52e80b641307de684d4a015ba7a4eaf AS web-build
 WORKDIR /source/web
 COPY web/package.json web/package-lock.json ./
 RUN npm ci
@@ -8,16 +8,17 @@ COPY testdata/ /source/testdata/
 COPY web/ ./
 RUN npm run build
 
-FROM golang:1.26.6-alpine AS go-build
+FROM golang:1.26.6-alpine@sha256:3889b425f035be855a72fb4755265311293b6d414521f0a519d819df32222d83 AS go-build
+ARG HAVEN_BUILD_SHA=development
 WORKDIR /source
 RUN apk add --no-cache ca-certificates
 COPY go.mod go.sum ./
 RUN go mod download
 COPY . .
 COPY --from=web-build /source/internal/webui/dist/ internal/webui/dist/
-RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /out/haven-hub ./cmd/haven-hub
-RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /out/haven-agent ./cmd/haven-agent
-RUN CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -trimpath -ldflags="-s -w" -o /out/haven-nas-probe-arm64 ./cmd/haven-nas-probe
+RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w -X github.com/AdamWentworth/haven/internal/buildinfo.Revision=${HAVEN_BUILD_SHA}" -o /out/haven-hub ./cmd/haven-hub
+RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w -X github.com/AdamWentworth/haven/internal/buildinfo.Revision=${HAVEN_BUILD_SHA}" -o /out/haven-agent ./cmd/haven-agent
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -trimpath -ldflags="-s -w -X github.com/AdamWentworth/haven/internal/buildinfo.Revision=${HAVEN_BUILD_SHA}" -o /out/haven-nas-probe-arm64 ./cmd/haven-nas-probe
 RUN mkdir -p /out/data && touch /out/data/.haven-volume
 
 FROM scratch

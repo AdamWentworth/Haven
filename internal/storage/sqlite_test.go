@@ -554,8 +554,12 @@ func TestEnrollmentReplayRevocationAndBackup(t *testing.T) {
 	if err != nil || liveDetail.Snapshot == nil || len(liveDetail.Snapshot.Connections) != 1 {
 		t.Fatalf("expected the current remote observation to retain live connections in memory: %#v, %v", liveDetail, err)
 	}
+	if err := store.AcceptObservation(ctx, device.CertificateSerial, envelope, now); !errors.Is(err, ErrAlreadyAccepted) {
+		t.Fatalf("expected an exact retry to be accepted idempotently, got %v", err)
+	}
+	envelope.ObservationID = "obs_collision"
 	if err := store.AcceptObservation(ctx, device.CertificateSerial, envelope, now); !errors.Is(err, ErrReplay) {
-		t.Fatalf("expected replay rejection, got %v", err)
+		t.Fatalf("expected a reused sequence with a different identity to be rejected, got %v", err)
 	}
 	if err := store.RevokeDevice(ctx, device.ID, now.Add(time.Minute)); err != nil {
 		t.Fatal(err)
@@ -587,15 +591,15 @@ func TestEnrollmentReplayRevocationAndBackup(t *testing.T) {
 	}
 }
 
-func TestDeviceStatusAllowsAgentScheduleJitter(t *testing.T) {
+func TestDeviceStatusAllowsOneMissedAgentInterval(t *testing.T) {
 	now := time.Date(2026, time.September, 2, 12, 0, 0, 0, time.UTC)
-	lastSeen := now.Add(-16 * time.Minute)
+	lastSeen := now.Add(-34 * time.Minute)
 	device := model.DeviceRecord{TrustState: "enrolled", LastSeenAt: &lastSeen}
 	if status := deviceStatus(device, now); status != "current" {
-		t.Fatalf("a healthy 15-minute agent with small scheduling jitter must remain current, got %q", status)
+		t.Fatalf("one missed 15-minute report plus scheduling jitter must remain current, got %q", status)
 	}
-	lastSeen = now.Add(-21 * time.Minute)
+	lastSeen = now.Add(-36 * time.Minute)
 	if status := deviceStatus(device, now); status != "stale" {
-		t.Fatalf("an agent more than 20 minutes late must be stale, got %q", status)
+		t.Fatalf("an agent beyond the 35-minute allowance must be stale, got %q", status)
 	}
 }
