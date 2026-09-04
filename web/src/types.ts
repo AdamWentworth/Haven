@@ -48,7 +48,7 @@ export interface ContainerPortBinding {
 }
 
 export interface WindowsBaseline {
-  update: { lastInstalledAt: string | null; pendingReboot: boolean | null; rebootReasons: string[] } | null;
+  update: { lastInstalledAt: string | null; pendingReboot: boolean | null; rebootReasons: string[]; pendingFileReplacement?: boolean | null } | null;
   systemEncryption: { systemDrive: string; volumeStatus: string; protectionStatus: string; encryptionPercentage: number | null } | null;
   platformSecurity: { secureBootEnabled: boolean | null; tpmPresent: boolean | null; tpmReady: boolean | null; tpmVersion?: string; tpmManufacturer?: string; tpmSource?: string } | null;
   remoteAccess: { remoteDesktopEnabled: boolean | null; networkLevelAuthRequired: boolean | null; rdpFirewallScope?: "restricted" | "unrestricted" | "blocked" | "unknown"; rdpFirewallRuleCount: number | null; remoteAssistanceEnabled: boolean | null; smb1Enabled: boolean | null; openSshServerRunning: boolean | null } | null;

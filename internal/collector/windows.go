@@ -141,11 +141,12 @@ try {
     $rebootReasons = [System.Collections.Generic.List[string]]::new()
     if (Test-Path 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Component Based Servicing\RebootPending') { $rebootReasons.Add('Component servicing') }
     if (Test-Path 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\WindowsUpdate\Auto Update\RebootRequired') { $rebootReasons.Add('Windows Update') }
-    if ($null -ne (Get-ItemProperty -Path 'HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager' -Name PendingFileRenameOperations -ErrorAction SilentlyContinue)) { $rebootReasons.Add('Pending file replacement') }
+    $pendingFileReplacement = $null -ne (Get-ItemProperty -Path 'HKLM:\SYSTEM\CurrentControlSet\Control\Session Manager' -Name PendingFileRenameOperations -ErrorAction SilentlyContinue)
     $windowsUpdate = [pscustomobject]@{
         LastInstalledAt = if ($null -eq $latestHotFix) { $null } else { $latestHotFix.InstalledOn.ToUniversalTime().ToString('o') }
         PendingReboot = [bool]($rebootReasons.Count -gt 0)
         RebootReasons = @($rebootReasons)
+        PendingFileReplacement = [bool]$pendingFileReplacement
     }
 }
 catch {

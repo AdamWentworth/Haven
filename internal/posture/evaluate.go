@@ -291,6 +291,10 @@ func evaluateUpdate(snapshot *model.SecuritySnapshot, now time.Time) {
 		addFinding(snapshot, "updates-stale", "Maintenance", "Windows updates may be overdue", "medium", "The latest dated installed update reported by Windows was "+ageLabel+" ago.", "Open Windows Update, check for updates, and verify that quality updates are installing successfully.")
 		return
 	}
+	if update.PendingFileReplacement != nil && *update.PendingFileReplacement {
+		addCheck(snapshot, "updates", "Maintenance", "Windows servicing", "configured", "Windows Update and component servicing do not require a restart. An application has queued file cleanup for a future restart.", "Pending file replacement (informational)")
+		return
+	}
 	addCheck(snapshot, "updates", "Maintenance", "Windows servicing", "pass", "A dated Windows update was installed within the last 45 days and no restart is pending.", update.LastInstalledAt.Local().Format("Jan 2, 2006"))
 }
 

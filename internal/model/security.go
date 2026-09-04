@@ -124,9 +124,10 @@ type WindowsBaseline struct {
 }
 
 type WindowsUpdateStatus struct {
-	LastInstalledAt *time.Time `json:"lastInstalledAt"`
-	PendingReboot   *bool      `json:"pendingReboot"`
-	RebootReasons   []string   `json:"rebootReasons"`
+	LastInstalledAt        *time.Time `json:"lastInstalledAt"`
+	PendingReboot          *bool      `json:"pendingReboot"`
+	RebootReasons          []string   `json:"rebootReasons"`
+	PendingFileReplacement *bool      `json:"pendingFileReplacement"`
 }
 
 type DiskEncryptionStatus struct {

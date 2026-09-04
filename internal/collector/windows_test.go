@@ -67,6 +67,21 @@ func TestWindowsSnapshotScriptUsesReadOnlyTPMAndFirewallFallbacks(t *testing.T) 
 	}
 }
 
+func TestWindowsSnapshotScriptSeparatesAuthoritativeRebootSignalsFromFileCleanup(t *testing.T) {
+	for _, expected := range []string{
+		"PendingFileRenameOperations",
+		"PendingFileReplacement = [bool]$pendingFileReplacement",
+		"PendingReboot = [bool]($rebootReasons.Count -gt 0)",
+	} {
+		if !strings.Contains(windowsSnapshotScript, expected) {
+			t.Fatalf("Windows snapshot script is missing %q", expected)
+		}
+	}
+	if strings.Contains(windowsSnapshotScript, "$rebootReasons.Add('Pending file replacement')") {
+		t.Fatal("generic pending file replacements must not be classified as an authoritative restart requirement")
+	}
+}
+
 func TestWindowsCollectorReportsRunnerFailure(t *testing.T) {
 	collector := NewWindowsCollector(stubRunner{err: errors.New("access denied")})
 

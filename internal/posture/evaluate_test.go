@@ -108,6 +108,51 @@ func TestEvaluateTreatsRunningWindowsOpenSSHAsConfiguredService(t *testing.T) {
 	}
 }
 
+func TestEvaluateTreatsPendingApplicationFileReplacementAsInformational(t *testing.T) {
+	now := time.Date(2026, time.September, 1, 12, 0, 0, 0, time.UTC)
+	lastUpdate := now.Add(-10 * 24 * time.Hour)
+	snapshot := windowsSnapshot()
+	snapshot.WindowsBaseline = &model.WindowsBaseline{
+		Update: &model.WindowsUpdateStatus{
+			LastInstalledAt:        &lastUpdate,
+			PendingReboot:          boolPointer(false),
+			PendingFileReplacement: boolPointer(true),
+		},
+	}
+
+	evaluated := Evaluate(snapshot, now)
+	check := findCheck(t, evaluated.BaselineChecks, "updates")
+	if check.Status != "configured" || !strings.Contains(check.Summary, "do not require a restart") {
+		t.Fatalf("expected informational application cleanup state, got %#v", check)
+	}
+	for _, finding := range evaluated.Findings {
+		if finding.ID == "pending-reboot" {
+			t.Fatalf("generic application file cleanup must not create a restart finding: %#v", finding)
+		}
+	}
+}
+
+func TestEvaluateFlagsAuthoritativeWindowsRestartRequirement(t *testing.T) {
+	now := time.Date(2026, time.September, 1, 12, 0, 0, 0, time.UTC)
+	lastUpdate := now.Add(-10 * 24 * time.Hour)
+	snapshot := windowsSnapshot()
+	snapshot.WindowsBaseline = &model.WindowsBaseline{
+		Update: &model.WindowsUpdateStatus{
+			LastInstalledAt:        &lastUpdate,
+			PendingReboot:          boolPointer(true),
+			RebootReasons:          []string{"Windows Update"},
+			PendingFileReplacement: boolPointer(true),
+		},
+	}
+
+	evaluated := Evaluate(snapshot, now)
+	assertFinding(t, evaluated.Findings, "pending-reboot", "low")
+	check := findCheck(t, evaluated.BaselineChecks, "updates")
+	if check.Status != "attention" || check.Evidence != "Windows Update" {
+		t.Fatalf("expected authoritative restart requirement to remain actionable, got %#v", check)
+	}
+}
+
 func TestEvaluateDoesNotTreatDisabledBuiltInAdministratorAsEnabled(t *testing.T) {
 	now := time.Date(2026, time.September, 1, 12, 0, 0, 0, time.UTC)
 	lastUpdate := now.Add(-10 * 24 * time.Hour)
