@@ -43,6 +43,23 @@ describe("account security notebook", () => {
 		expect(save).toHaveBeenCalledWith(expect.objectContaining({ provider: "Google", label: "Personal", twoStepStatus: "enabled", factors: ["authenticator"] }));
 	});
 
+	it("updates an account without resending derived presentation fields", async () => {
+		const user = userEvent.setup();
+		const save = vi.fn().mockResolvedValue(true);
+		render(<AccountNotebook profiles={[profile()]} demoMode={false} busy={false} save={save} remove={vi.fn()} />);
+		await user.click(screen.getByRole("button", { name: "Edit" }));
+		await user.clear(screen.getByLabelText("Sign-in or profile identifier optional"));
+		await user.type(screen.getByLabelText("Sign-in or profile identifier optional"), "owner@example.com");
+		await user.selectOptions(screen.getByLabelText("Category"), "email");
+		await user.click(screen.getByRole("button", { name: "Save profile" }));
+		expect(save).toHaveBeenCalledWith(expect.objectContaining({ id: "acct_test_profile", identifier: "owner@example.com", category: "email" }));
+		const submitted = save.mock.calls[0][0] as Record<string, unknown>;
+		expect(submitted).not.toHaveProperty("status");
+		expect(submitted).not.toHaveProperty("suggestions");
+		expect(submitted).not.toHaveProperty("createdAt");
+		expect(submitted).not.toHaveProperty("updatedAt");
+	});
+
 	it("keeps synthetic portfolio profiles read-only", () => {
 		render(<AccountNotebook profiles={[profile({ id: "acct_demo_profile" })]} demoMode busy={false} save={vi.fn()} remove={vi.fn()} />);
 		expect(screen.getByText(/Synthetic account notebook/)).toBeInTheDocument();
