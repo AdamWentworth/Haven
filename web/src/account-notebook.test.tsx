@@ -30,6 +30,14 @@ describe("account security notebook", () => {
 		expect(container.querySelector('[data-provider-brand="Google"] svg')).toBeInTheDocument();
 	});
 
+	it("keeps a healthy reviewed card concise", () => {
+		render(<AccountNotebook profiles={[profile({ status: "good", suggestions: [], lastReviewedAt: "2026-09-04T12:00:00Z" })]} demoMode={false} unlocked busy={false} unlock={vi.fn()} lock={vi.fn()} save={vi.fn()} remove={vi.fn()} />);
+		expect(screen.getByText("Checklist looks good")).toBeInTheDocument();
+		expect(screen.getByText(/Reviewed Sep 4, 2026/)).toBeInTheDocument();
+		expect(screen.queryByText(/No improvement suggestion follows/)).not.toBeInTheDocument();
+		expect(screen.queryByText(/5:00:00 AM/)).not.toBeInTheDocument();
+	});
+
 	it("does not render private profiles until the notebook is unlocked", async () => {
 		const user = userEvent.setup();
 		const unlock = vi.fn();
