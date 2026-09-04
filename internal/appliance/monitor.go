@@ -264,24 +264,29 @@ func (monitor *Monitor) probeService(ctx context.Context, address string, servic
 		deadline = contextDeadline
 	}
 	_ = connection.SetDeadline(deadline)
-	// Certificate verification is performed explicitly below so HAVEN can
-	// inspect private appliances that use a self-signed or address-mismatched
-	// certificate without treating the probe itself as failed.
-	tlsConnection := tls.Client(connection, &tls.Config{ // #nosec G402 -- observation only; explicit verification follows.
-		InsecureSkipVerify: true,
-		MinVersion:         tls.VersionTLS12,
-		ServerName:         address,
+	// Keep Go's normal certificate verification enabled. When verification is
+	// the only handshake failure, CertificateVerificationError still exposes
+	// the unverified peer chain so HAVEN can report bounded certificate facts
+	// without accepting an untrusted TLS session.
+	tlsConnection := tls.Client(connection, &tls.Config{
+		MinVersion: tls.VersionTLS12,
+		ServerName: address,
 	})
-	if err := tlsConnection.HandshakeContext(ctx); err != nil {
-		status.ErrorClass = "tls-handshake-failed"
-		return status
+	handshakeErr := tlsConnection.HandshakeContext(ctx)
+	peerCertificates := tlsConnection.ConnectionState().PeerCertificates
+	if handshakeErr != nil {
+		var verificationError *tls.CertificateVerificationError
+		if !errors.As(handshakeErr, &verificationError) || len(verificationError.UnverifiedCertificates) == 0 {
+			status.ErrorClass = "tls-handshake-failed"
+			return status
+		}
+		peerCertificates = verificationError.UnverifiedCertificates
 	}
-	state := tlsConnection.ConnectionState()
-	if len(state.PeerCertificates) == 0 {
+	if len(peerCertificates) == 0 {
 		status.ErrorClass = "certificate-unavailable"
 		return status
 	}
-	leaf := state.PeerCertificates[0]
+	leaf := peerCertificates[0]
 	digest := sha256.Sum256(leaf.Raw)
 	certificate := &model.ManagedCertificateStatus{
 		Subject:     boundedCertificateName(leaf.Subject.String()),
@@ -292,7 +297,7 @@ func (monitor *Monitor) probeService(ctx context.Context, address string, servic
 	}
 	certificate.NameValid = leaf.VerifyHostname(address) == nil
 	intermediates := x509.NewCertPool()
-	for _, candidate := range state.PeerCertificates[1:] {
+	for _, candidate := range peerCertificates[1:] {
 		intermediates.AddCert(candidate)
 	}
 	_, verifyErr := leaf.Verify(x509.VerifyOptions{Intermediates: intermediates, CurrentTime: checkedAt})
