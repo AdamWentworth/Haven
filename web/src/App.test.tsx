@@ -22,6 +22,7 @@ const fixtures = vi.hoisted(() => {
 		lastCollectedAt: "2026-09-04T08:00:00Z",
 		certificateExpiresAt: "2027-09-01T00:00:00Z",
 		revokedAt: null,
+		agent: { schemaVersion: 2, version: "0.14.0", revision: "test-revision", platform: "windows", installation: "windows-task", capabilities: ["host-firewall", "network-observation", "windows-defender", "windows-posture"], collectionNotices: 0, compatibility: "current" },
 	};
 	const snapshot: SecuritySnapshot = {
 		collectedAt: "2026-09-04T08:00:00Z",
@@ -39,7 +40,7 @@ const fixtures = vi.hoisted(() => {
 	const runtime: RuntimeStatus = {
 		status: "ready",
 		service: "HAVEN",
-		version: "0.13.0",
+		version: "0.14.0",
 		revision: "test-revision",
 		agentIngestion: "mutual-tls",
 		demoMode: false,
@@ -92,10 +93,14 @@ describe("HAVEN routed console", () => {
 
 		await user.click(screen.getByRole("link", { name: "Devices" }));
 		expect(await screen.findByRole("heading", { name: "Devices", level: 1 })).toBeInTheDocument();
+		expect(screen.getByRole("heading", { name: "Agent lifecycle" })).toBeInTheDocument();
+		expect(screen.getByText("exact build verified")).toBeInTheDocument();
 		expect(window.location.pathname).toBe("/devices");
 
 		await user.click(screen.getByRole("button", { name: /ADAM-TEST/ }));
 		expect(await screen.findByRole("heading", { name: "ADAM-TEST" })).toBeInTheDocument();
+		expect(screen.getByRole("heading", { name: "Agent evidence" })).toBeInTheDocument();
+		expect(screen.getByText("Windows scheduled task")).toBeInTheDocument();
 		expect(window.location.pathname).toBe("/devices/device-a/overview");
 
 		await user.click(screen.getByRole("link", { name: "Posture" }));
@@ -112,7 +117,7 @@ describe("HAVEN routed console", () => {
 		expect(await screen.findByRole("heading", { name: "Owner passkeys" })).toBeInTheDocument();
 		expect(document.title).toBe("Settings — HAVEN");
 		expect(screen.getByRole("heading", { name: "Background alerts" })).toBeInTheDocument();
-		expect(screen.getByText("0.13.0")).toBeInTheDocument();
+		expect(screen.getByText("0.14.0")).toBeInTheDocument();
 		expect(window.location.pathname).toBe("/settings");
 	});
 

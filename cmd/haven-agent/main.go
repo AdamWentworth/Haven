@@ -13,6 +13,7 @@ import (
 	"syscall"
 
 	"github.com/AdamWentworth/haven/internal/agent"
+	"github.com/AdamWentworth/haven/internal/buildinfo"
 	"github.com/AdamWentworth/haven/internal/collector"
 	"github.com/AdamWentworth/haven/internal/workload"
 )
@@ -86,6 +87,11 @@ func run(ctx context.Context, command string, arguments []string) error {
 		return nil
 
 	case "report":
+		flags := flag.NewFlagSet("report", flag.ContinueOnError)
+		installation := flags.String("installation", defaultInstallation(), "bounded installation kind reported to the hub")
+		if err := flags.Parse(arguments); err != nil {
+			return err
+		}
 		directory, err := agent.DefaultDirectory()
 		if err != nil {
 			return err
@@ -94,7 +100,7 @@ func run(ctx context.Context, command string, arguments []string) error {
 		if err != nil {
 			return err
 		}
-		receipt, err := client.Report(ctx, collector.NewForCurrentPlatform().Collect(ctx))
+		receipt, err := client.Report(ctx, collector.NewForCurrentPlatform().Collect(ctx), *installation)
 		if err != nil {
 			return err
 		}
@@ -110,10 +116,23 @@ func run(ctx context.Context, command string, arguments []string) error {
 		if err != nil {
 			return err
 		}
-		return writeJSON(client.Config())
+		return writeJSON(struct {
+			agent.Config
+			Version  string `json:"version"`
+			Revision string `json:"revision"`
+		}{Config: client.Config(), Version: buildinfo.Version, Revision: buildinfo.Revision})
+	case "version":
+		return writeJSON(map[string]string{"version": buildinfo.Version, "revision": buildinfo.Revision})
 	default:
-		return errors.New("usage: haven-agent [collect | enroll | export-docker-inventory | report | status]")
+		return errors.New("usage: haven-agent [collect | enroll | export-docker-inventory | report | status | version]")
 	}
+}
+
+func defaultInstallation() string {
+	if os.Getenv("INVOCATION_ID") != "" {
+		return "systemd-user"
+	}
+	return "interactive"
 }
 
 func writeJSON(value any) error {

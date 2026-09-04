@@ -13,7 +13,24 @@ type ObservationEnvelope struct {
 	DeviceID      string           `json:"deviceId"`
 	Sequence      int64            `json:"sequence"`
 	SentAt        time.Time        `json:"sentAt"`
+	Agent         *AgentMetadata   `json:"agent,omitempty"`
 	Snapshot      SecuritySnapshot `json:"snapshot"`
+}
+
+// AgentMetadata identifies the exact reporter that produced an observation.
+// It contains public build and capability facts only; installation paths,
+// usernames, credentials, and scheduling details are deliberately excluded.
+// The field is optional so a 0.14 hub can continue accepting already-enrolled
+// pre-0.14 agents while clearly presenting them as legacy reporters.
+type AgentMetadata struct {
+	SchemaVersion     int      `json:"schemaVersion"`
+	Version           string   `json:"version"`
+	Revision          string   `json:"revision"`
+	Platform          string   `json:"platform"`
+	Installation      string   `json:"installation"`
+	Capabilities      []string `json:"capabilities"`
+	CollectionNotices int      `json:"collectionNotices"`
+	Compatibility     string   `json:"compatibility,omitempty"`
 }
 
 type EnrollmentRequest struct {

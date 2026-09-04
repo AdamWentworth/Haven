@@ -402,6 +402,18 @@ var migrations = []migration{
 			`ALTER TABLE managed_appliances ADD COLUMN health_error_class TEXT NOT NULL DEFAULT ''`,
 		},
 	},
+	{
+		version: 14,
+		statements: []string{
+			`ALTER TABLE devices ADD COLUMN agent_schema_version INTEGER`,
+			`ALTER TABLE devices ADD COLUMN agent_version TEXT`,
+			`ALTER TABLE devices ADD COLUMN agent_revision TEXT`,
+			`ALTER TABLE devices ADD COLUMN agent_platform TEXT`,
+			`ALTER TABLE devices ADD COLUMN agent_installation TEXT`,
+			`ALTER TABLE devices ADD COLUMN agent_capabilities_json BLOB`,
+			`ALTER TABLE devices ADD COLUMN agent_collection_notices INTEGER`,
+		},
+	},
 }
 
 func Open(ctx context.Context, path string) (*Store, error) {
@@ -722,6 +734,10 @@ func (store *Store) AcceptObservation(
 	}
 
 	envelope.Snapshot.Device.DeviceID = deviceID
+	agentSchemaVersion, agentVersion, agentRevision, agentPlatform, agentInstallation, agentCapabilities, agentCollectionNotices, err := storedAgentMetadata(envelope.Agent)
+	if err != nil {
+		return err
+	}
 	payload, err := historicalPayload(envelope.Snapshot)
 	if err != nil {
 		return err
@@ -751,7 +767,10 @@ func (store *Store) AcceptObservation(
 		ctx,
 		`UPDATE devices SET
 			host_name = ?, operating_system = ?, architecture = ?,
-			last_seen_at = ?, last_collected_at = ?, last_sequence = ?
+			last_seen_at = ?, last_collected_at = ?, last_sequence = ?,
+			agent_schema_version = ?, agent_version = ?, agent_revision = ?,
+			agent_platform = ?, agent_installation = ?,
+			agent_capabilities_json = ?, agent_collection_notices = ?
 		 WHERE id = ?`,
 		envelope.Snapshot.Device.HostName,
 		envelope.Snapshot.Device.OperatingSystem,
@@ -759,6 +778,13 @@ func (store *Store) AcceptObservation(
 		receivedAt.UTC().Format(time.RFC3339Nano),
 		envelope.Snapshot.CollectedAt.UTC().Format(time.RFC3339Nano),
 		envelope.Sequence,
+		agentSchemaVersion,
+		agentVersion,
+		agentRevision,
+		agentPlatform,
+		agentInstallation,
+		agentCapabilities,
+		agentCollectionNotices,
 		deviceID,
 	)
 	if err != nil {
@@ -776,7 +802,9 @@ func (store *Store) ListDevices(ctx context.Context, now time.Time) ([]model.Dev
 		ctx,
 		`SELECT id, display_name, host_name, operating_system, architecture,
 			trust_state, enrolled_at, last_seen_at, last_collected_at,
-			certificate_not_after, revoked_at
+			certificate_not_after, revoked_at, agent_schema_version,
+			agent_version, agent_revision, agent_platform, agent_installation,
+			agent_capabilities_json, agent_collection_notices
 		 FROM devices
 		 ORDER BY display_name COLLATE NOCASE, id`,
 	)
@@ -877,7 +905,9 @@ func (store *Store) DeviceDetail(ctx context.Context, deviceID string, now time.
 		ctx,
 		`SELECT id, display_name, host_name, operating_system, architecture,
 			trust_state, enrolled_at, last_seen_at, last_collected_at,
-			certificate_not_after, revoked_at
+			certificate_not_after, revoked_at, agent_schema_version,
+			agent_version, agent_revision, agent_platform, agent_installation,
+			agent_capabilities_json, agent_collection_notices
 		 FROM devices WHERE id = ?`,
 		deviceID,
 	)
@@ -1439,6 +1469,9 @@ func scanDevice(row rowScanner, now time.Time) (model.DeviceRecord, error) {
 	var device model.DeviceRecord
 	var enrolledAt string
 	var lastSeenAt, lastCollectedAt, certificateExpiresAt, revokedAt sql.NullString
+	var agentSchemaVersion, agentCollectionNotices sql.NullInt64
+	var agentVersion, agentRevision, agentPlatform, agentInstallation sql.NullString
+	var agentCapabilities []byte
 	err := row.Scan(
 		&device.ID,
 		&device.DisplayName,
@@ -1451,6 +1484,13 @@ func scanDevice(row rowScanner, now time.Time) (model.DeviceRecord, error) {
 		&lastCollectedAt,
 		&certificateExpiresAt,
 		&revokedAt,
+		&agentSchemaVersion,
+		&agentVersion,
+		&agentRevision,
+		&agentPlatform,
+		&agentInstallation,
+		&agentCapabilities,
+		&agentCollectionNotices,
 	)
 	if err != nil {
 		return model.DeviceRecord{}, fmt.Errorf("read device: %w", err)
@@ -1471,8 +1511,36 @@ func scanDevice(row rowScanner, now time.Time) (model.DeviceRecord, error) {
 	if device.RevokedAt, err = optionalDatabaseTime(revokedAt); err != nil {
 		return model.DeviceRecord{}, err
 	}
+	if agentSchemaVersion.Valid {
+		metadata := model.AgentMetadata{
+			SchemaVersion:     int(agentSchemaVersion.Int64),
+			Version:           agentVersion.String,
+			Revision:          agentRevision.String,
+			Platform:          agentPlatform.String,
+			Installation:      agentInstallation.String,
+			CollectionNotices: int(agentCollectionNotices.Int64),
+			Capabilities:      []string{},
+		}
+		if len(agentCapabilities) > 0 {
+			if err := json.Unmarshal(agentCapabilities, &metadata.Capabilities); err != nil {
+				return model.DeviceRecord{}, fmt.Errorf("decode device agent capabilities: %w", err)
+			}
+		}
+		device.Agent = &metadata
+	}
 	device.Status = deviceStatus(device, now)
 	return device, nil
+}
+
+func storedAgentMetadata(metadata *model.AgentMetadata) (schemaVersion any, version any, revision any, platform any, installation any, capabilities any, collectionNotices any, err error) {
+	if metadata == nil {
+		return nil, nil, nil, nil, nil, nil, nil, nil
+	}
+	payload, err := json.Marshal(metadata.Capabilities)
+	if err != nil {
+		return nil, nil, nil, nil, nil, nil, nil, fmt.Errorf("encode device agent capabilities: %w", err)
+	}
+	return metadata.SchemaVersion, metadata.Version, metadata.Revision, metadata.Platform, metadata.Installation, payload, metadata.CollectionNotices, nil
 }
 
 // EnrolledDeviceStaleAfter is the server-owned freshness allowance used when

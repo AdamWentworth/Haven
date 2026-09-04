@@ -3,6 +3,7 @@ import { addPasskey, collectSnapshot, getAuthStatus, getDevice, getLatestSnapsho
 import { suggestedBaseline } from "./baseline";
 import { AuthenticationGate } from "./authentication-gate";
 import { DeviceInventory } from "./device-inventory";
+import { AgentEvidencePanel, FleetPanel } from "./fleet-panel";
 import { actionableFindings, visibleFindingLifecycles } from "./findings";
 import { booleanValue, formatBytes, formatDate, formatDuration, formatInterval, formatPortBinding, formatRelativeTime, formatTimeRemaining, policyValue } from "./format";
 import { ActivityIcon, AlertIcon, BellIcon, CheckIcon, ChipIcon, DefenderIcon, DevicesIcon, FirewallIcon, HavenIcon, HelpIcon, LaptopIcon, LockIcon, MonitorIcon, NetworkIcon, RefreshIcon, RemoteAccessIcon, ServerIcon, UpdateIcon, UsersIcon, WorkloadIcon } from "./icons";
@@ -832,7 +833,7 @@ function Application({ snapshot, devices, networkDevices, appliances, events, ne
 	if (route.page === "overview") {
 		page = <><PageIntro eyebrow="PERSONAL SECURITY OBSERVATORY" title="Home security overview">Current alerts, coverage, and meaningful changes across trusted devices and explicitly configured appliances.</PageIntro><NetworkOverview devices={networkDevices} appliances={appliances} events={networkEvents} alerts={alerts} selectedId={selectedDeviceId} selectDevice={openDevice} demoMode={demoMode} view="overview" /></>;
 	} else if (route.page === "devices") {
-		page = <><PageIntro eyebrow="TRUSTED INVENTORY" title="Devices">Choose an enrolled endpoint to inspect its current posture, services, connections, and history.</PageIntro><DeviceInventory devices={devices} selectedId={selectedDeviceId} select={openDevice} demoMode={demoMode} /></>;
+		page = <><PageIntro eyebrow="TRUSTED INVENTORY" title="Devices">Choose an enrolled endpoint to inspect its posture and verify that its reporter is current, compatible, and collecting the expected evidence.</PageIntro><FleetPanel devices={devices} runtime={runtime} /><DeviceInventory devices={devices} selectedId={selectedDeviceId} select={openDevice} demoMode={demoMode} /></>;
 	} else if (route.page === "network") {
 		page = <><PageIntro eyebrow="LIVE OBSERVATION" title="Network">Current device coverage and relationship summaries without packet capture or retained remote endpoints.</PageIntro><NetworkOverview devices={networkDevices} appliances={appliances} events={networkEvents} alerts={alerts} selectedId={selectedDeviceId} selectDevice={openDevice} demoMode={demoMode} view="network" /></>;
 	} else if (route.page === "appliances") {
@@ -845,7 +846,7 @@ function Application({ snapshot, devices, networkDevices, appliances, events, ne
 		page = <>
 			<div className="device-page-heading"><a href="/devices" onClick={(event) => { if (event.button === 0 && !event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey) { event.preventDefault(); navigate({ page: "devices" }); } }}>← All devices</a><DeviceNavigation deviceId={selectedDeviceId} current={deviceSection} navigate={navigate} /></div>
 			{deviceSummary}
-			{deviceSection === "overview" && <FindingsPanel findings={snapshot.findings || []} checks={snapshot.baselineChecks || []} reviews={reviews} review={reviewFinding} />}
+			{deviceSection === "overview" && <>{selectedDevice && <AgentEvidencePanel device={selectedDevice} runtime={runtime} />}<FindingsPanel findings={snapshot.findings || []} checks={snapshot.baselineChecks || []} reviews={reviews} review={reviewFinding} /></>}
 			{deviceSection === "posture" && <>{(snapshot.baselineChecks || []).length > 0 && <BaselinePanel checks={snapshot.baselineChecks || []} collectedAt={snapshot.collectedAt} platform={isLinux ? "Linux" : "Windows"} />}{snapshot.notices.length > 0 && <section className="panel notices-panel" aria-labelledby="notices-title"><PanelHeading eyebrow="COLLECTION NOTES" title="Some signals could not be verified" id="notices-title" icon={<AlertIcon />} accent="amber">A collection limitation is not automatically a security problem</PanelHeading><ul className="notices-list">{snapshot.notices.map((notice, index) => <li className="notice" key={`${notice.source}-${index}`}><strong>{notice.source}: </strong>{notice.message}</li>)}</ul></section>}{isLinux && snapshot.linuxBaseline ? <LinuxPanel baseline={snapshot.linuxBaseline} /> : <DefenderPanel defender={snapshot.defender} />}<FirewallPanel profiles={snapshot.firewallProfiles} isLinux={isLinux} /></>}
 			{deviceSection === "services" && <>{isLinux && <WorkloadsPanel inventory={snapshot.linuxBaseline?.workloads ?? null} />}<ConnectionsPanel deviceId={selectedDeviceId} operatingSystem={snapshot.device.operatingSystem} connections={snapshot.connections} workloads={workloadInventory} expectedServices={expectedServices} observations={listenerObservations} saveExpectation={saveServiceExpectation} saveExpectations={saveServiceExpectations} removeExpectation={removeServiceExpectation} busy={actionBusy} /></>}
 			{deviceSection === "history" && <ActivityPanel events={events} alerts={alerts} />}
