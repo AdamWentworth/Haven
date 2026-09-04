@@ -1,4 +1,4 @@
-import type { ManagedHealthComponentState, ManagedHealthCoverageState, ManagedHealthStatus } from "./types";
+import type { ManagedHealthComponentState, ManagedHealthCoverageState, ManagedHealthStatus, ManagedPoolHealth } from "./types";
 
 export type HealthTone = "healthy" | "configured" | "attention" | "danger" | "unknown";
 
@@ -31,4 +31,16 @@ export function healthStatusLabel(status: ManagedHealthStatus["status"]): string
     case "unavailable": return "unavailable";
     default: return "pending";
   }
+}
+
+export function storageSetLabel(pool: ManagedPoolHealth): string {
+  if (pool.memberCount === 1) return "Single-disk storage";
+  return pool.raidLevel ? pool.raidLevel.toUpperCase() : "Storage set";
+}
+
+export function storageSetDetail(pool: ManagedPoolHealth): string {
+  const noun = pool.memberCount === 1 ? "member" : "members";
+  const activity = `${pool.activeCount}/${pool.memberCount} ${noun} active`;
+  if (pool.memberCount === 1) return `${activity} · no drive redundancy · TOS-managed Linux md set`;
+  return activity;
 }

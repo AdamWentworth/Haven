@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { addPasskey, collectSnapshot, getAuthStatus, getDevice, getLatestSnapshot, getNotificationStatus, getRuntimeStatus, listAlerts, listAuditEvents, listDevices, listEvents, listExpectedServices, listFindingReviews, listManagedAppliances, listObservedListeners, listPasskeys, listSecurityActions, loginWithPasskey, logout, registerPasskey, registerPushDestination, removeExpectedService, removePasskey, removePushDestination, requestSecurityAction, saveExpectedService, saveExpectedServices, saveFindingReview } from "./api";
 import { ActivityIcon, AlertIcon, BellIcon, CheckIcon, ChipIcon, DefenderIcon, DevicesIcon, FirewallIcon, HavenIcon, HelpIcon, LaptopIcon, LockIcon, MonitorIcon, NetworkIcon, RefreshIcon, RemoteAccessIcon, ServerIcon, UpdateIcon, UsersIcon, WorkloadIcon } from "./icons";
-import { componentHealthTone, coverageTone, healthStatusLabel, managedHealthTone } from "./appliance-health";
+import { componentHealthTone, coverageTone, healthStatusLabel, managedHealthTone, storageSetDetail, storageSetLabel } from "./appliance-health";
 import { bindScopeLabel, canonicalOwnerName, endpoint, endpointScope, expectedServiceMatches, expectedServiceOwnerConstrained, isPrivateNetworkAddress, listenerOwnerSummary, liveNetworkRelationships, logicalListeners, networkServiceLabel, normalizeAddress, workloadAttribution, type LogicalListener, type NetworkDeviceObservation } from "./network";
 import { decodeApplicationServerKey, normalizePushDestinationLabel, serializePushSubscription, supportsBackgroundPush } from "./push";
 import type {
@@ -520,7 +520,7 @@ function PanelHeading({
 function ApplianceHealthPanel({ health }: { health: ManagedHealthStatus }) {
 	const coverage = [
 		["Disks + SMART", health.coverage.disks],
-		["RAID", health.coverage.raid],
+		["Storage sets", health.coverage.raid],
 		["Temperature", health.coverage.temperature],
 		["Capacity", health.coverage.capacity],
 		["Firmware", health.coverage.firmware],
@@ -537,7 +537,7 @@ function ApplianceHealthPanel({ health }: { health: ManagedHealthStatus }) {
 		<div className="appliance-coverage" aria-label="Health evidence coverage">{coverage.map(([label, state]) => <span key={label}><small>{label}</small><StatusChip label={state} tone={coverageTone(state)} /></span>)}</div>
 		{health.errorClass && <p className="appliance-health-note">One read-only source was unavailable during this check. Available evidence remains visible and is not promoted to fully healthy.</p>}
 		{health.disks.length > 0 && <div className="appliance-health-group"><h4>Physical disks</h4><ul>{health.disks.map((disk) => <li key={disk.name}><span><strong>{disk.name}{disk.model ? ` · ${disk.model}` : ""}</strong><small>{formatBytes(disk.capacityBytes)}{disk.temperatureC === undefined ? "" : ` · ${disk.temperatureC.toFixed(0)}°C`} · SMART {disk.smart}</small></span><StatusChip label={disk.state} tone={componentHealthTone(disk.state)} /></li>)}</ul></div>}
-		{health.pools.length > 0 && <div className="appliance-health-group"><h4>RAID arrays</h4><ul>{health.pools.map((pool) => <li key={pool.name}><span><strong>{pool.name} · {pool.raidLevel || "RAID"}</strong><small>{pool.activeCount}/{pool.memberCount} members active</small></span><StatusChip label={pool.state} tone={componentHealthTone(pool.state)} /></li>)}</ul></div>}
+		{health.pools.length > 0 && <div className="appliance-health-group"><h4>Storage sets</h4><ul>{health.pools.map((pool) => <li key={pool.name}><span><strong>{pool.name} · {storageSetLabel(pool)}</strong><small>{storageSetDetail(pool)}</small></span><StatusChip label={pool.state} tone={componentHealthTone(pool.state)} /></li>)}</ul></div>}
 		{health.volumes.length > 0 && <div className="appliance-health-group"><h4>Volume capacity</h4><ul>{health.volumes.map((volume) => {
 			const width = Math.min(100, Math.max(0, volume.usedPercentage));
 			return <li className="appliance-volume" key={volume.name}><span><strong>{volume.name}</strong><small>{volume.usedPercentage.toFixed(1)}% used · {formatBytes(volume.availableBytes)} available of {formatBytes(volume.capacityBytes)}</small><span className="capacity-track" aria-hidden="true"><span style={{ width: `${width}%` }} /></span></span><StatusChip label={volume.state} tone={componentHealthTone(volume.state)} /></li>;
