@@ -132,6 +132,30 @@ func TestEvaluateTreatsPendingApplicationFileReplacementAsInformational(t *testi
 	}
 }
 
+func TestEvaluateTreatsLegacyFileReplacementOnlyPayloadAsInformational(t *testing.T) {
+	now := time.Date(2026, time.September, 1, 12, 0, 0, 0, time.UTC)
+	lastUpdate := now.Add(-10 * 24 * time.Hour)
+	snapshot := windowsSnapshot()
+	snapshot.WindowsBaseline = &model.WindowsBaseline{
+		Update: &model.WindowsUpdateStatus{
+			LastInstalledAt: &lastUpdate,
+			PendingReboot:   boolPointer(true),
+			RebootReasons:   []string{"Pending file replacement"},
+		},
+	}
+
+	evaluated := Evaluate(snapshot, now)
+	check := findCheck(t, evaluated.BaselineChecks, "updates")
+	if check.Status != "configured" || !strings.Contains(check.Summary, "do not require a restart") {
+		t.Fatalf("expected legacy file cleanup payload to be informational, got %#v", check)
+	}
+	for _, finding := range evaluated.Findings {
+		if finding.ID == "pending-reboot" {
+			t.Fatalf("legacy file-cleanup-only payload must not create a restart finding: %#v", finding)
+		}
+	}
+}
+
 func TestEvaluateFlagsAuthoritativeWindowsRestartRequirement(t *testing.T) {
 	now := time.Date(2026, time.September, 1, 12, 0, 0, 0, time.UTC)
 	lastUpdate := now.Add(-10 * 24 * time.Hour)

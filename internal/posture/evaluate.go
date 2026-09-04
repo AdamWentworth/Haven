@@ -271,10 +271,20 @@ func evaluateUpdate(snapshot *model.SecuritySnapshot, now time.Time) {
 		return
 	}
 	update := snapshot.WindowsBaseline.Update
-	if update.PendingReboot != nil && *update.PendingReboot {
+	pendingFileReplacement := update.PendingFileReplacement != nil && *update.PendingFileReplacement
+	authoritativeReasons := make([]string, 0, len(update.RebootReasons))
+	for _, reason := range update.RebootReasons {
+		if strings.EqualFold(strings.TrimSpace(reason), "Pending file replacement") {
+			pendingFileReplacement = true
+			continue
+		}
+		authoritativeReasons = append(authoritativeReasons, reason)
+	}
+	authoritativeReboot := update.PendingReboot != nil && *update.PendingReboot && (len(update.RebootReasons) == 0 || len(authoritativeReasons) > 0)
+	if authoritativeReboot {
 		reason := "Windows has pending work normally completed by a restart"
-		if len(update.RebootReasons) > 0 {
-			reason = strings.Join(update.RebootReasons, ", ")
+		if len(authoritativeReasons) > 0 {
+			reason = strings.Join(authoritativeReasons, ", ")
 		}
 		addCheck(snapshot, "updates", "Maintenance", "Windows servicing", "attention", "A system restart may be needed to finish pending work.", reason)
 		addFinding(snapshot, "pending-reboot", "Maintenance", "A system restart may be pending", "low", reason+" was reported. This does not necessarily mean Windows Update itself requires a restart.", "Save your work and restart Windows at a convenient time if this pending state is unexpected or persists.")
@@ -291,7 +301,7 @@ func evaluateUpdate(snapshot *model.SecuritySnapshot, now time.Time) {
 		addFinding(snapshot, "updates-stale", "Maintenance", "Windows updates may be overdue", "medium", "The latest dated installed update reported by Windows was "+ageLabel+" ago.", "Open Windows Update, check for updates, and verify that quality updates are installing successfully.")
 		return
 	}
-	if update.PendingFileReplacement != nil && *update.PendingFileReplacement {
+	if pendingFileReplacement {
 		addCheck(snapshot, "updates", "Maintenance", "Windows servicing", "configured", "Windows Update and component servicing do not require a restart. An application has queued file cleanup for a future restart.", "Pending file replacement (informational)")
 		return
 	}
