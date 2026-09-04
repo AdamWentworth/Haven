@@ -7,8 +7,99 @@ import (
 	"time"
 
 	"github.com/AdamWentworth/haven/internal/account"
+	"github.com/AdamWentworth/haven/internal/authn"
 	"github.com/AdamWentworth/haven/internal/storage"
 )
+
+const (
+	accountAccessScope  = "account-notebook"
+	accountUnlockScope  = "account-notebook:unlock"
+	accountAccessHeader = "X-HAVEN-Account-Access"
+)
+
+func (server *Server) accountProtected(next http.Handler) http.Handler {
+	return server.protected(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		if server.requireAccountAccess(writer, request) {
+			next.ServeHTTP(writer, request)
+		}
+	}))
+}
+
+func (server *Server) accountMutating(next http.Handler) http.Handler {
+	return server.mutating(http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+		if server.requireAccountAccess(writer, request) {
+			next.ServeHTTP(writer, request)
+		}
+	}))
+}
+
+func (server *Server) requireAccountAccess(writer http.ResponseWriter, request *http.Request) bool {
+	if server.demoMode || server.auth == nil {
+		return true
+	}
+	session, err := request.Cookie(authn.SessionCookie)
+	if err != nil {
+		server.writeJSON(writer, http.StatusUnauthorized, map[string]string{"error": "Passkey sign-in is required."})
+		return false
+	}
+	if _, err := server.auth.RefreshScopedAccess(session.Value, request.Header.Get(accountAccessHeader), accountAccessScope, time.Now().UTC()); err != nil {
+		server.writeJSON(writer, http.StatusForbidden, map[string]string{"error": "The account notebook is locked. Confirm access with a passkey."})
+		return false
+	}
+	return true
+}
+
+func (server *Server) unlockAccountNotebook(writer http.ResponseWriter, request *http.Request) {
+	writer.Header().Set("Cache-Control", "no-store")
+	if server.demoMode {
+		server.writeJSON(writer, http.StatusOK, authn.ScopedAccess{IdleTimeoutSeconds: 900})
+		return
+	}
+	if !server.consumeReauthorization(writer, request, accountUnlockScope) {
+		return
+	}
+	session, err := request.Cookie(authn.SessionCookie)
+	if err != nil {
+		server.writeJSON(writer, http.StatusUnauthorized, map[string]string{"error": "Passkey sign-in is required."})
+		return
+	}
+	now := time.Now().UTC()
+	access, err := server.auth.IssueScopedAccess(request.Context(), session.Value, accountAccessScope, now)
+	if err != nil {
+		server.writeJSON(writer, http.StatusForbidden, map[string]string{"error": "Private account access could not be granted."})
+		return
+	}
+	_ = server.store.AppendAudit(request.Context(), storage.AuditEvent{Actor: "owner", Action: "account.notebook.unlock", Target: "account-notebook", Outcome: "succeeded", Detail: "The private account notebook was unlocked after fresh passkey confirmation. No account content was copied into audit history.", OccurredAt: now})
+	server.writeJSON(writer, http.StatusOK, access)
+}
+
+func (server *Server) touchAccountNotebook(writer http.ResponseWriter, request *http.Request) {
+	writer.Header().Set("Cache-Control", "no-store")
+	if server.demoMode {
+		server.writeJSON(writer, http.StatusOK, authn.ScopedAccess{IdleTimeoutSeconds: 900})
+		return
+	}
+	session, err := request.Cookie(authn.SessionCookie)
+	if err != nil {
+		server.writeJSON(writer, http.StatusUnauthorized, map[string]string{"error": "Passkey sign-in is required."})
+		return
+	}
+	access, err := server.auth.RefreshScopedAccess(session.Value, request.Header.Get(accountAccessHeader), accountAccessScope, time.Now().UTC())
+	if err != nil {
+		server.writeJSON(writer, http.StatusForbidden, map[string]string{"error": "The account notebook is locked. Confirm access with a passkey."})
+		return
+	}
+	server.writeJSON(writer, http.StatusOK, access)
+}
+
+func (server *Server) lockAccountNotebook(writer http.ResponseWriter, request *http.Request) {
+	if !server.demoMode && server.auth != nil {
+		if session, err := request.Cookie(authn.SessionCookie); err == nil {
+			server.auth.RevokeScopedAccess(session.Value, request.Header.Get(accountAccessHeader), accountAccessScope)
+		}
+	}
+	writer.WriteHeader(http.StatusNoContent)
+}
 
 func (server *Server) accountProfiles(writer http.ResponseWriter, request *http.Request) {
 	writer.Header().Set("Cache-Control", "no-store")

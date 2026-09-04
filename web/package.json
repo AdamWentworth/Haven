@@ -1,7 +1,7 @@
 {
   "name": "@haven/web",
   "private": true,
-  "version": "0.15.1",
+  "version": "0.15.2",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -12,7 +12,8 @@
   },
   "dependencies": {
     "react": "19.2.8",
-    "react-dom": "19.2.8"
+    "react-dom": "19.2.8",
+    "simple-icons": "16.29.0"
   },
   "devDependencies": {
     "@testing-library/jest-dom": "7.0.1",

@@ -34,7 +34,9 @@ func completeInput(now time.Time) ProfileInput {
 		Category: "email", TwoStepStatus: "enabled",
 		Factors: []string{"passkey", "authenticator"}, PasswordStatus: "unique",
 		RecoveryStatus: "configured", BackupCodesStatus: "stored",
-		LastReviewedAt: &reviewed, Notes: "Sessions and recovery methods reviewed.",
+		LastReviewedAt: &reviewed,
+		ReviewDetails:  []string{"Signed-in devices reviewed; nothing unfamiliar.", "Recovery methods are current."},
+		Notes:          "Enhanced protection remains an owner choice.",
 	}
 }
 
@@ -55,14 +57,14 @@ func TestProfilesAreEncryptedAndRoundTrip(t *testing.T) {
 	if err != nil || len(records) != 1 {
 		t.Fatalf("unexpected encrypted records: %#v, %v", records, err)
 	}
-	for _, forbidden := range [][]byte{[]byte("Google"), []byte("owner@example.com"), []byte("Sessions and recovery")} {
+	for _, forbidden := range [][]byte{[]byte("Google"), []byte("owner@example.com"), []byte("Signed-in devices"), []byte("Enhanced protection")} {
 		if bytes.Contains(records[0].Ciphertext, forbidden) {
 			t.Fatalf("ciphertext exposed account material %q", forbidden)
 		}
 	}
 
 	listed, err := service.List(ctx, now)
-	if err != nil || len(listed) != 1 || listed[0].Identifier != "owner@example.com" {
+	if err != nil || len(listed) != 1 || listed[0].Identifier != "owner@example.com" || len(listed[0].ReviewDetails) != 2 {
 		t.Fatalf("unexpected decrypted profiles: %#v, %v", listed, err)
 	}
 	updatedInput := listed[0].ProfileInput
@@ -149,6 +151,8 @@ func TestValidationRejectsContradictionsAndObviousSecrets(t *testing.T) {
 		{Provider: "Google", Label: "Profile", Category: "social", TwoStepStatus: "disabled", Factors: []string{"authenticator"}, PasswordStatus: "unique", RecoveryStatus: "configured", BackupCodesStatus: "missing"},
 		{Provider: "Google", Label: "Profile", Category: "social", TwoStepStatus: "enabled", Factors: []string{"authenticator", "authenticator"}, PasswordStatus: "unique", RecoveryStatus: "configured", BackupCodesStatus: "stored"},
 		{Provider: "Google", Label: "Profile", Category: "social", TwoStepStatus: "enabled", Factors: []string{"authenticator"}, PasswordStatus: "unique", RecoveryStatus: "configured", BackupCodesStatus: "stored", Notes: "otpauth://totp/do-not-store-this"},
+		{Provider: "Google", Label: "Profile", Category: "social", TwoStepStatus: "enabled", Factors: []string{"authenticator"}, PasswordStatus: "unique", RecoveryStatus: "configured", BackupCodesStatus: "stored", ReviewDetails: []string{"cookie: do-not-store-this"}},
+		{Provider: "Google", Label: "Profile", Category: "social", TwoStepStatus: "enabled", Factors: []string{"authenticator"}, PasswordStatus: "unique", RecoveryStatus: "configured", BackupCodesStatus: "stored", ReviewDetails: []string{"Duplicate", "duplicate"}},
 	}
 	for index, input := range tests {
 		if _, err := normalize(input, now); !errors.Is(err, ErrInvalidProfile) {

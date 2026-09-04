@@ -35,7 +35,13 @@ var (
 	ErrSessionInvalid  = errors.New("authentication session is invalid or expired")
 	ErrCSRFInvalid     = errors.New("anti-forgery token is invalid")
 	ErrReauthorization = errors.New("fresh passkey confirmation is required")
+	ErrScopedAccess    = errors.New("scoped access is invalid or expired")
 	ErrFinalPasskey    = errors.New("the final passkey cannot be removed")
+)
+
+const (
+	scopedAccessIdleTimeout     = 15 * time.Minute
+	scopedAccessAbsoluteTimeout = 8 * time.Hour
 )
 
 type Service struct {
@@ -49,6 +55,7 @@ type Service struct {
 	ceremonies map[string]ceremony
 	attempts   map[string]attemptWindow
 	grants     map[string]authorizationGrant
+	access     map[string]scopedAccessGrant
 }
 
 type ceremony struct {
@@ -64,6 +71,13 @@ type authorizationGrant struct {
 	sessionHash [32]byte
 	scope       string
 	expiresAt   time.Time
+}
+
+type scopedAccessGrant struct {
+	sessionHash       [32]byte
+	scope             string
+	idleExpiresAt     time.Time
+	absoluteExpiresAt time.Time
 }
 
 type attemptWindow struct {
@@ -90,6 +104,16 @@ type Session struct {
 	Token     string
 	CSRFToken string
 	ExpiresAt time.Time
+}
+
+// ScopedAccess is an in-memory, session-bound authorization for a private
+// workspace. Its bearer token is returned to the browser only and must never
+// be persisted by the client.
+type ScopedAccess struct {
+	Token              string    `json:"token"`
+	ExpiresAt          time.Time `json:"expiresAt"`
+	AbsoluteExpiresAt  time.Time `json:"absoluteExpiresAt"`
+	IdleTimeoutSeconds int64     `json:"idleTimeoutSeconds"`
 }
 
 type PasskeyInfo struct {
@@ -124,7 +148,7 @@ func New(store *storage.Store, keyPath, origin string) (*Service, error) {
 	if err != nil {
 		return nil, fmt.Errorf("configure passkey authentication: %w", err)
 	}
-	return &Service{store: store, webAuthn: instance, key: key, origin: origin, secureCookies: parsed.Scheme == "https", ceremonies: map[string]ceremony{}, attempts: map[string]attemptWindow{}, grants: map[string]authorizationGrant{}}, nil
+	return &Service{store: store, webAuthn: instance, key: key, origin: origin, secureCookies: parsed.Scheme == "https", ceremonies: map[string]ceremony{}, attempts: map[string]attemptWindow{}, grants: map[string]authorizationGrant{}, access: map[string]scopedAccessGrant{}}, nil
 }
 
 func (service *Service) Origin() string      { return service.origin }
@@ -372,6 +396,13 @@ func (service *Service) Logout(ctx context.Context, token string) error {
 		return nil
 	}
 	digest := sha256.Sum256([]byte(token))
+	service.mutex.Lock()
+	for key, grant := range service.access {
+		if subtle.ConstantTimeCompare(grant.sessionHash[:], digest[:]) == 1 {
+			delete(service.access, key)
+		}
+	}
+	service.mutex.Unlock()
 	return service.store.DeleteAuthSession(ctx, digest[:])
 }
 
@@ -469,6 +500,94 @@ func (service *Service) ConsumeReauthorization(sessionToken, token, scope string
 		return ErrReauthorization
 	}
 	return nil
+}
+
+// IssueScopedAccess creates a short-lived bearer grant bound to the current
+// authenticated session. The caller must consume a fresh passkey
+// reauthorization before invoking this method.
+func (service *Service) IssueScopedAccess(ctx context.Context, sessionToken, scope string, now time.Time) (ScopedAccess, error) {
+	if scope == "" || len(scope) > 180 {
+		return ScopedAccess{}, ErrScopedAccess
+	}
+	valid, err := service.ValidateSession(ctx, sessionToken, now)
+	if err != nil {
+		return ScopedAccess{}, err
+	}
+	if !valid {
+		return ScopedAccess{}, ErrSessionInvalid
+	}
+	token, err := randomToken(32)
+	if err != nil {
+		return ScopedAccess{}, err
+	}
+	tokenHash := sha256.Sum256([]byte(token))
+	sessionHash := sha256.Sum256([]byte(sessionToken))
+	idleExpiresAt := now.Add(scopedAccessIdleTimeout)
+	absoluteExpiresAt := now.Add(scopedAccessAbsoluteTimeout)
+	service.mutex.Lock()
+	service.pruneScopedAccessLocked(now)
+	for key, grant := range service.access {
+		if grant.scope == scope && subtle.ConstantTimeCompare(grant.sessionHash[:], sessionHash[:]) == 1 {
+			delete(service.access, key)
+		}
+	}
+	service.access[base64.RawURLEncoding.EncodeToString(tokenHash[:])] = scopedAccessGrant{
+		sessionHash: sessionHash, scope: scope, idleExpiresAt: idleExpiresAt, absoluteExpiresAt: absoluteExpiresAt,
+	}
+	service.mutex.Unlock()
+	return ScopedAccess{Token: token, ExpiresAt: idleExpiresAt, AbsoluteExpiresAt: absoluteExpiresAt, IdleTimeoutSeconds: int64(scopedAccessIdleTimeout / time.Second)}, nil
+}
+
+// RefreshScopedAccess validates a private-workspace grant and advances its
+// server-enforced idle deadline without extending its absolute lifetime.
+func (service *Service) RefreshScopedAccess(sessionToken, token, scope string, now time.Time) (ScopedAccess, error) {
+	if sessionToken == "" || token == "" || scope == "" {
+		return ScopedAccess{}, ErrScopedAccess
+	}
+	tokenHash := sha256.Sum256([]byte(token))
+	key := base64.RawURLEncoding.EncodeToString(tokenHash[:])
+	sessionHash := sha256.Sum256([]byte(sessionToken))
+	service.mutex.Lock()
+	defer service.mutex.Unlock()
+	service.pruneScopedAccessLocked(now)
+	grant, found := service.access[key]
+	if !found || grant.scope != scope || subtle.ConstantTimeCompare(grant.sessionHash[:], sessionHash[:]) != 1 {
+		return ScopedAccess{}, ErrScopedAccess
+	}
+	nextExpiry := now.Add(scopedAccessIdleTimeout)
+	if nextExpiry.After(grant.absoluteExpiresAt) {
+		nextExpiry = grant.absoluteExpiresAt
+	}
+	if !nextExpiry.After(now) {
+		delete(service.access, key)
+		return ScopedAccess{}, ErrScopedAccess
+	}
+	grant.idleExpiresAt = nextExpiry
+	service.access[key] = grant
+	return ScopedAccess{Token: token, ExpiresAt: nextExpiry, AbsoluteExpiresAt: grant.absoluteExpiresAt, IdleTimeoutSeconds: int64(scopedAccessIdleTimeout / time.Second)}, nil
+}
+
+func (service *Service) RevokeScopedAccess(sessionToken, token, scope string) {
+	if sessionToken == "" || token == "" {
+		return
+	}
+	tokenHash := sha256.Sum256([]byte(token))
+	key := base64.RawURLEncoding.EncodeToString(tokenHash[:])
+	sessionHash := sha256.Sum256([]byte(sessionToken))
+	service.mutex.Lock()
+	defer service.mutex.Unlock()
+	grant, found := service.access[key]
+	if found && grant.scope == scope && subtle.ConstantTimeCompare(grant.sessionHash[:], sessionHash[:]) == 1 {
+		delete(service.access, key)
+	}
+}
+
+func (service *Service) pruneScopedAccessLocked(now time.Time) {
+	for key, grant := range service.access {
+		if !grant.idleExpiresAt.After(now) || !grant.absoluteExpiresAt.After(now) {
+			delete(service.access, key)
+		}
+	}
 }
 
 func (service *Service) loadUser(ctx context.Context) (*User, error) {

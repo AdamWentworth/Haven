@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { addPasskey, collectSnapshot, getAuthStatus, getDevice, getLatestSnapshot, getNotificationStatus, getRuntimeStatus, listAccountProfiles, listAlerts, listAuditEvents, listDevices, listEvents, listExpectedServices, listFindingReviews, listManagedAppliances, listObservedListeners, listPasskeys, listSecurityActions, loginWithPasskey, logout, registerPasskey, registerPushDestination, removeAccountProfile, removeExpectedService, removePasskey, removePushDestination, requestSecurityAction, saveAccountProfile, saveExpectedService, saveExpectedServices, saveFindingReview } from "./api";
+import { HavenAPIError, addPasskey, collectSnapshot, getAuthStatus, getDevice, getLatestSnapshot, getNotificationStatus, getRuntimeStatus, listAccountProfiles, listAlerts, listAuditEvents, listDevices, listEvents, listExpectedServices, listFindingReviews, listManagedAppliances, listObservedListeners, listPasskeys, listSecurityActions, lockAccountNotebook, loginWithPasskey, logout, registerPasskey, registerPushDestination, removeAccountProfile, removeExpectedService, removePasskey, removePushDestination, requestSecurityAction, saveAccountProfile, saveExpectedService, saveExpectedServices, saveFindingReview, touchAccountNotebook, unlockAccountNotebook } from "./api";
 import { AccountNotebook } from "./account-notebook";
 import { suggestedBaseline } from "./baseline";
 import { AuthenticationGate } from "./authentication-gate";
@@ -15,6 +15,7 @@ import { decodeApplicationServerKey, normalizePushDestinationLabel, serializePus
 import { type AppRoute, type DeviceSection, useAppRoute } from "./routing";
 import type {
   BaselineCheck,
+  AccountAccessGrant,
   AccountProfile,
   AccountProfileInput,
   AuditEvent,
@@ -775,6 +776,7 @@ interface ApplicationProps {
 	actions: SecurityAction[];
 	passkeys: PasskeyInfo[];
 	accountProfiles: AccountProfile[];
+	accountUnlocked: boolean;
 	reviewFinding: (finding: SecurityFinding, state: FindingReviewState) => void;
 	saveServiceExpectation: (service: ExpectedServiceInput) => void;
 	saveServiceExpectations: (services: ExpectedServiceInput[]) => void;
@@ -784,13 +786,15 @@ interface ApplicationProps {
 	removeOwnerPasskey: (passkey: PasskeyInfo) => void;
 	saveAccount: (profile: AccountProfileInput) => Promise<boolean>;
 	removeAccount: (profile: AccountProfile) => void;
+	unlockAccounts: () => void;
+	lockAccounts: () => void;
 	actionBusy: boolean;
 	signOut: () => void;
 	route: AppRoute;
 	navigate: (route: AppRoute) => void;
 }
 
-function Application({ snapshot, devices, networkDevices, appliances, events, networkEvents, alerts, runtime, notificationStatus, selectedDevice, selectDevice, refresh, refreshing, error, demoMode, alertsEnabled, alertsSupported, enableAlerts, disableAlerts, reviews, expectedServices, listenerObservations, audit, actions, passkeys, accountProfiles, reviewFinding, saveServiceExpectation, saveServiceExpectations, removeServiceExpectation, runAction, addOwnerPasskey, removeOwnerPasskey, saveAccount, removeAccount, actionBusy, signOut, route, navigate }: ApplicationProps) {
+function Application({ snapshot, devices, networkDevices, appliances, events, networkEvents, alerts, runtime, notificationStatus, selectedDevice, selectDevice, refresh, refreshing, error, demoMode, alertsEnabled, alertsSupported, enableAlerts, disableAlerts, reviews, expectedServices, listenerObservations, audit, actions, passkeys, accountProfiles, accountUnlocked, reviewFinding, saveServiceExpectation, saveServiceExpectations, removeServiceExpectation, runAction, addOwnerPasskey, removeOwnerPasskey, saveAccount, removeAccount, unlockAccounts, lockAccounts, actionBusy, signOut, route, navigate }: ApplicationProps) {
   const isLinux = snapshot.linuxBaseline !== null || /linux|ubuntu/i.test(snapshot.device.operatingSystem);
   const defenderHealthy = snapshot.defender?.antivirusEnabled === true
     && snapshot.defender.realTimeProtectionEnabled === true
@@ -845,7 +849,7 @@ function Application({ snapshot, devices, networkDevices, appliances, events, ne
 	} else if (route.page === "appliances") {
 		page = <><PageIntro eyebrow="READ-ONLY HEALTH" title="Appliances">Bounded reachability and health evidence from devices explicitly configured by the owner.</PageIntro><NetworkOverview devices={networkDevices} appliances={appliances} events={networkEvents} alerts={alerts} selectedId={selectedDeviceId} selectDevice={openDevice} demoMode={demoMode} view="appliances" /></>;
 	} else if (route.page === "accounts") {
-		page = <><PageIntro eyebrow="IDENTITY AND RECOVERY" title="Accounts">An informal, encrypted notebook for the security measures you have confirmed directly at each provider.</PageIntro><AccountNotebook profiles={accountProfiles} demoMode={demoMode} busy={actionBusy} save={saveAccount} remove={removeAccount} /></>;
+		page = <><PageIntro eyebrow="IDENTITY AND RECOVERY" title="Accounts">An informal, encrypted notebook for the security measures you have confirmed directly at each provider.</PageIntro><AccountNotebook profiles={accountProfiles} demoMode={demoMode} unlocked={accountUnlocked} busy={actionBusy} unlock={unlockAccounts} lock={lockAccounts} save={saveAccount} remove={removeAccount} /></>;
 	} else if (route.page === "activity") {
 		page = <><PageIntro eyebrow="EVENTS AND DECISIONS" title="Activity">Finding transitions, deliberate control requests, and privacy-bounded owner decisions.</PageIntro><ActivityPanel events={networkEvents} alerts={alerts} />{!demoMode && <ActionCenter actions={actions} audit={audit} capabilities={runtime?.actionCapabilities || []} run={runAction} busy={actionBusy} />}</>;
 	} else if (route.page === "settings") {
@@ -899,6 +903,7 @@ export function App() {
   const [actions, setActions] = useState<SecurityAction[]>([]);
   const [passkeys, setPasskeys] = useState<PasskeyInfo[]>([]);
   const [accountProfiles, setAccountProfiles] = useState<AccountProfile[]>([]);
+  const [accountAccess, setAccountAccess] = useState<AccountAccessGrant | null>(null);
   const [runtime, setRuntime] = useState<RuntimeStatus | null>(null);
   const [notificationStatus, setNotificationStatus] = useState<PushNotificationStatus | null>(null);
   const [selectedId, setSelectedId] = useState(route.deviceId || "");
@@ -908,6 +913,9 @@ export function App() {
   const [actionBusy, setActionBusy] = useState(false);
   const [inventoryLoaded, setInventoryLoaded] = useState(false);
   const selectedIdRef = useRef(route.deviceId || "");
+  const accountAccessRef = useRef<AccountAccessGrant | null>(null);
+  const accountLastActivityRef = useRef(Date.now());
+  const accountLastTouchRef = useRef(0);
   const alertsSupported = supportsBackgroundPush();
   const [alertsEnabled, setAlertsEnabled] = useState(false);
 
@@ -921,7 +929,17 @@ export function App() {
   const refresh = useCallback(async (signal?: AbortSignal) => {
     setRefreshing(true);
     try {
-		const [initialInventory, runtimeStatus, activity, activeAlerts, pushStatus, managedAppliances, accounts] = await Promise.all([listDevices(signal), getRuntimeStatus(signal), listEvents(undefined, signal), listAlerts(signal), getNotificationStatus(signal), listManagedAppliances(signal), listAccountProfiles(signal)]);
+		const [initialInventory, runtimeStatus, activity, activeAlerts, pushStatus, managedAppliances] = await Promise.all([listDevices(signal), getRuntimeStatus(signal), listEvents(undefined, signal), listAlerts(signal), getNotificationStatus(signal), listManagedAppliances(signal)]);
+		let accounts: AccountProfile[] | null = null;
+		try {
+			if (runtimeStatus.demoMode) accounts = await listAccountProfiles("", signal);
+			else if (accountAccessRef.current) accounts = await listAccountProfiles(accountAccessRef.current.token, signal);
+		} catch (reason) {
+			if (!(reason instanceof HavenAPIError) || reason.status !== 403) throw reason;
+			accountAccessRef.current = null;
+			setAccountAccess(null);
+			accounts = [];
+		}
       let inventory = initialInventory;
       let observed: { id: string; snapshot: SecuritySnapshot } | null;
       if (runtimeStatus.demoMode || runtimeStatus.localCollection) {
@@ -940,7 +958,7 @@ export function App() {
       setCurrentAlerts(activeAlerts);
       setRuntime(runtimeStatus);
       setNotificationStatus(pushStatus);
-		setAccountProfiles(accounts);
+		if (accounts !== null) setAccountProfiles(accounts);
       setDemoMode(runtimeStatus.demoMode);
       const nextId = observed?.id || inventory.find((device) => device.status === "awaiting-first-report")?.id || "";
 	  if (!runtimeStatus.demoMode && nextId) setListenerObservations(await listObservedListeners(nextId, signal));
@@ -997,6 +1015,40 @@ export function App() {
 			setError(reason instanceof Error ? reason.message : "HAVEN could not refresh its control metadata.");
 		}
 	}, [demoMode, loadControls, refresh]);
+
+	const clearAccountAccess = useCallback(() => {
+		accountAccessRef.current = null;
+		setAccountAccess(null);
+		setAccountProfiles([]);
+	}, []);
+
+	const unlockAccounts = useCallback(async () => {
+		setActionBusy(true);
+		try {
+			const access = await unlockAccountNotebook();
+			const profiles = await listAccountProfiles(access.token);
+			accountAccessRef.current = access;
+			accountLastActivityRef.current = Date.now();
+			accountLastTouchRef.current = Date.now();
+			setAccountAccess(access);
+			setAccountProfiles(profiles);
+			setAudit(await listAuditEvents());
+			setError(null);
+		} catch (reason) {
+			clearAccountAccess();
+			setError(reason instanceof Error ? reason.message : "The account notebook could not be unlocked.");
+		} finally {
+			setActionBusy(false);
+		}
+	}, [clearAccountAccess]);
+
+	const lockAccounts = useCallback(async () => {
+		const token = accountAccessRef.current?.token || "";
+		clearAccountAccess();
+		if (token) {
+			try { await lockAccountNotebook(token); } catch { /* The local view is already locked; the server grant will expire. */ }
+		}
+	}, [clearAccountAccess]);
 
   const reviewFinding = useCallback(async (finding: SecurityFinding, state: FindingReviewState) => {
     if (!selectedId) return;
@@ -1119,33 +1171,39 @@ export function App() {
 	const saveAccount = useCallback(async (profile: AccountProfileInput) => {
 		setActionBusy(true);
 		try {
-			await saveAccountProfile(profile);
-			setAccountProfiles(await listAccountProfiles());
+			const token = accountAccessRef.current?.token;
+			if (!token) throw new Error("Unlock the account notebook before editing it.");
+			await saveAccountProfile(profile, token);
+			setAccountProfiles(await listAccountProfiles(token));
 			setAudit(await listAuditEvents());
 			setError(null);
 			return true;
 		} catch (reason) {
+			if (reason instanceof HavenAPIError && reason.status === 403) clearAccountAccess();
 			setError(reason instanceof Error ? reason.message : "The account profile could not be saved.");
 			return false;
 		} finally {
 			setActionBusy(false);
 		}
-	}, []);
+	}, [clearAccountAccess]);
 
 	const removeAccount = useCallback(async (profile: AccountProfile) => {
 		if (!window.confirm(`Remove “${profile.provider} · ${profile.label}” from HAVEN? This deletes the encrypted notebook entry; it does not change the provider account.`)) return;
 		setActionBusy(true);
 		try {
-			await removeAccountProfile(profile.id);
-			setAccountProfiles(await listAccountProfiles());
+			const token = accountAccessRef.current?.token;
+			if (!token) throw new Error("Unlock the account notebook before editing it.");
+			await removeAccountProfile(profile.id, token);
+			setAccountProfiles(await listAccountProfiles(token));
 			setAudit(await listAuditEvents());
 			setError(null);
 		} catch (reason) {
+			if (reason instanceof HavenAPIError && reason.status === 403) clearAccountAccess();
 			setError(reason instanceof Error ? reason.message : "The account profile could not be removed.");
 		} finally {
 			setActionBusy(false);
 		}
-	}, []);
+	}, [clearAccountAccess]);
 
   const signOut = useCallback(async () => {
     try { await logout(); } finally {
@@ -1163,6 +1221,8 @@ export function App() {
       setActions([]);
       setPasskeys([]);
 		setAccountProfiles([]);
+		accountAccessRef.current = null;
+		setAccountAccess(null);
       setNotificationStatus(null);
       setAlertsEnabled(false);
       setInventoryLoaded(false);
@@ -1240,6 +1300,54 @@ export function App() {
     return () => { active = false; };
   }, [alertsSupported, authentication?.authenticated, notificationStatus?.available]);
 
+	useEffect(() => {
+		if (!accountAccess || demoMode) return;
+		const token = accountAccess.token;
+		const recordActivity = () => {
+			const now = Date.now();
+			const current = accountAccessRef.current;
+			if (!current || now >= new Date(current.expiresAt).getTime() || now >= new Date(current.absoluteExpiresAt).getTime()) {
+				void lockAccounts();
+				return;
+			}
+			accountLastActivityRef.current = now;
+		};
+		const checkAccess = async () => {
+			if (accountAccessRef.current?.token !== token) return;
+			const now = Date.now();
+			if (now >= new Date(accountAccessRef.current.expiresAt).getTime() || now >= new Date(accountAccess.absoluteExpiresAt).getTime() || now-accountLastActivityRef.current >= accountAccess.idleTimeoutSeconds*1000) {
+				await lockAccounts();
+				return;
+			}
+			if (document.visibilityState !== "visible" || now-accountLastActivityRef.current > 5*60_000 || now-accountLastTouchRef.current < 4*60_000) return;
+			accountLastTouchRef.current = now;
+			try {
+				const refreshed = await touchAccountNotebook(token);
+				if (accountAccessRef.current?.token === token) {
+					accountAccessRef.current = refreshed;
+					setAccountAccess(refreshed);
+				}
+			} catch (reason) {
+				if (reason instanceof HavenAPIError && reason.status === 403) clearAccountAccess();
+				else setError(reason instanceof Error ? reason.message : "Private account access could not be refreshed.");
+			}
+		};
+		window.addEventListener("pointerdown", recordActivity, { passive: true });
+		window.addEventListener("keydown", recordActivity);
+		window.addEventListener("touchstart", recordActivity, { passive: true });
+		window.addEventListener("focus", checkAccess);
+		document.addEventListener("visibilitychange", checkAccess);
+		const interval = window.setInterval(() => void checkAccess(), 30_000);
+		return () => {
+			window.removeEventListener("pointerdown", recordActivity);
+			window.removeEventListener("keydown", recordActivity);
+			window.removeEventListener("touchstart", recordActivity);
+			window.removeEventListener("focus", checkAccess);
+			document.removeEventListener("visibilitychange", checkAccess);
+			window.clearInterval(interval);
+		};
+	}, [accountAccess?.absoluteExpiresAt, accountAccess?.idleTimeoutSeconds, accountAccess?.token, clearAccountAccess, demoMode, lockAccounts]);
+
   useEffect(() => {
     if (!authentication?.authenticated || !inventoryLoaded || demoMode) return;
     const controller = new AbortController();
@@ -1275,7 +1383,7 @@ export function App() {
     const controller = new AbortController();
     const poll = async () => {
       try {
-		const [inventory, runtimeStatus, activity, activeAlerts, pushStatus, managedAppliances, accounts] = await Promise.all([listDevices(controller.signal), getRuntimeStatus(controller.signal), listEvents(undefined, controller.signal), listAlerts(controller.signal), getNotificationStatus(controller.signal), listManagedAppliances(controller.signal), listAccountProfiles(controller.signal)]);
+		const [inventory, runtimeStatus, activity, activeAlerts, pushStatus, managedAppliances] = await Promise.all([listDevices(controller.signal), getRuntimeStatus(controller.signal), listEvents(undefined, controller.signal), listAlerts(controller.signal), getNotificationStatus(controller.signal), listManagedAppliances(controller.signal)]);
         let observed: { id: string; snapshot: SecuritySnapshot } | null;
         if (runtimeStatus.demoMode || runtimeStatus.localCollection) {
           const latest = await getLatestSnapshot(controller.signal);
@@ -1291,7 +1399,6 @@ export function App() {
         setCurrentAlerts(activeAlerts);
         setRuntime(runtimeStatus);
         setNotificationStatus(pushStatus);
-		setAccountProfiles(accounts);
         setDemoMode(runtimeStatus.demoMode);
         setSnapshot(observed?.snapshot || null);
         const nextId = observed?.id || inventory.find((device) => device.status === "awaiting-first-report")?.id || "";
@@ -1330,5 +1437,5 @@ export function App() {
 
   const selectedDevice = devices.find((device) => device.id === selectedId) || null;
   const selectedEvents = selectedId ? events.filter((event) => event.deviceId === selectedId) : events;
-	return <Application snapshot={snapshot} devices={devices} networkDevices={networkDevices} appliances={appliances} events={selectedEvents} networkEvents={events} alerts={currentAlerts} runtime={runtime} notificationStatus={notificationStatus} selectedDevice={selectedDevice} selectDevice={(id) => void selectDevice(id)} refresh={() => void refreshView()} refreshing={refreshing} error={error} demoMode={demoMode} alertsEnabled={alertsEnabled} alertsSupported={alertsSupported} enableAlerts={(label) => void enableAlerts(label)} disableAlerts={() => void disableAlerts()} reviews={reviews} expectedServices={expectedServices} listenerObservations={listenerObservations} audit={audit} actions={actions} passkeys={passkeys} accountProfiles={accountProfiles} reviewFinding={(finding, state) => void reviewFinding(finding, state)} saveServiceExpectation={(service) => void saveServiceExpectation(service)} saveServiceExpectations={(services) => void saveServiceBaseline(services)} removeServiceExpectation={(service) => void removeServiceExpectation(service)} runAction={(kind) => void runAction(kind)} addOwnerPasskey={() => void addOwnerPasskey()} removeOwnerPasskey={(passkey) => void removeOwnerPasskey(passkey)} saveAccount={saveAccount} removeAccount={(profile) => void removeAccount(profile)} actionBusy={actionBusy} signOut={() => void signOut()} route={route} navigate={navigate} />;
+	return <Application snapshot={snapshot} devices={devices} networkDevices={networkDevices} appliances={appliances} events={selectedEvents} networkEvents={events} alerts={currentAlerts} runtime={runtime} notificationStatus={notificationStatus} selectedDevice={selectedDevice} selectDevice={(id) => void selectDevice(id)} refresh={() => void refreshView()} refreshing={refreshing} error={error} demoMode={demoMode} alertsEnabled={alertsEnabled} alertsSupported={alertsSupported} enableAlerts={(label) => void enableAlerts(label)} disableAlerts={() => void disableAlerts()} reviews={reviews} expectedServices={expectedServices} listenerObservations={listenerObservations} audit={audit} actions={actions} passkeys={passkeys} accountProfiles={accountProfiles} accountUnlocked={demoMode || accountAccess !== null} reviewFinding={(finding, state) => void reviewFinding(finding, state)} saveServiceExpectation={(service) => void saveServiceExpectation(service)} saveServiceExpectations={(services) => void saveServiceBaseline(services)} removeServiceExpectation={(service) => void removeServiceExpectation(service)} runAction={(kind) => void runAction(kind)} addOwnerPasskey={() => void addOwnerPasskey()} removeOwnerPasskey={(passkey) => void removeOwnerPasskey(passkey)} saveAccount={saveAccount} removeAccount={(profile) => void removeAccount(profile)} unlockAccounts={() => void unlockAccounts()} lockAccounts={() => void lockAccounts()} actionBusy={actionBusy} signOut={() => void signOut()} route={route} navigate={navigate} />;
 }

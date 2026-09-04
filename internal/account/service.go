@@ -22,9 +22,10 @@ import (
 )
 
 const (
-	maximumProfiles   = 250
-	maximumNotesBytes = 4 * 1024
-	reviewAge         = 180 * 24 * time.Hour
+	maximumProfiles      = 250
+	maximumReviewDetails = 16
+	maximumNotesBytes    = 4 * 1024
+	reviewAge            = 180 * 24 * time.Hour
 )
 
 var (
@@ -44,6 +45,7 @@ type ProfileInput struct {
 	RecoveryStatus    string     `json:"recoveryStatus"`
 	BackupCodesStatus string     `json:"backupCodesStatus"`
 	LastReviewedAt    *time.Time `json:"lastReviewedAt,omitempty"`
+	ReviewDetails     []string   `json:"reviewDetails,omitempty"`
 	Notes             string     `json:"notes,omitempty"`
 }
 
@@ -73,6 +75,7 @@ type storedProfile struct {
 	RecoveryStatus    string     `json:"recoveryStatus"`
 	BackupCodesStatus string     `json:"backupCodesStatus"`
 	LastReviewedAt    *time.Time `json:"lastReviewedAt,omitempty"`
+	ReviewDetails     []string   `json:"reviewDetails,omitempty"`
 	Notes             string     `json:"notes,omitempty"`
 }
 
@@ -148,7 +151,7 @@ func (service *Service) Save(ctx context.Context, input ProfileInput, now time.T
 		Category: input.Category, TwoStepStatus: input.TwoStepStatus,
 		Factors: input.Factors, PasswordStatus: input.PasswordStatus,
 		RecoveryStatus: input.RecoveryStatus, BackupCodesStatus: input.BackupCodesStatus,
-		LastReviewedAt: input.LastReviewedAt, Notes: input.Notes,
+		LastReviewedAt: input.LastReviewedAt, ReviewDetails: input.ReviewDetails, Notes: input.Notes,
 	}
 	plain, err := json.Marshal(payload)
 	if err != nil {
@@ -189,7 +192,8 @@ func (service *Service) decrypt(record storage.EncryptedAccountProfile, now time
 		TwoStepStatus: payload.TwoStepStatus, Factors: payload.Factors,
 		PasswordStatus: payload.PasswordStatus, RecoveryStatus: payload.RecoveryStatus,
 		BackupCodesStatus: payload.BackupCodesStatus, LastReviewedAt: payload.LastReviewedAt,
-		Notes: payload.Notes,
+		ReviewDetails: payload.ReviewDetails,
+		Notes:         payload.Notes,
 	}, now)
 	if err != nil {
 		return Profile{}, errors.New("stored account profile is invalid")
@@ -268,6 +272,9 @@ func normalize(input ProfileInput, now time.Time) (ProfileInput, error) {
 	input.RecoveryStatus = strings.ToLower(strings.TrimSpace(input.RecoveryStatus))
 	input.BackupCodesStatus = strings.ToLower(strings.TrimSpace(input.BackupCodesStatus))
 	input.Notes = strings.TrimSpace(input.Notes)
+	if input.ReviewDetails == nil {
+		input.ReviewDetails = []string{}
+	}
 	if input.Factors == nil {
 		input.Factors = []string{}
 	}
@@ -294,6 +301,24 @@ func normalize(input ProfileInput, now time.Time) (ProfileInput, error) {
 		input.Factors[index] = factor
 	}
 	sort.Strings(input.Factors)
+	cleanDetails := make([]string, 0, len(input.ReviewDetails))
+	seenDetails := map[string]bool{}
+	for _, detail := range input.ReviewDetails {
+		detail = strings.TrimSpace(detail)
+		if detail == "" {
+			continue
+		}
+		key := strings.ToLower(detail)
+		if !boundedLine(detail, 240) || containsSecretMaterial(detail) || seenDetails[key] {
+			return input, ErrInvalidProfile
+		}
+		seenDetails[key] = true
+		cleanDetails = append(cleanDetails, detail)
+		if len(cleanDetails) > maximumReviewDetails {
+			return input, ErrInvalidProfile
+		}
+	}
+	input.ReviewDetails = cleanDetails
 	if input.TwoStepStatus != "enabled" && len(input.Factors) > 0 {
 		return input, ErrInvalidProfile
 	}
@@ -434,7 +459,7 @@ func loadOrCreateKey(path string) ([]byte, error) {
 func DemoProfiles(now time.Time) []Profile {
 	reviewed := now.UTC().Add(-21 * 24 * time.Hour)
 	inputs := []ProfileInput{
-		{ID: "acct_demo_google_profile", Provider: "Google", Label: "Personal account", Category: "email", TwoStepStatus: "enabled", Factors: []string{"authenticator", "passkey"}, PasswordStatus: "unique", RecoveryStatus: "configured", BackupCodesStatus: "stored", LastReviewedAt: &reviewed, Notes: "Recovery options reviewed."},
+		{ID: "acct_demo_google_profile", Provider: "Google", Label: "Personal account", Category: "email", TwoStepStatus: "enabled", Factors: []string{"authenticator", "passkey"}, PasswordStatus: "unique", RecoveryStatus: "configured", BackupCodesStatus: "stored", LastReviewedAt: &reviewed, ReviewDetails: []string{"Signed-in devices were reviewed.", "Backup codes are stored outside HAVEN."}},
 		{ID: "acct_demo_social_profile", Provider: "Example Social", Label: "Portfolio profile", Category: "social", TwoStepStatus: "disabled", Factors: []string{}, PasswordStatus: "unique", RecoveryStatus: "configured", BackupCodesStatus: "not-supported", LastReviewedAt: &reviewed, Notes: "Enable two-step verification next."},
 	}
 	profiles := make([]Profile, 0, len(inputs))

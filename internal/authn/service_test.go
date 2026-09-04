@@ -127,6 +127,99 @@ func TestReauthorizationGrantIsScopedAndSingleUse(t *testing.T) {
 	}
 }
 
+func TestScopedAccessIsSessionBoundIdleLimitedAndRevocable(t *testing.T) {
+	service, store := testService(t)
+	defer store.Close()
+	ctx := context.Background()
+	now := time.Date(2026, time.September, 4, 18, 0, 0, 0, time.UTC)
+	session, err := service.NewSession(ctx, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	access, err := service.IssueScopedAccess(ctx, session.Token, "account-notebook", now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if access.Token == "" || access.ExpiresAt.Sub(now) != 15*time.Minute || access.AbsoluteExpiresAt.Sub(now) != 8*time.Hour || access.IdleTimeoutSeconds != 900 {
+		t.Fatalf("unexpected scoped access: %#v", access)
+	}
+	refreshed, err := service.RefreshScopedAccess(session.Token, access.Token, "account-notebook", now.Add(10*time.Minute))
+	if err != nil || refreshed.ExpiresAt.Sub(now) != 25*time.Minute {
+		t.Fatalf("expected idle deadline refresh, got %#v, %v", refreshed, err)
+	}
+	replacement, err := service.IssueScopedAccess(ctx, session.Token, "account-notebook", now.Add(11*time.Minute))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.RefreshScopedAccess(session.Token, access.Token, "account-notebook", now.Add(11*time.Minute)); !errors.Is(err, ErrScopedAccess) {
+		t.Fatalf("expected a replacement grant to revoke the older same-session grant, got %v", err)
+	}
+	access = replacement
+	if _, err := service.RefreshScopedAccess("different-session", access.Token, "account-notebook", now.Add(11*time.Minute)); !errors.Is(err, ErrScopedAccess) {
+		t.Fatalf("expected session binding rejection, got %v", err)
+	}
+	service.RevokeScopedAccess(session.Token, access.Token, "account-notebook")
+	if _, err := service.RefreshScopedAccess(session.Token, access.Token, "account-notebook", now.Add(12*time.Minute)); !errors.Is(err, ErrScopedAccess) {
+		t.Fatalf("expected revoked grant rejection, got %v", err)
+	}
+
+	access, err = service.IssueScopedAccess(ctx, session.Token, "account-notebook", now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.RefreshScopedAccess(session.Token, access.Token, "account-notebook", now.Add(16*time.Minute)); !errors.Is(err, ErrScopedAccess) {
+		t.Fatalf("expected idle expiry, got %v", err)
+	}
+}
+
+func TestLogoutRevokesScopedAccess(t *testing.T) {
+	service, store := testService(t)
+	defer store.Close()
+	ctx := context.Background()
+	now := time.Date(2026, time.September, 4, 18, 0, 0, 0, time.UTC)
+	session, err := service.NewSession(ctx, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	access, err := service.IssueScopedAccess(ctx, session.Token, "account-notebook", now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := service.Logout(ctx, session.Token); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.RefreshScopedAccess(session.Token, access.Token, "account-notebook", now); !errors.Is(err, ErrScopedAccess) {
+		t.Fatalf("expected logout to revoke scoped access, got %v", err)
+	}
+}
+
+func TestScopedAccessCannotOutliveItsAbsoluteDeadline(t *testing.T) {
+	service, store := testService(t)
+	defer store.Close()
+	ctx := context.Background()
+	now := time.Date(2026, time.September, 4, 18, 0, 0, 0, time.UTC)
+	session, err := service.NewSession(ctx, now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	access, err := service.IssueScopedAccess(ctx, session.Token, "account-notebook", now)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for elapsed := 14 * time.Minute; elapsed < 8*time.Hour; elapsed += 14 * time.Minute {
+		access, err = service.RefreshScopedAccess(session.Token, access.Token, "account-notebook", now.Add(elapsed))
+		if err != nil {
+			t.Fatalf("active grant expired before its absolute deadline at %s: %v", elapsed, err)
+		}
+	}
+	if !access.ExpiresAt.Equal(now.Add(8 * time.Hour)) {
+		t.Fatalf("sliding expiry must be capped at the absolute deadline, got %s", access.ExpiresAt)
+	}
+	if _, err := service.RefreshScopedAccess(session.Token, access.Token, "account-notebook", now.Add(8*time.Hour)); !errors.Is(err, ErrScopedAccess) {
+		t.Fatalf("expected absolute expiry, got %v", err)
+	}
+}
+
 func TestOriginRequiresHTTPSOutsideLocalhost(t *testing.T) {
 	store, err := storage.Open(context.Background(), filepath.Join(t.TempDir(), "haven.db"))
 	if err != nil {

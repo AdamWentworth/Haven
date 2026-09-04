@@ -26,7 +26,7 @@ describe("HAVEN API client", () => {
 			api.getLatestSnapshot(signal),
 			api.listDevices(signal),
 			api.listManagedAppliances(signal),
-			api.listAccountProfiles(signal),
+			api.listAccountProfiles("account-access", signal),
 			api.getDevice("device/one", signal),
 			api.getRuntimeStatus(signal),
 			api.listEvents("device one", signal),
@@ -46,6 +46,8 @@ describe("HAVEN API client", () => {
 		expect(requests.every(([, options]) => options?.cache === "no-store" && options.signal === signal)).toBe(true);
 		expect(requests.map(([url]) => url)).toContain("/api/devices/device%2Fone");
 		expect(requests.map(([url]) => url)).toContain("/api/events?limit=60&deviceId=device+one");
+		const accountRequest = requests.find(([url]) => url === "/api/account-profiles");
+		expect(new Headers(accountRequest?.[1]?.headers).get("X-HAVEN-Account-Access")).toBe("account-access");
 	});
 
 	it("adds anti-forgery protection to mutations and supports empty responses", async () => {
@@ -59,14 +61,18 @@ describe("HAVEN API client", () => {
 		await api.saveExpectedServices("device", [service]);
 		await api.removeExpectedService({ id: "service/one", deviceId: "device" } as ExpectedService);
 		const account = { provider: "Google", label: "Personal", category: "email", twoStepStatus: "unknown", factors: [], passwordStatus: "unknown", recoveryStatus: "unknown", backupCodesStatus: "unknown" } as AccountProfileInput;
-		await api.saveAccountProfile(account);
-		await api.removeAccountProfile("account/one");
+		await api.saveAccountProfile(account, "account-access");
+		await api.removeAccountProfile("account/one", "account-access");
+		await api.touchAccountNotebook("account-access");
+		await api.lockAccountNotebook("account-access");
 
 		for (const [, options] of fetchMock.mock.calls) {
 			expect(options?.method).toBe("POST");
 			expect(new Headers(options?.headers).get("X-HAVEN-CSRF")).toBe("test-token");
 			expect(options?.credentials).toBe("same-origin");
 		}
+		const accountMutations = fetchMock.mock.calls.filter(([url]) => String(url).startsWith("/api/account-"));
+		expect(accountMutations.every(([, options]) => new Headers(options?.headers).get("X-HAVEN-Account-Access") === "account-access")).toBe(true);
 		expect(fetchMock.mock.calls.map(([url]) => url)).toContain("/api/expected-services/service%2Fone/remove");
 		expect(fetchMock.mock.calls.map(([url]) => url)).toContain("/api/account-profiles/account%2Fone/remove");
 
@@ -116,5 +122,35 @@ describe("HAVEN API client", () => {
 		const [, finish] = vi.mocked(fetch).mock.calls[1];
 		expect(new Headers(finish?.headers).get("X-HAVEN-Ceremony")).toBe("ceremony");
 		expect(JSON.parse(String(finish?.body))).toMatchObject({ id: "credential-id", rawId: "BA", response: { authenticatorData: "AQ", signature: "Aw", userHandle: null } });
+	});
+
+	it("uses fresh passkey reauthorization to unlock the private account scope", async () => {
+		class TestAssertionResponse {
+			authenticatorData = Uint8Array.from([1]).buffer;
+			clientDataJSON = Uint8Array.from([2]).buffer;
+			signature = Uint8Array.from([3]).buffer;
+			userHandle = null;
+		}
+		class TestCredential {
+			id = "credential-id";
+			rawId = Uint8Array.from([4]).buffer;
+			type = "public-key";
+			response = new TestAssertionResponse();
+			getClientExtensionResults() { return {}; }
+		}
+		vi.stubGlobal("AuthenticatorAssertionResponse", TestAssertionResponse);
+		vi.stubGlobal("PublicKeyCredential", TestCredential);
+		Object.defineProperty(navigator, "credentials", { configurable: true, value: { get: vi.fn().mockResolvedValue(new TestCredential()) } });
+		const access = { token: "account-access", expiresAt: "2026-09-04T18:15:00Z", absoluteExpiresAt: "2026-09-05T02:00:00Z", idleTimeoutSeconds: 900 };
+		vi.mocked(fetch)
+			.mockResolvedValueOnce(response({ ceremonyId: "reauth-ceremony", publicKey: { challenge: "AQ", allowCredentials: [{ id: "Ag", type: "public-key" }] } }))
+			.mockResolvedValueOnce(response({ reauthorizationToken: "single-use-grant" }))
+			.mockResolvedValueOnce(response(access));
+
+		await expect(api.unlockAccountNotebook()).resolves.toEqual(access);
+		const calls = vi.mocked(fetch).mock.calls;
+		expect(calls.map(([url]) => url)).toEqual(["/api/auth/reauthorize/begin", "/api/auth/reauthorize/finish", "/api/account-access/unlock"]);
+		expect(JSON.parse(String(calls[0][1]?.body))).toEqual({ scope: "account-notebook:unlock" });
+		expect(new Headers(calls[2][1]?.headers).get("X-HAVEN-Reauthorization")).toBe("single-use-grant");
 	});
 });

@@ -594,6 +594,9 @@ func (server *Server) consumeReauthorization(writer http.ResponseWriter, request
 }
 
 func validReauthorizationScope(scope string) bool {
+	if scope == accountUnlockScope {
+		return true
+	}
 	if scope == "passkey:add" {
 		return true
 	}
