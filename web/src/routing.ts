@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 
-export type PageKey = "overview" | "devices" | "device" | "network" | "appliances" | "activity" | "settings";
+export type PageKey = "overview" | "devices" | "device" | "network" | "appliances" | "accounts" | "activity" | "settings";
 export type DeviceSection = "overview" | "posture" | "services" | "history";
 
 export interface AppRoute {
@@ -26,6 +26,7 @@ export function parseRoute(pathname: string): AppRoute {
 	if (parts[0] === "devices") return { page: "devices" };
 	if (parts[0] === "network") return { page: "network" };
 	if (parts[0] === "appliances") return { page: "appliances" };
+	if (parts[0] === "accounts") return { page: "accounts" };
 	if (parts[0] === "activity") return { page: "activity" };
 	if (parts[0] === "settings") return { page: "settings" };
 	return { page: "overview" };

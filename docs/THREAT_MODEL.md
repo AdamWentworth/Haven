@@ -6,7 +6,7 @@ This document defines HAVEN's security boundary before it becomes a multi-device
 
 - Security observations about household devices
 - Process names, addresses, ports, services, and installed-software metadata
-- Future account-security posture records
+- Encrypted owner-reported account-security posture records and notes
 - Device identities and future client certificates
 - The integrity of findings, policies, audit history, and updates
 
@@ -14,7 +14,7 @@ HAVEN must not store passwords, session cookies, authenticator seeds, recovery-c
 
 ## Current boundary
 
-Milestone 0.10 performs continuous collection, explainable baseline evaluation, privacy-bounded finding and listener transition tracking, authenticated device reporting, owner-reviewed expected-service classification, explicit report freshness/lifecycle presentation, hub-owned fact-based active-alert derivation, opt-in encrypted Web Push delivery, live Docker workload and Linux systemd-unit attribution, a derived network-wide overview, and an authenticated local action boundary. The overview distinguishes enrolled devices from observed-only private endpoints and grouped Internet relationships. It uses only the latest live connection reports, performs no active discovery, and persists no remote endpoint or relationship history. Suggested baseline entries are derived only from bounded platform roles and the current live observation; nothing is classified until the owner approves it. Alerts are review prompts based on current evidence, not intrusion verdicts or Internet-reachability claims. On Windows, the collector launches one fixed, internally defined PowerShell script with no user-controlled commands or parameters. The two available controls also select fixed internal PowerShell commands for a Defender quick scan or security-intelligence update; browser text is never interpolated into them.
+Milestone 0.15 performs continuous collection, explainable baseline evaluation, privacy-bounded finding and listener transition tracking, authenticated device reporting, owner-reviewed expected-service classification, explicit report freshness/lifecycle presentation, hub-owned fact-based active-alert derivation, opt-in encrypted Web Push delivery, live Docker workload and Linux systemd-unit attribution, a derived network-wide overview, an authenticated local action boundary, and an encrypted owner-reported account-security notebook. The overview distinguishes enrolled devices from observed-only private endpoints and grouped Internet relationships. It uses only the latest live connection reports, performs no active discovery, and persists no remote endpoint or relationship history. Suggested baseline entries are derived only from bounded platform roles and the current live observation; nothing is classified until the owner approves it. Alerts are review prompts based on current evidence, not intrusion verdicts or Internet-reachability claims. On Windows, the collector launches one fixed, internally defined PowerShell script with no user-controlled commands or parameters. The two available controls also select fixed internal PowerShell commands for a Defender quick scan or security-intelligence update; browser text is never interpolated into them.
 
 The owner registers one or more discoverable passkeys through the cross-platform WebAuthn standard. Windows Hello, platform biometric providers, synchronized phone passkeys, and hardware security keys are authenticator choices rather than HAVEN dependencies. The first passkey requires a one-time local CLI code; the same short-lived mechanism provides local recovery. A signed-in owner can add or remove passkeys, but cannot remove the final credential without a replacement.
 
@@ -35,6 +35,8 @@ The activity ledger records only finding-opened and finding-resolved transitions
 Background delivery is disabled until an authenticated owner explicitly grants browser permission and registers a destination through the anti-forgery-protected API. The Web Push capability endpoint and subscription keys are encrypted at rest with a separate random key outside SQLite. The push service receives an encrypted payload and can observe delivery metadata. To limit lock-screen disclosure, the plaintext contains only HAVEN's name, the owner-assigned device label, severity, and a prompt to open the authenticated dashboard; finding titles, summaries, ports, and endpoint evidence are excluded. Completed receipts expire after a bounded period. HAVEN does not register a privileged tray process or browser extension.
 
 The network overview is a browser-side projection of the latest authenticated reports. Address matches can explain likely enrolled-device relationships, but they are not cryptographic proof that the peer at an address is the enrolled machine. Unmatched private endpoints remain visibly "observed only," are never promoted to trusted inventory, and are not retained as asset history in this milestone. Internet destinations are grouped to reduce noise rather than classified as benign.
+
+The Accounts workspace is an owner-authenticated private notebook, not an account-provider integration. The owner supplies all facts manually. Each profile is encrypted as one identity-bound AES-GCM envelope with a dedicated key outside SQLite; audit history receives only the opaque profile ID and operation. The schema offers no secret or token fields, strict decoding rejects unknown fields, and recognizable TOTP setup links, private keys, and cookie-header formats are refused in free text. Free-form text cannot be perfectly classified, so the interface repeatedly instructs the owner never to paste secret contents. Losing the notebook key makes the ciphertext unreadable; therefore the complete state directory must be backed up together. Suggestions are deterministic checklist guidance, not incident findings, and are excluded from active alerts and Web Push.
 
 Managed-appliance monitoring is opt-in deployment configuration, not LAN discovery. Configuration parsing accepts only literal private unicast addresses, explicit TCP ports, bounded identifiers, and a fixed schema. The hub retains the declared address plus current reachability, bounded error classification, timestamps, and presented certificate metadata. It does not send credentials, issue application requests, retain response bodies, inspect shares, or promote the appliance to authenticated endpoint status. TLS certificate collection deliberately completes an observation-only handshake and then reports system-chain and address-name validation separately; a private appliance's name mismatch is factual evidence rather than an automatic compromise claim.
 
@@ -77,6 +79,19 @@ Current and planned mitigations:
 - The hub stores no user passwords or device-administrator credentials.
 - Browser access has independent application authentication and authorization.
 - Push capability endpoints, subscription keys, and the VAPID private key stay in the private state directory, never the source repository or an API response.
+- Account-notebook records contain no provider credentials or authentication secrets and are encrypted with a separate key outside SQLite.
+
+### The account notebook becomes a password or token vault
+
+Current mitigations:
+
+- Provide no password, cookie, recovery-code-content, authenticator-seed, OAuth-token, or provider-credential fields.
+- Reject unknown JSON fields and recognizable TOTP setup links, private-key blocks, and cookie-header formats.
+- Warn beside the free-form note field that arbitrary text cannot be proven non-secret and must never contain actual secret values.
+- Encrypt the entire account profile before SQLite storage and bind it to its opaque identity with authenticated additional data.
+- Omit provider, label, identifier, status, and note contents from audit history and logs.
+- Make no outbound provider request and accept no provider authorization grant.
+- Keep notebook suggestions outside the incident-alert and background-notification pipelines.
 
 ### A compromised endpoint lies to HAVEN
 

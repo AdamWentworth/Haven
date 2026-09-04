@@ -414,6 +414,19 @@ var migrations = []migration{
 			`ALTER TABLE devices ADD COLUMN agent_collection_notices INTEGER`,
 		},
 	},
+	{
+		version: 15,
+		statements: []string{
+			`CREATE TABLE account_profiles (
+				id TEXT PRIMARY KEY,
+				encrypted_profile BLOB NOT NULL,
+				created_at TEXT NOT NULL,
+				updated_at TEXT NOT NULL
+			)`,
+			`CREATE INDEX account_profiles_updated
+				ON account_profiles (updated_at DESC, id)`,
+		},
+	},
 }
 
 func Open(ctx context.Context, path string) (*Store, error) {

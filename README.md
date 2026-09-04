@@ -4,13 +4,20 @@
 
 HAVEN is a personal security observatory for home devices and networks. It presents native operating-system protections in one understandable console without trying to replace Microsoft Defender, host firewalls, or other trusted security controls.
 
-HAVEN is pre-release software. The current milestone makes its authenticated endpoint fleet operationally explainable: the hub can distinguish current, legacy, development, and drifted reporter builds without mislabeling maintenance as a security threat. It is not a replacement for native protection.
+HAVEN is pre-release software. The current milestone adds a private, informal account-security notebook that turns owner-confirmed authentication and recovery status into calm improvement suggestions without connecting to providers or becoming a secret vault. It is not a replacement for native protection.
 
-## Milestone 0.14 — Verifiable Endpoint Fleet
+## Milestone 0.15 — Account Security Notebook
 
 The current implementation provides:
 
 - A Go hub with a responsive React and TypeScript dashboard embedded in its executable
+- A dedicated Accounts workspace for owner-reported email, social, developer, finance, gaming, shopping, work, and other profiles
+- Manual status tracking for two-step verification, factor types, password uniqueness/passwordless use, recovery methods, backup-code readiness, review dates, and private notes
+- Fact-derived suggestions for disabled two-step verification, reused passwords, missing recovery methods or backup codes, SMS/email-only factors, unknown checklist fields, and reviews older than six months
+- Clear separation between account-notebook suggestions and threat alerts: notebook gaps never create push notifications or claim that an account was compromised
+- AES-256-GCM encryption of every account profile using a dedicated random key outside SQLite, with ciphertext bound to its opaque profile identity
+- Strict account APIs with no password, cookie, authenticator seed, recovery-code, OAuth-token, or provider-credential fields; recognizable secret formats are rejected and free-form notes carry an explicit warning
+- Privacy-bounded account audit events that retain only an opaque profile identity and operation, never provider names, identifiers, posture choices, or notes
 - Read-only Windows collection for Microsoft Defender, Windows Firewall, device posture, and up to 250 established or listening TCP endpoints
 - SQLite posture history with migrations, consistent online backups, a 90-day default retention window, and no historical storage of connection or workload details
 - A native Go agent with one-time enrollment, a unique ECDSA certificate, and TLS 1.3 mutual authentication
@@ -21,7 +28,7 @@ The current implementation provides:
 - Checksummed Windows amd64, Linux amd64, and Linux arm64 agent artifacts produced from an explicit full source revision by CI
 - Idempotent Windows and Linux install/repair workflows plus read-only status commands and identity-preserving uninstall procedures
 - Reproducible Windows Task Scheduler packaging that runs a GUI-subsystem reporter and suppresses console allocation for child collectors, preventing periodic focus theft or window flashes
-- Stable, browser-native routes for Overview, Devices, Network, Appliances, Activity, Settings, and per-device posture, services, and history views
+- Stable, browser-native routes for Overview, Devices, Network, Appliances, Accounts, Activity, Settings, and per-device posture, services, and history views
 - A concise network-wide landing page instead of forcing every control and observation into one scrolling dashboard
 - Bounded transient report retries that reuse a single observation identity, with idempotent hub acceptance when a successful response is lost
 - A 35-minute server-owned freshness allowance so one missed 15-minute agent run does not create a noisy false alarm
@@ -139,7 +146,7 @@ go run .\cmd\haven-hub auth bootstrap
 
 Paste the code into HAVEN and follow the passkey prompt offered by the browser and operating system. On Windows this may be Windows Hello; other systems may offer Touch ID, a phone, a synchronized passkey provider, or a hardware security key. The code expires after 10 minutes and is consumed only by a successful passkey registration. The same command provides local recovery if every registered passkey is later unavailable.
 
-HAVEN supports multiple labeled owner passkeys. A signed-in owner can add or remove them from the dashboard; the final passkey cannot be removed without first adding a replacement. Direct enrollment from another computer requires HAVEN's eventual stable private HTTPS hostname because a `localhost` passkey belongs to the local development origin. Trusted-browser sessions last up to 30 days, while each sensitive control requires a fresh, single-use passkey confirmation. Passkey credential data and Web Push subscriptions are encrypted with random keys stored beside the database outside the repository; the VAPID identity also lives there. Back up the complete state directory as one unit. Losing its keys makes stored passkeys or existing push subscriptions unusable.
+HAVEN supports multiple labeled owner passkeys. A signed-in owner can add or remove them from the dashboard; the final passkey cannot be removed without first adding a replacement. Direct enrollment from another computer requires HAVEN's eventual stable private HTTPS hostname because a `localhost` passkey belongs to the local development origin. Trusted-browser sessions last up to 30 days, while each sensitive control requires a fresh, single-use passkey confirmation. Passkey credential data, account-notebook profiles, and Web Push subscriptions are encrypted with separate random keys stored beside the database outside the repository; the VAPID identity also lives there. Back up the complete state directory as one unit. Losing an encryption key makes the corresponding stored data unreadable.
 
 The hub takes an observation immediately at startup and every 15 minutes thereafter. Set `HAVEN_COLLECTION_INTERVAL` to a duration from `1m` through `24h` to change it during development.
 
@@ -185,7 +192,7 @@ On Linux, the source-based installer provides the same install/repair/status/uni
 
 Both installers also accept a prebuilt CI artifact only when its SHA-256 manifest value is supplied. Windows uses `-AgentBinary` with `-ExpectedSHA256`; Linux uses the `HAVEN_AGENT_BINARY` and `HAVEN_AGENT_SHA256` environment variables. A failed checksum leaves the installed reporter untouched.
 
-Upgrade the hub before installing 0.14 reporters. The 0.14 hub deliberately accepts older metadata-free reports and labels them as legacy; a 0.13 hub's strict decoder does not yet recognize the optional agent-metadata field.
+Upgrade the hub before installing reporters from 0.14 or later. The newer hub deliberately accepts older metadata-free reports and labels them as legacy; a 0.13 hub's strict decoder does not recognize the optional agent-metadata field.
 
 Create portfolio-safe inventory fixtures or a consistent SQLite backup with:
 
@@ -242,6 +249,7 @@ Haven/
 │   └── haven-nas-probe/ # Fixed-schema, appliance-side health helper
 ├── internal/
 │   ├── collector/       # Fixed, platform-specific collectors
+│   ├── account/         # Encrypted manual account posture and suggestions
 │   ├── agent/           # Enrollment, identity persistence, and reporting client
 │   ├── alert/           # Server-owned current-alert projection
 │   ├── hub/             # Local dashboard and mutually authenticated agent APIs
@@ -271,6 +279,6 @@ Haven/
 
 ## Current and next security milestone
 
-Milestone 0.7 adds native Linux monitoring and boot-persistent endpoint-agent scheduling. Milestone 0.7.1 makes its network results explainable, 0.7.2 makes report freshness and finding lifecycles explicit, and 0.7.3 correlates host listeners with sanitized Docker port mappings. Milestone 0.7.4 adds deliberate suggested-baseline review; 0.7.5 adds live systemd ownership and service-constrained expectations for Linux listeners. Milestone 0.8 combines the latest authenticated reports into a network-wide coverage, change, and live-relationship view while keeping merely observed private endpoints separate from explicitly enrolled devices. Milestone 0.9 turns current findings, server-classified stale agents, incomplete enrollments, new non-local listeners, and changed service attribution into explainable active alerts. Milestone 0.10 moves that derivation to the hub and adds opt-in, encrypted, durable Web Push delivery with bounded retries and per-destination receipts; its expectation model also supports owner-constrained dynamic ranges and expiring development approvals. Milestone 0.11 adds reproducible console-free Windows scheduled-task packaging and credential-free monitoring of explicitly configured private network appliances. Milestone 0.12 adds optional read-only NAS health through bounded SNMP plus a host-key-pinned, forced-command SSH helper. Milestone 0.13 reorganizes the console around stable routes and strengthens report delivery, freshness semantics, readiness, version evidence, rendered UI tests, and the public release pipeline. Milestone 0.14 adds authenticated reporter provenance, capability evidence, fleet lifecycle presentation, checksummed cross-platform artifacts, and safe install/repair/status/uninstall workflows while preserving older enrolled reporters. A later event-driven Windows sensor may move under Service Control Manager only when real-time Defender and Windows Event Log monitoring justify an always-running process; it must remain outbound-only and use the least privilege its collectors require. HAVEN does not scan the LAN, retain remote endpoints, or claim that an alert proves compromise. See [verification](docs/VERIFICATION.md) for the claim-to-test map. The Ubuntu hub does not execute Windows actions on another machine. GitHub Actions verifies the Go, frontend, dependency, concurrency, vulnerability, Windows process isolation, agent artifacts, image, static analysis, and public-repository safety checks on each proposed change.
+Milestone 0.7 adds native Linux monitoring and boot-persistent endpoint-agent scheduling. Milestone 0.7.1 makes its network results explainable, 0.7.2 makes report freshness and finding lifecycles explicit, and 0.7.3 correlates host listeners with sanitized Docker port mappings. Milestone 0.7.4 adds deliberate suggested-baseline review; 0.7.5 adds live systemd ownership and service-constrained expectations for Linux listeners. Milestone 0.8 combines the latest authenticated reports into a network-wide coverage, change, and live-relationship view while keeping merely observed private endpoints separate from explicitly enrolled devices. Milestone 0.9 turns current findings, server-classified stale agents, incomplete enrollments, new non-local listeners, and changed service attribution into explainable active alerts. Milestone 0.10 moves that derivation to the hub and adds opt-in, encrypted, durable Web Push delivery with bounded retries and per-destination receipts; its expectation model also supports owner-constrained dynamic ranges and expiring development approvals. Milestone 0.11 adds reproducible console-free Windows scheduled-task packaging and credential-free monitoring of explicitly configured private network appliances. Milestone 0.12 adds optional read-only NAS health through bounded SNMP plus a host-key-pinned, forced-command SSH helper. Milestone 0.13 reorganizes the console around stable routes and strengthens report delivery, freshness semantics, readiness, version evidence, rendered UI tests, and the public release pipeline. Milestone 0.14 adds authenticated reporter provenance, capability evidence, fleet lifecycle presentation, checksummed cross-platform artifacts, and safe install/repair/status/uninstall workflows while preserving older enrolled reporters. Milestone 0.15 adds an encrypted owner-reported account-security notebook with calm, evidence-derived authentication and recovery suggestions while explicitly excluding provider access and secret storage. A later event-driven Windows sensor may move under Service Control Manager only when real-time Defender and Windows Event Log monitoring justify an always-running process; it must remain outbound-only and use the least privilege its collectors require. HAVEN does not scan the LAN, retain remote endpoints, or claim that an alert proves compromise. See [verification](docs/VERIFICATION.md) for the claim-to-test map. The Ubuntu hub does not execute Windows actions on another machine. GitHub Actions verifies the Go, frontend, dependency, concurrency, vulnerability, Windows process isolation, agent artifacts, image, static analysis, and public-repository safety checks on each proposed change.
 
 Read the [architecture](docs/ARCHITECTURE.md), [threat model](docs/THREAT_MODEL.md), and [public repository policy](docs/PUBLIC_REPOSITORY.md) before expanding the trust boundary.

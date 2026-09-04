@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { addPasskey, collectSnapshot, getAuthStatus, getDevice, getLatestSnapshot, getNotificationStatus, getRuntimeStatus, listAlerts, listAuditEvents, listDevices, listEvents, listExpectedServices, listFindingReviews, listManagedAppliances, listObservedListeners, listPasskeys, listSecurityActions, loginWithPasskey, logout, registerPasskey, registerPushDestination, removeExpectedService, removePasskey, removePushDestination, requestSecurityAction, saveExpectedService, saveExpectedServices, saveFindingReview } from "./api";
+import { addPasskey, collectSnapshot, getAuthStatus, getDevice, getLatestSnapshot, getNotificationStatus, getRuntimeStatus, listAccountProfiles, listAlerts, listAuditEvents, listDevices, listEvents, listExpectedServices, listFindingReviews, listManagedAppliances, listObservedListeners, listPasskeys, listSecurityActions, loginWithPasskey, logout, registerPasskey, registerPushDestination, removeAccountProfile, removeExpectedService, removePasskey, removePushDestination, requestSecurityAction, saveAccountProfile, saveExpectedService, saveExpectedServices, saveFindingReview } from "./api";
+import { AccountNotebook } from "./account-notebook";
 import { suggestedBaseline } from "./baseline";
 import { AuthenticationGate } from "./authentication-gate";
 import { DeviceInventory } from "./device-inventory";
@@ -14,6 +15,8 @@ import { decodeApplicationServerKey, normalizePushDestinationLabel, serializePus
 import { type AppRoute, type DeviceSection, useAppRoute } from "./routing";
 import type {
   BaselineCheck,
+  AccountProfile,
+  AccountProfileInput,
   AuditEvent,
   ActionCapability,
   AuthStatus,
@@ -771,6 +774,7 @@ interface ApplicationProps {
 	audit: AuditEvent[];
 	actions: SecurityAction[];
 	passkeys: PasskeyInfo[];
+	accountProfiles: AccountProfile[];
 	reviewFinding: (finding: SecurityFinding, state: FindingReviewState) => void;
 	saveServiceExpectation: (service: ExpectedServiceInput) => void;
 	saveServiceExpectations: (services: ExpectedServiceInput[]) => void;
@@ -778,13 +782,15 @@ interface ApplicationProps {
 	runAction: (kind: SecurityActionKind) => void;
 	addOwnerPasskey: () => void;
 	removeOwnerPasskey: (passkey: PasskeyInfo) => void;
+	saveAccount: (profile: AccountProfileInput) => Promise<boolean>;
+	removeAccount: (profile: AccountProfile) => void;
 	actionBusy: boolean;
 	signOut: () => void;
 	route: AppRoute;
 	navigate: (route: AppRoute) => void;
 }
 
-function Application({ snapshot, devices, networkDevices, appliances, events, networkEvents, alerts, runtime, notificationStatus, selectedDevice, selectDevice, refresh, refreshing, error, demoMode, alertsEnabled, alertsSupported, enableAlerts, disableAlerts, reviews, expectedServices, listenerObservations, audit, actions, passkeys, reviewFinding, saveServiceExpectation, saveServiceExpectations, removeServiceExpectation, runAction, addOwnerPasskey, removeOwnerPasskey, actionBusy, signOut, route, navigate }: ApplicationProps) {
+function Application({ snapshot, devices, networkDevices, appliances, events, networkEvents, alerts, runtime, notificationStatus, selectedDevice, selectDevice, refresh, refreshing, error, demoMode, alertsEnabled, alertsSupported, enableAlerts, disableAlerts, reviews, expectedServices, listenerObservations, audit, actions, passkeys, accountProfiles, reviewFinding, saveServiceExpectation, saveServiceExpectations, removeServiceExpectation, runAction, addOwnerPasskey, removeOwnerPasskey, saveAccount, removeAccount, actionBusy, signOut, route, navigate }: ApplicationProps) {
   const isLinux = snapshot.linuxBaseline !== null || /linux|ubuntu/i.test(snapshot.device.operatingSystem);
   const defenderHealthy = snapshot.defender?.antivirusEnabled === true
     && snapshot.defender.realTimeProtectionEnabled === true
@@ -838,6 +844,8 @@ function Application({ snapshot, devices, networkDevices, appliances, events, ne
 		page = <><PageIntro eyebrow="LIVE OBSERVATION" title="Network">Current device coverage and relationship summaries without packet capture or retained remote endpoints.</PageIntro><NetworkOverview devices={networkDevices} appliances={appliances} events={networkEvents} alerts={alerts} selectedId={selectedDeviceId} selectDevice={openDevice} demoMode={demoMode} view="network" /></>;
 	} else if (route.page === "appliances") {
 		page = <><PageIntro eyebrow="READ-ONLY HEALTH" title="Appliances">Bounded reachability and health evidence from devices explicitly configured by the owner.</PageIntro><NetworkOverview devices={networkDevices} appliances={appliances} events={networkEvents} alerts={alerts} selectedId={selectedDeviceId} selectDevice={openDevice} demoMode={demoMode} view="appliances" /></>;
+	} else if (route.page === "accounts") {
+		page = <><PageIntro eyebrow="IDENTITY AND RECOVERY" title="Accounts">An informal, encrypted notebook for the security measures you have confirmed directly at each provider.</PageIntro><AccountNotebook profiles={accountProfiles} demoMode={demoMode} busy={actionBusy} save={saveAccount} remove={removeAccount} /></>;
 	} else if (route.page === "activity") {
 		page = <><PageIntro eyebrow="EVENTS AND DECISIONS" title="Activity">Finding transitions, deliberate control requests, and privacy-bounded owner decisions.</PageIntro><ActivityPanel events={networkEvents} alerts={alerts} />{!demoMode && <ActionCenter actions={actions} audit={audit} capabilities={runtime?.actionCapabilities || []} run={runAction} busy={actionBusy} />}</>;
 	} else if (route.page === "settings") {
@@ -890,6 +898,7 @@ export function App() {
   const [audit, setAudit] = useState<AuditEvent[]>([]);
   const [actions, setActions] = useState<SecurityAction[]>([]);
   const [passkeys, setPasskeys] = useState<PasskeyInfo[]>([]);
+  const [accountProfiles, setAccountProfiles] = useState<AccountProfile[]>([]);
   const [runtime, setRuntime] = useState<RuntimeStatus | null>(null);
   const [notificationStatus, setNotificationStatus] = useState<PushNotificationStatus | null>(null);
   const [selectedId, setSelectedId] = useState(route.deviceId || "");
@@ -912,7 +921,7 @@ export function App() {
   const refresh = useCallback(async (signal?: AbortSignal) => {
     setRefreshing(true);
     try {
-		const [initialInventory, runtimeStatus, activity, activeAlerts, pushStatus, managedAppliances] = await Promise.all([listDevices(signal), getRuntimeStatus(signal), listEvents(undefined, signal), listAlerts(signal), getNotificationStatus(signal), listManagedAppliances(signal)]);
+		const [initialInventory, runtimeStatus, activity, activeAlerts, pushStatus, managedAppliances, accounts] = await Promise.all([listDevices(signal), getRuntimeStatus(signal), listEvents(undefined, signal), listAlerts(signal), getNotificationStatus(signal), listManagedAppliances(signal), listAccountProfiles(signal)]);
       let inventory = initialInventory;
       let observed: { id: string; snapshot: SecuritySnapshot } | null;
       if (runtimeStatus.demoMode || runtimeStatus.localCollection) {
@@ -931,6 +940,7 @@ export function App() {
       setCurrentAlerts(activeAlerts);
       setRuntime(runtimeStatus);
       setNotificationStatus(pushStatus);
+		setAccountProfiles(accounts);
       setDemoMode(runtimeStatus.demoMode);
       const nextId = observed?.id || inventory.find((device) => device.status === "awaiting-first-report")?.id || "";
 	  if (!runtimeStatus.demoMode && nextId) setListenerObservations(await listObservedListeners(nextId, signal));
@@ -1106,6 +1116,37 @@ export function App() {
     }
   }, []);
 
+	const saveAccount = useCallback(async (profile: AccountProfileInput) => {
+		setActionBusy(true);
+		try {
+			await saveAccountProfile(profile);
+			setAccountProfiles(await listAccountProfiles());
+			setAudit(await listAuditEvents());
+			setError(null);
+			return true;
+		} catch (reason) {
+			setError(reason instanceof Error ? reason.message : "The account profile could not be saved.");
+			return false;
+		} finally {
+			setActionBusy(false);
+		}
+	}, []);
+
+	const removeAccount = useCallback(async (profile: AccountProfile) => {
+		if (!window.confirm(`Remove “${profile.provider} · ${profile.label}” from HAVEN? This deletes the encrypted notebook entry; it does not change the provider account.`)) return;
+		setActionBusy(true);
+		try {
+			await removeAccountProfile(profile.id);
+			setAccountProfiles(await listAccountProfiles());
+			setAudit(await listAuditEvents());
+			setError(null);
+		} catch (reason) {
+			setError(reason instanceof Error ? reason.message : "The account profile could not be removed.");
+		} finally {
+			setActionBusy(false);
+		}
+	}, []);
+
   const signOut = useCallback(async () => {
     try { await logout(); } finally {
       setAuthentication((current) => current ? { ...current, authenticated: false } : current);
@@ -1121,6 +1162,7 @@ export function App() {
       setAudit([]);
       setActions([]);
       setPasskeys([]);
+		setAccountProfiles([]);
       setNotificationStatus(null);
       setAlertsEnabled(false);
       setInventoryLoaded(false);
@@ -1233,7 +1275,7 @@ export function App() {
     const controller = new AbortController();
     const poll = async () => {
       try {
-		const [inventory, runtimeStatus, activity, activeAlerts, pushStatus, managedAppliances] = await Promise.all([listDevices(controller.signal), getRuntimeStatus(controller.signal), listEvents(undefined, controller.signal), listAlerts(controller.signal), getNotificationStatus(controller.signal), listManagedAppliances(controller.signal)]);
+		const [inventory, runtimeStatus, activity, activeAlerts, pushStatus, managedAppliances, accounts] = await Promise.all([listDevices(controller.signal), getRuntimeStatus(controller.signal), listEvents(undefined, controller.signal), listAlerts(controller.signal), getNotificationStatus(controller.signal), listManagedAppliances(controller.signal), listAccountProfiles(controller.signal)]);
         let observed: { id: string; snapshot: SecuritySnapshot } | null;
         if (runtimeStatus.demoMode || runtimeStatus.localCollection) {
           const latest = await getLatestSnapshot(controller.signal);
@@ -1249,6 +1291,7 @@ export function App() {
         setCurrentAlerts(activeAlerts);
         setRuntime(runtimeStatus);
         setNotificationStatus(pushStatus);
+		setAccountProfiles(accounts);
         setDemoMode(runtimeStatus.demoMode);
         setSnapshot(observed?.snapshot || null);
         const nextId = observed?.id || inventory.find((device) => device.status === "awaiting-first-report")?.id || "";
@@ -1287,5 +1330,5 @@ export function App() {
 
   const selectedDevice = devices.find((device) => device.id === selectedId) || null;
   const selectedEvents = selectedId ? events.filter((event) => event.deviceId === selectedId) : events;
-	return <Application snapshot={snapshot} devices={devices} networkDevices={networkDevices} appliances={appliances} events={selectedEvents} networkEvents={events} alerts={currentAlerts} runtime={runtime} notificationStatus={notificationStatus} selectedDevice={selectedDevice} selectDevice={(id) => void selectDevice(id)} refresh={() => void refreshView()} refreshing={refreshing} error={error} demoMode={demoMode} alertsEnabled={alertsEnabled} alertsSupported={alertsSupported} enableAlerts={(label) => void enableAlerts(label)} disableAlerts={() => void disableAlerts()} reviews={reviews} expectedServices={expectedServices} listenerObservations={listenerObservations} audit={audit} actions={actions} passkeys={passkeys} reviewFinding={(finding, state) => void reviewFinding(finding, state)} saveServiceExpectation={(service) => void saveServiceExpectation(service)} saveServiceExpectations={(services) => void saveServiceBaseline(services)} removeServiceExpectation={(service) => void removeServiceExpectation(service)} runAction={(kind) => void runAction(kind)} addOwnerPasskey={() => void addOwnerPasskey()} removeOwnerPasskey={(passkey) => void removeOwnerPasskey(passkey)} actionBusy={actionBusy} signOut={() => void signOut()} route={route} navigate={navigate} />;
+	return <Application snapshot={snapshot} devices={devices} networkDevices={networkDevices} appliances={appliances} events={selectedEvents} networkEvents={events} alerts={currentAlerts} runtime={runtime} notificationStatus={notificationStatus} selectedDevice={selectedDevice} selectDevice={(id) => void selectDevice(id)} refresh={() => void refreshView()} refreshing={refreshing} error={error} demoMode={demoMode} alertsEnabled={alertsEnabled} alertsSupported={alertsSupported} enableAlerts={(label) => void enableAlerts(label)} disableAlerts={() => void disableAlerts()} reviews={reviews} expectedServices={expectedServices} listenerObservations={listenerObservations} audit={audit} actions={actions} passkeys={passkeys} accountProfiles={accountProfiles} reviewFinding={(finding, state) => void reviewFinding(finding, state)} saveServiceExpectation={(service) => void saveServiceExpectation(service)} saveServiceExpectations={(services) => void saveServiceBaseline(services)} removeServiceExpectation={(service) => void removeServiceExpectation(service)} runAction={(kind) => void runAction(kind)} addOwnerPasskey={() => void addOwnerPasskey()} removeOwnerPasskey={(passkey) => void removeOwnerPasskey(passkey)} saveAccount={saveAccount} removeAccount={(profile) => void removeAccount(profile)} actionBusy={actionBusy} signOut={() => void signOut()} route={route} navigate={navigate} />;
 }

@@ -2,7 +2,7 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as api from "./api";
-import type { ExpectedService, ExpectedServiceInput } from "./types";
+import type { AccountProfileInput, ExpectedService, ExpectedServiceInput } from "./types";
 
 function response(body: unknown, status = 200) {
 	return {
@@ -26,6 +26,7 @@ describe("HAVEN API client", () => {
 			api.getLatestSnapshot(signal),
 			api.listDevices(signal),
 			api.listManagedAppliances(signal),
+			api.listAccountProfiles(signal),
 			api.getDevice("device/one", signal),
 			api.getRuntimeStatus(signal),
 			api.listEvents("device one", signal),
@@ -41,7 +42,7 @@ describe("HAVEN API client", () => {
 		]);
 
 		const requests = vi.mocked(fetch).mock.calls;
-		expect(requests).toHaveLength(15);
+		expect(requests).toHaveLength(16);
 		expect(requests.every(([, options]) => options?.cache === "no-store" && options.signal === signal)).toBe(true);
 		expect(requests.map(([url]) => url)).toContain("/api/devices/device%2Fone");
 		expect(requests.map(([url]) => url)).toContain("/api/events?limit=60&deviceId=device+one");
@@ -57,6 +58,9 @@ describe("HAVEN API client", () => {
 		await api.saveExpectedService(service);
 		await api.saveExpectedServices("device", [service]);
 		await api.removeExpectedService({ id: "service/one", deviceId: "device" } as ExpectedService);
+		const account = { provider: "Google", label: "Personal", category: "email", twoStepStatus: "unknown", factors: [], passwordStatus: "unknown", recoveryStatus: "unknown", backupCodesStatus: "unknown" } as AccountProfileInput;
+		await api.saveAccountProfile(account);
+		await api.removeAccountProfile("account/one");
 
 		for (const [, options] of fetchMock.mock.calls) {
 			expect(options?.method).toBe("POST");
@@ -64,6 +68,7 @@ describe("HAVEN API client", () => {
 			expect(options?.credentials).toBe("same-origin");
 		}
 		expect(fetchMock.mock.calls.map(([url]) => url)).toContain("/api/expected-services/service%2Fone/remove");
+		expect(fetchMock.mock.calls.map(([url]) => url)).toContain("/api/account-profiles/account%2Fone/remove");
 
 		fetchMock.mockResolvedValueOnce(response(null, 204));
 		await expect(api.logout()).resolves.toBeUndefined();

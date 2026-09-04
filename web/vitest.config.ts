@@ -14,6 +14,8 @@ export default defineConfig({
         lines: 40,
         "src/network.ts": { statements: 85, branches: 80, functions: 90, lines: 85 },
         "src/push.ts": { statements: 85, branches: 75, functions: 90, lines: 85 },
+		"src/account-security.ts": { statements: 95, branches: 80, functions: 95, lines: 95 },
+		"src/account-notebook.tsx": { statements: 65, branches: 60, functions: 60, lines: 65 },
       },
     },
   },
