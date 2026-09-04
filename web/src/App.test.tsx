@@ -22,7 +22,7 @@ const fixtures = vi.hoisted(() => {
 		lastCollectedAt: "2026-09-04T08:00:00Z",
 		certificateExpiresAt: "2027-09-01T00:00:00Z",
 		revokedAt: null,
-		agent: { schemaVersion: 2, version: "0.14.0", revision: "test-revision", platform: "windows", installation: "windows-task", capabilities: ["host-firewall", "network-observation", "windows-defender", "windows-posture"], collectionNotices: 0, compatibility: "current" },
+		agent: { schemaVersion: 2, version: "0.15.0", revision: "test-revision", platform: "windows", installation: "windows-task", capabilities: ["host-firewall", "network-observation", "windows-defender", "windows-posture"], collectionNotices: 0, compatibility: "current" },
 	};
 	const snapshot: SecuritySnapshot = {
 		collectedAt: "2026-09-04T08:00:00Z",
@@ -40,7 +40,7 @@ const fixtures = vi.hoisted(() => {
 	const runtime: RuntimeStatus = {
 		status: "ready",
 		service: "HAVEN",
-		version: "0.14.0",
+		version: "0.15.0",
 		revision: "test-revision",
 		agentIngestion: "mutual-tls",
 		demoMode: false,
@@ -54,7 +54,7 @@ const fixtures = vi.hoisted(() => {
 });
 
 const api = vi.hoisted(() => ({
-	addPasskey: vi.fn(), collectSnapshot: vi.fn(), getAuthStatus: vi.fn(), getDevice: vi.fn(), getLatestSnapshot: vi.fn(), getNotificationStatus: vi.fn(), getRuntimeStatus: vi.fn(), listAlerts: vi.fn(), listAuditEvents: vi.fn(), listDevices: vi.fn(), listEvents: vi.fn(), listExpectedServices: vi.fn(), listFindingReviews: vi.fn(), listManagedAppliances: vi.fn(), listObservedListeners: vi.fn(), listPasskeys: vi.fn(), listSecurityActions: vi.fn(), loginWithPasskey: vi.fn(), logout: vi.fn(), registerPasskey: vi.fn(), registerPushDestination: vi.fn(), removeExpectedService: vi.fn(), removePasskey: vi.fn(), removePushDestination: vi.fn(), requestSecurityAction: vi.fn(), saveExpectedService: vi.fn(), saveExpectedServices: vi.fn(), saveFindingReview: vi.fn(), revokeDevice: vi.fn(),
+	addPasskey: vi.fn(), collectSnapshot: vi.fn(), getAuthStatus: vi.fn(), getDevice: vi.fn(), getLatestSnapshot: vi.fn(), getNotificationStatus: vi.fn(), getRuntimeStatus: vi.fn(), listAccountProfiles: vi.fn(), listAlerts: vi.fn(), listAuditEvents: vi.fn(), listDevices: vi.fn(), listEvents: vi.fn(), listExpectedServices: vi.fn(), listFindingReviews: vi.fn(), listManagedAppliances: vi.fn(), listObservedListeners: vi.fn(), listPasskeys: vi.fn(), listSecurityActions: vi.fn(), loginWithPasskey: vi.fn(), logout: vi.fn(), registerPasskey: vi.fn(), registerPushDestination: vi.fn(), removeAccountProfile: vi.fn(), removeExpectedService: vi.fn(), removePasskey: vi.fn(), removePushDestination: vi.fn(), requestSecurityAction: vi.fn(), saveAccountProfile: vi.fn(), saveExpectedService: vi.fn(), saveExpectedServices: vi.fn(), saveFindingReview: vi.fn(), revokeDevice: vi.fn(),
 }));
 
 vi.mock("./api", () => api);
@@ -69,6 +69,7 @@ beforeEach(() => {
 	api.listAlerts.mockResolvedValue([]);
 	api.getNotificationStatus.mockResolvedValue({ available: false, vapidPublicKey: "", destinations: [], pendingCount: 0, failedCount: 0, lastSuccessAt: null, lastFailureAt: null, evaluationPeriodSeconds: 60 });
 	api.listManagedAppliances.mockResolvedValue([]);
+	api.listAccountProfiles.mockResolvedValue([]);
 	api.getDevice.mockResolvedValue({ device: fixtures.device, snapshot: fixtures.snapshot });
 	api.listExpectedServices.mockResolvedValue([]);
 	api.listObservedListeners.mockResolvedValue([]);
@@ -117,8 +118,19 @@ describe("HAVEN routed console", () => {
 		expect(await screen.findByRole("heading", { name: "Owner passkeys" })).toBeInTheDocument();
 		expect(document.title).toBe("Settings — HAVEN");
 		expect(screen.getByRole("heading", { name: "Background alerts" })).toBeInTheDocument();
-		expect(screen.getByText("0.14.0")).toBeInTheDocument();
+		expect(screen.getByText("0.15.0")).toBeInTheDocument();
 		expect(window.location.pathname).toBe("/settings");
+	});
+
+	it("opens the private account-security notebook as a dedicated workspace", async () => {
+		const user = userEvent.setup();
+		render(<App />);
+		await screen.findByRole("heading", { name: "Home security overview" });
+		await user.click(screen.getByRole("link", { name: "Accounts" }));
+		expect(await screen.findByRole("heading", { name: "Accounts", level: 1 })).toBeInTheDocument();
+		expect(screen.getByRole("heading", { name: "Account readiness" })).toBeInTheDocument();
+		expect(screen.getByText(/Owner-reported, not provider-verified/)).toBeInTheDocument();
+		expect(window.location.pathname).toBe("/accounts");
 	});
 
 	it("honors a directly addressed device history route", async () => {

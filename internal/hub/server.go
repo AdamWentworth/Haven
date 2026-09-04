@@ -14,6 +14,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/AdamWentworth/haven/internal/account"
 	"github.com/AdamWentworth/haven/internal/action"
 	"github.com/AdamWentworth/haven/internal/alert"
 	"github.com/AdamWentworth/haven/internal/appliance"
@@ -40,6 +41,7 @@ type Server struct {
 	alertProjector  *alert.Projector
 	notifications   *notification.Service
 	appliances      *appliance.Monitor
+	accounts        *account.Service
 
 	collectionMutex sync.Mutex
 	latestMutex     sync.RWMutex
@@ -76,6 +78,10 @@ func WithNotifications(service *notification.Service) ServerOption {
 
 func WithManagedAppliances(monitor *appliance.Monitor) ServerOption {
 	return func(server *Server) { server.appliances = monitor }
+}
+
+func WithAccountNotebook(service *account.Service) ServerOption {
+	return func(server *Server) { server.accounts = service }
 }
 
 func NewServer(
@@ -125,6 +131,9 @@ func (server *Server) Handler() http.Handler {
 	mux.Handle("GET /api/notifications", server.protected(http.HandlerFunc(server.notificationStatus)))
 	mux.Handle("POST /api/notifications/subscribe", server.mutating(http.HandlerFunc(server.subscribeNotifications)))
 	mux.Handle("POST /api/notifications/unsubscribe", server.mutating(http.HandlerFunc(server.unsubscribeNotifications)))
+	mux.Handle("GET /api/account-profiles", server.protected(http.HandlerFunc(server.accountProfiles)))
+	mux.Handle("POST /api/account-profiles", server.mutating(http.HandlerFunc(server.saveAccountProfile)))
+	mux.Handle("POST /api/account-profiles/{profileID}/remove", server.mutating(http.HandlerFunc(server.removeAccountProfile)))
 	mux.HandleFunc("/", server.webApplication)
 	return server.securityHeaders(mux)
 }

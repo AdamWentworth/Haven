@@ -46,12 +46,13 @@ After the proxy generates its internal authority, install only its public root c
 
 ## Persistent data and recovery
 
-SQLite, the WebAuthn credential-encryption key, the Web Push subscription-encryption key, the VAPID identity, and the agent PKI live together in the configured data directory. Caddy's private authority lives in its separate data directory. All are outside the repository.
+SQLite, the WebAuthn credential-encryption key, the account-notebook encryption key, the Web Push subscription-encryption key, the VAPID identity, and the agent PKI live together in the configured data directory. Caddy's private authority lives in its separate data directory. All are outside the repository.
 
 The daily backup service uses HAVEN's SQLite backup command and then archives:
 
 - the consistent SQLite backup;
 - the WebAuthn credential-encryption key;
+- the account-notebook encryption key;
 - the Web Push subscription-encryption key and VAPID identity;
 - the hub/agent private authority;
 - the dashboard private authority required to preserve existing client trust.

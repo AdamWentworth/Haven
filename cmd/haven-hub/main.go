@@ -18,6 +18,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/AdamWentworth/haven/internal/account"
 	"github.com/AdamWentworth/haven/internal/action"
 	"github.com/AdamWentworth/haven/internal/alert"
 	"github.com/AdamWentworth/haven/internal/appliance"
@@ -307,7 +308,11 @@ func run(logger *slog.Logger) error {
 		if err != nil {
 			return err
 		}
-		serverOptions = append(serverOptions, hub.WithAuthentication(authentication))
+		accountNotebook, err := account.New(store, filepath.Join(stateDirectory, "account-notebook.key"))
+		if err != nil {
+			return err
+		}
+		serverOptions = append(serverOptions, hub.WithAuthentication(authentication), hub.WithAccountNotebook(accountNotebook))
 		notificationSubscriber := publicOrigin
 		if strings.HasPrefix(notificationSubscriber, "http://localhost") {
 			notificationSubscriber = "https://haven.localhost.invalid"

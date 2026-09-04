@@ -7,6 +7,7 @@ describe("application routes", () => {
 		expect(parseRoute("/devices")).toEqual({ page: "devices" });
 		expect(parseRoute("/network")).toEqual({ page: "network" });
 		expect(parseRoute("/appliances")).toEqual({ page: "appliances" });
+		expect(parseRoute("/accounts")).toEqual({ page: "accounts" });
 		expect(parseRoute("/activity")).toEqual({ page: "activity" });
 		expect(parseRoute("/settings")).toEqual({ page: "settings" });
 	});

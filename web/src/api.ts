@@ -1,4 +1,4 @@
-import type { AuditEvent, AuthStatus, DeviceDetail, DeviceRecord, ExpectedService, ExpectedServiceInput, FindingReview, FindingReviewState, HavenAlert, ManagedApplianceStatus, ObservedListener, PasskeyInfo, PushDestination, PushNotificationStatus, RuntimeStatus, SecurityAction, SecurityActionKind, SecurityEvent, SecuritySnapshot } from "./types";
+import type { AccountProfile, AccountProfileInput, AuditEvent, AuthStatus, DeviceDetail, DeviceRecord, ExpectedService, ExpectedServiceInput, FindingReview, FindingReviewState, HavenAlert, ManagedApplianceStatus, ObservedListener, PasskeyInfo, PushDestination, PushNotificationStatus, RuntimeStatus, SecurityAction, SecurityActionKind, SecurityEvent, SecuritySnapshot } from "./types";
 import type { SerializedPushSubscription } from "./push";
 
 async function getJSON<T>(path: string, signal?: AbortSignal): Promise<T> {
@@ -50,6 +50,12 @@ export const getLatestSnapshot = (signal?: AbortSignal) => getJSON<SecuritySnaps
 export const listDevices = (signal?: AbortSignal) => getJSON<DeviceRecord[]>("/api/devices", signal);
 
 export const listManagedAppliances = (signal?: AbortSignal) => getJSON<ManagedApplianceStatus[]>("/api/appliances", signal);
+
+export const listAccountProfiles = (signal?: AbortSignal) => getJSON<AccountProfile[]>("/api/account-profiles", signal);
+
+export const saveAccountProfile = (profile: AccountProfileInput) => postJSON<AccountProfile>("/api/account-profiles", profile);
+
+export const removeAccountProfile = (profileId: string) => postJSON<void>(`/api/account-profiles/${encodeURIComponent(profileId)}/remove`);
 
 export const getDevice = (deviceId: string, signal?: AbortSignal) =>
   getJSON<DeviceDetail>(`/api/devices/${encodeURIComponent(deviceId)}`, signal);

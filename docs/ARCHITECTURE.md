@@ -37,7 +37,13 @@ PostgreSQL becomes appropriate if HAVEN needs multiple hub writers, multiple hub
 
 ## Current milestone boundary
 
-Milestone 0.14 extends the authenticated native-agent hub with verifiable fleet lifecycle evidence while retaining the routed console, reliability guardrails, and bounded read-only NAS health evidence:
+Milestone 0.15 extends the authenticated hub with a private owner-reported account-security notebook while retaining verifiable fleet lifecycle evidence, the routed console, reliability guardrails, and bounded read-only NAS health evidence:
+
+- Account profiles are manual checklists, not provider observations. HAVEN stores provider and profile labels, an optional identifier, bounded notes, authentication/recovery status, factor categories, and an optional last-review date only after an authenticated owner submits them.
+- Every complete account profile is serialized and encrypted with AES-256-GCM before it reaches SQLite. A dedicated random key lives beside the database outside the repository, and authenticated additional data binds ciphertext to its opaque profile identity.
+- The account API has no field for passwords, session cookies, authenticator seeds, recovery-code contents, OAuth tokens, or provider credentials. Strict JSON decoding rejects unknown fields, and high-confidence secret formats are rejected inside notes or identifiers.
+- Suggestions are deterministic projections of the saved checklist. They identify disabled two-step verification, reused passwords, missing recovery options, missing backup-code readiness, weak-only second factors, unknown fields, and reviews older than six months. They remain notebook guidance and never enter the threat-alert or Web Push pipelines.
+- Account audit events contain only the opaque profile identity and operation. Provider names, identifiers, posture choices, and note text are not copied into the activity ledger.
 
 - `haven-hub` serves a loopback dashboard, owns SQLite, and exposes a separate loopback TLS 1.3 agent listener. Native development may enable local collection; a containerized production hub disables it and never treats its ephemeral container hostname as a device.
 - Enrollment uses a short-lived, one-time 256-bit token plus an ECDSA P-256 certificate request. The trusted CA certificate is transferred out of band.
@@ -99,7 +105,7 @@ Agents will send high-level observations to the hub, never SQL. The SQLite file 
 - Managed-appliance persistence contains only normalized current service and health status, stable transition times, bounded failure classes, and public TLS certificate metadata. SNMP communities, SSH private keys, raw SNMP values, raw helper output, disk serials, and appliance account data are never written to SQLite.
 - Packet payloads, browser content, keystrokes, screenshots, and document contents are never collected.
 - Future high-volume network summaries receive shorter retention than posture changes.
-- Account-security records contain status metadata, never passwords, recovery codes, authenticator seeds, cookies, or refresh tokens unless a separately reviewed integration makes a token unavoidable.
+- Account-security records contain AES-GCM-encrypted owner-reported status metadata and bounded notes. They never have fields for passwords, recovery-code contents, authenticator seeds, cookies, OAuth tokens, or provider credentials. A future provider integration would require a separate threat-model and authorization review rather than extending this notebook implicitly.
 - Portfolio and demo modes use synthetic fixtures only.
 
 ## Hub container boundary

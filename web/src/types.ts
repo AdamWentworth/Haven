@@ -383,6 +383,43 @@ export interface PasskeyInfo {
   lastUsedAt: string | null;
 }
 
+export type AccountCategory = "email" | "social" | "developer" | "finance" | "gaming" | "shopping" | "work" | "other";
+export type TwoStepStatus = "unknown" | "enabled" | "disabled" | "not-supported";
+export type AccountFactor = "authenticator" | "passkey" | "security-key" | "provider-prompt" | "sms" | "email" | "other";
+export type PasswordStatus = "unknown" | "unique" | "reused" | "passwordless" | "not-applicable";
+export type RecoveryStatus = "unknown" | "configured" | "missing" | "not-supported";
+export type BackupCodesStatus = "unknown" | "stored" | "missing" | "not-supported";
+
+export interface AccountProfileInput {
+  id?: string;
+  provider: string;
+  label: string;
+  identifier?: string;
+  category: AccountCategory;
+  twoStepStatus: TwoStepStatus;
+  factors: AccountFactor[];
+  passwordStatus: PasswordStatus;
+  recoveryStatus: RecoveryStatus;
+  backupCodesStatus: BackupCodesStatus;
+  lastReviewedAt?: string | null;
+  notes?: string;
+}
+
+export interface AccountSuggestion {
+  id: string;
+  priority: "high" | "medium" | "low";
+  title: string;
+  summary: string;
+}
+
+export interface AccountProfile extends AccountProfileInput {
+  id: string;
+  status: "good" | "attention" | "incomplete";
+  suggestions: AccountSuggestion[];
+  createdAt: string;
+  updatedAt: string;
+}
+
 export type FindingReviewState = "new" | "acknowledged" | "snoozed" | "accepted-risk";
 
 export interface FindingReview {

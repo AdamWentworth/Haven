@@ -1,5 +1,5 @@
 import type { MouseEvent, ReactNode } from "react";
-import { ActivityIcon, DevicesIcon, HavenIcon, LockIcon, NetworkIcon, ServerIcon } from "./icons";
+import { ActivityIcon, DevicesIcon, HavenIcon, LockIcon, NetworkIcon, ServerIcon, UsersIcon } from "./icons";
 import { routePath, type AppRoute, type DeviceSection, type PageKey } from "./routing";
 
 const navigationItems: Array<{ page: Exclude<PageKey, "device">; label: string; icon: ReactNode }> = [
@@ -7,6 +7,7 @@ const navigationItems: Array<{ page: Exclude<PageKey, "device">; label: string; 
 	{ page: "devices", label: "Devices", icon: <DevicesIcon /> },
 	{ page: "network", label: "Network", icon: <NetworkIcon /> },
 	{ page: "appliances", label: "Appliances", icon: <ServerIcon /> },
+	{ page: "accounts", label: "Accounts", icon: <UsersIcon /> },
 	{ page: "activity", label: "Activity", icon: <ActivityIcon /> },
 	{ page: "settings", label: "Settings", icon: <LockIcon /> },
 ];

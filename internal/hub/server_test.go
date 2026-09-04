@@ -15,6 +15,7 @@ import (
 	"testing/fstest"
 	"time"
 
+	"github.com/AdamWentworth/haven/internal/account"
 	"github.com/AdamWentworth/haven/internal/alert"
 	"github.com/AdamWentworth/haven/internal/appliance"
 	"github.com/AdamWentworth/haven/internal/authn"
@@ -50,7 +51,8 @@ func (collector signalingCollector) Collect(context.Context) model.SecuritySnaps
 
 func testServer(t *testing.T) (*Server, *storage.Store) {
 	t.Helper()
-	store, err := storage.Open(context.Background(), filepath.Join(t.TempDir(), "haven.db"))
+	directory := t.TempDir()
+	store, err := storage.Open(context.Background(), filepath.Join(directory, "haven.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -65,7 +67,12 @@ func testServer(t *testing.T) (*Server, *storage.Store) {
 		Notices:          []model.CollectorNotice{},
 	}
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	return NewServer(staticCollector{snapshot: snapshot}, store, logger, fs.FS(webFiles), WithAlertProjector(alert.NewProjector(store))), store
+	accounts, err := account.New(store, filepath.Join(directory, "account-notebook.key"))
+	if err != nil {
+		store.Close()
+		t.Fatal(err)
+	}
+	return NewServer(staticCollector{snapshot: snapshot}, store, logger, fs.FS(webFiles), WithAlertProjector(alert.NewProjector(store)), WithAccountNotebook(accounts)), store
 }
 
 func TestHealthEndpointHasSecurityHeaders(t *testing.T) {
