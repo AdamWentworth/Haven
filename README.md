@@ -41,6 +41,7 @@ The current implementation provides:
 - Enforced coverage thresholds for security projection modules plus Go race detection in CI
 - Clear language that observed-only assets are neither enrolled nor trusted and that the overview does not actively scan the LAN
 - Explainable Windows baseline checks for servicing, BitLocker, Secure Boot, TPM, remote access, local administrator count, and Defender threat counts
+- Consistent remote-access policy across Windows and Linux: a running SSH service is inventory, while unsafe authentication or network boundaries—not service presence alone—are actionable
 - Non-elevated TPM verification through Windows TPM Tool when the administrative PowerShell provider is unavailable
 - RDP context that distinguishes NLA-protected, firewall-restricted access from unrestricted or unverifiable exposure
 - Separate healthy, intentionally configured, review, and unverified states with per-check observation timestamps
@@ -51,7 +52,7 @@ The current implementation provides:
 - Passwordless owner authentication using the cross-platform WebAuthn passkey standard (Windows Hello is one supported provider)
 - Multiple labeled owner passkeys for trusted computers, phones, and hardware security keys, with local terminal recovery
 - Expiring server-side sessions, strict same-origin checks, anti-forgery tokens, and rate-limited authentication ceremonies
-- Finding acknowledgement, 24-hour snooze, accepted-risk notes, immediate alert refresh, and a privacy-bounded audit trail; accepted risks and active snoozes leave the interruptive alert queue without erasing current posture
+- Finding acknowledgement, 24-hour snooze, accepted-risk notes, immediate alert refresh, and a privacy-bounded audit trail; accepted risks and active snoozes leave alert, reminder, and review-count surfaces without erasing collected facts
 - Provider-advertised action capabilities with fresh passkey confirmation; the first Windows provider offers a Defender quick scan and security-intelligence update
 - No browser endpoint for arbitrary commands, scripts, paths, process launches, firewall changes, or Defender exclusions
 - Privacy-bounded collection: administrator names, update titles, threat names, and detected resource paths are not collected

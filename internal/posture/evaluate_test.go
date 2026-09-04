@@ -52,14 +52,60 @@ func TestEvaluatePrioritizesActionableWindowsFindings(t *testing.T) {
 	}
 
 	evaluated := Evaluate(snapshot, now)
-	if len(evaluated.Findings) < 8 {
+	if len(evaluated.Findings) < 7 {
 		t.Fatalf("expected multiple findings, got %#v", evaluated.Findings)
 	}
 	assertFinding(t, evaluated.Findings, "defender-disabled", "high")
 	assertFinding(t, evaluated.Findings, "firewall-disabled", "high")
 	assertFinding(t, evaluated.Findings, "rdp-nla", "high")
 	assertFinding(t, evaluated.Findings, "active-threats", "high")
-	assertFinding(t, evaluated.Findings, "drive-encryption", "medium")
+	for _, finding := range evaluated.Findings {
+		if finding.ID == "drive-encryption" {
+			t.Fatalf("BitLocker state is physical-loss posture and must not become a network or malware alert: %#v", finding)
+		}
+	}
+}
+
+func TestEvaluateTreatsDisabledBitLockerAsDataAtRestInventory(t *testing.T) {
+	snapshot := windowsSnapshot()
+	snapshot.WindowsBaseline = &model.WindowsBaseline{
+		SystemEncryption: &model.DiskEncryptionStatus{SystemDrive: "C:", VolumeStatus: "FullyDecrypted", ProtectionStatus: "Off"},
+	}
+
+	evaluated := Evaluate(snapshot, time.Date(2026, time.September, 1, 12, 0, 0, 0, time.UTC))
+	check := findCheck(t, evaluated.BaselineChecks, "encryption")
+	if check.Status != "configured" || !strings.Contains(check.Summary, "physical loss") {
+		t.Fatalf("expected neutral physical-loss inventory, got %#v", check)
+	}
+	for _, finding := range evaluated.Findings {
+		if finding.ID == "drive-encryption" {
+			t.Fatalf("disabled BitLocker must not create an actionable finding: %#v", finding)
+		}
+	}
+}
+
+func TestEvaluateTreatsRunningWindowsOpenSSHAsConfiguredService(t *testing.T) {
+	snapshot := windowsSnapshot()
+	snapshot.WindowsBaseline = &model.WindowsBaseline{
+		RemoteAccess: &model.RemoteAccessStatus{
+			RemoteDesktopEnabled:     boolPointer(false),
+			NetworkLevelAuthRequired: boolPointer(true),
+			RemoteAssistanceEnabled:  boolPointer(false),
+			SMB1Enabled:              boolPointer(false),
+			OpenSSHServerRunning:     boolPointer(true),
+		},
+	}
+
+	evaluated := Evaluate(snapshot, time.Date(2026, time.September, 1, 12, 0, 0, 0, time.UTC))
+	check := findCheck(t, evaluated.BaselineChecks, "remote-access")
+	if check.Status != "configured" {
+		t.Fatalf("expected running OpenSSH to be configured, got %#v", check)
+	}
+	for _, finding := range evaluated.Findings {
+		if finding.ID == "openssh-running" {
+			t.Fatalf("running OpenSSH alone must not create an actionable finding: %#v", finding)
+		}
+	}
 }
 
 func TestEvaluateDoesNotTreatDisabledBuiltInAdministratorAsEnabled(t *testing.T) {

@@ -524,8 +524,8 @@ function NetworkOverview({ devices, events, alerts, selectedId, selectDevice, de
 			const observation = entry.listenerObservations.find((item) => item.present && item.protocol === listener.protocol && item.port === listener.port && item.bindScope === listener.bindScope);
 			return observation && Date.now() - new Date(observation.appearedAt).valueOf() < 24 * 60 * 60 * 1000;
 		}).length;
-		const findings = snapshot?.findings || [];
-		const highFindings = findings.filter((finding) => finding.severity === "high").length;
+		const findingAlerts = alerts.filter((alert) => alert.deviceId === entry.device.id && alert.kind === "finding");
+		const highFindings = findingAlerts.filter((alert) => alert.severity === "high").length;
 		const firewallKnown = !!snapshot && snapshot.firewallProfiles.length > 0;
 		const firewallEnabled = firewallKnown && snapshot!.firewallProfiles.every((profile) => profile.enabled === true);
 		const establishedConnections = (snapshot?.connections || []).filter((connection) => connection.state.toLowerCase() === "established").length;
@@ -534,15 +534,15 @@ function NetworkOverview({ devices, events, alerts, selectedId, selectDevice, de
 		if (!snapshot) { tone = "unknown"; label = "awaiting report"; }
 		else if (!firewallKnown) { tone = "unknown"; label = "partly verified"; }
 		else if (!firewallEnabled || highFindings > 0) { tone = "danger"; label = !firewallEnabled ? "firewall attention" : "high finding"; }
-		else if (entry.device.status !== "current" || findings.length > 0 || unreviewed.length > 0) { tone = "attention"; label = entry.device.status !== "current" ? entry.device.status.replaceAll("-", " ") : unreviewed.length > 0 ? "service review" : "finding open"; }
-		return { ...entry, listeners, unreviewed, recentUnreviewed, findings, firewallKnown, firewallEnabled, establishedConnections, tone, label };
-	}), [devices]);
+		else if (entry.device.status !== "current" || findingAlerts.length > 0 || unreviewed.length > 0) { tone = "attention"; label = entry.device.status !== "current" ? entry.device.status.replaceAll("-", " ") : unreviewed.length > 0 ? "service review" : "finding open"; }
+		return { ...entry, listeners, unreviewed, recentUnreviewed, findingAlerts, firewallKnown, firewallEnabled, establishedConnections, tone, label };
+	}), [alerts, devices]);
 	const relationships = useMemo(() => liveNetworkRelationships(devices), [devices]);
-	const recentChanges = useMemo(() => latestFindingLifecycles(events).slice(0, 5), [events]);
+	const recentChanges = useMemo(() => visibleFindingLifecycles(events, alerts).slice(0, 5), [alerts, events]);
 	const reportingCount = summaries.filter((entry) => entry.device.status === "current" && entry.snapshot).length;
 	const protectedFirewallCount = summaries.filter((entry) => entry.firewallEnabled).length;
 	const knownFirewallCount = summaries.filter((entry) => entry.firewallKnown).length;
-	const findingCount = summaries.reduce((count, entry) => count + entry.findings.length, 0);
+	const findingCount = summaries.reduce((count, entry) => count + entry.findingAlerts.length, 0);
 	const unreviewedCount = summaries.reduce((count, entry) => count + entry.unreviewed.length, 0);
 	const activeConnectionCount = summaries.reduce((count, entry) => count + entry.establishedConnections, 0);
 	const observedAssetCount = new Set(relationships.filter((item) => item.peerKind === "observed").flatMap((item) => [item.sourceName, item.targetName].filter((name) => isPrivateNetworkAddress(name)))).size;
@@ -589,7 +589,7 @@ function NetworkOverview({ devices, events, alerts, selectedId, selectDevice, de
 					<div className="network-device-grid">
 						{summaries.map((entry) => <button className={`network-device-card ${selectedId === entry.device.id ? "selected" : ""}`} type="button" key={entry.device.id} onClick={() => selectDevice(entry.device.id)} aria-pressed={selectedId === entry.device.id} disabled={!entry.snapshot}>
 							<div className="network-device-heading"><span className="device-icon">{entry.device.operatingSystem.toLowerCase().includes("server") ? <ServerIcon /> : entry.device.displayName.toLowerCase().includes("laptop") ? <LaptopIcon /> : <MonitorIcon />}</span><span><strong>{entry.device.displayName}</strong><small>{entry.device.operatingSystem || "Awaiting first report"}</small></span><StatusChip label={entry.label} tone={entry.tone} /></div>
-							<dl><div><dt>Last report</dt><dd>{formatRelativeTime(entry.device.lastCollectedAt)}</dd></div><div><dt>Host firewall</dt><dd>{entry.firewallKnown ? entry.firewallEnabled ? "Protected" : "Attention" : "Not verified"}</dd></div><div><dt>Findings</dt><dd>{entry.findings.length}</dd></div><div><dt>Services</dt><dd>{entry.unreviewed.length > 0 ? `${entry.unreviewed.length} to review${entry.recentUnreviewed > 0 ? ` · ${entry.recentUnreviewed} new` : ""}` : `${entry.listeners.length} classified/local`}</dd></div></dl>
+							<dl><div><dt>Last report</dt><dd>{formatRelativeTime(entry.device.lastCollectedAt)}</dd></div><div><dt>Host firewall</dt><dd>{entry.firewallKnown ? entry.firewallEnabled ? "Protected" : "Attention" : "Not verified"}</dd></div><div><dt>Findings</dt><dd>{entry.findingAlerts.length}</dd></div><div><dt>Services</dt><dd>{entry.unreviewed.length > 0 ? `${entry.unreviewed.length} to review${entry.recentUnreviewed > 0 ? ` · ${entry.recentUnreviewed} new` : ""}` : `${entry.listeners.length} classified/local`}</dd></div></dl>
 						</button>)}
 					</div>
 				</section>
@@ -798,8 +798,17 @@ function baselineIcon(id: string) {
   return <HelpIcon />;
 }
 
+export function actionableFindings(findings: SecurityFinding[], reviews: FindingReview[], now = new Date()): SecurityFinding[] {
+  return findings.filter((finding) => {
+    const currentReview = reviews.find((review) => review.findingId === finding.id);
+    if (!currentReview) return true;
+    if (currentReview.state === "accepted-risk") return false;
+    return currentReview.state !== "snoozed" || !currentReview.snoozedUntil || new Date(currentReview.snoozedUntil) <= now;
+  });
+}
+
 function FindingsPanel({ findings, checks, reviews, review }: { findings: SecurityFinding[]; checks: BaselineCheck[]; reviews: FindingReview[]; review: (finding: SecurityFinding, state: FindingReviewState) => void }) {
-  const ordered = [...findings].sort((left, right) => ({ high: 0, medium: 1, low: 2 }[left.severity] - { high: 0, medium: 1, low: 2 }[right.severity]));
+  const ordered = actionableFindings(findings, reviews).sort((left, right) => ({ high: 0, medium: 1, low: 2 }[left.severity] - { high: 0, medium: 1, low: 2 }[right.severity]));
   const unknown = checks.filter((check) => check.status === "unknown").length;
   return (
     <section className={`panel findings-panel ${ordered.length === 0 ? "clear" : ""}`} aria-labelledby="findings-title">
@@ -917,8 +926,19 @@ function latestFindingLifecycles(events: SecurityEvent[]) {
   return lifecycles.sort((left, right) => Number(left.event.kind === "resolved") - Number(right.event.kind === "resolved") || new Date(right.event.occurredAt).valueOf() - new Date(left.event.occurredAt).valueOf());
 }
 
-function ActivityPanel({ events }: { events: SecurityEvent[] }) {
-  const recent = useMemo(() => latestFindingLifecycles(events).slice(0, 12), [events]);
+const retiredFindingIDs = new Set(["drive-encryption", "openssh-running"]);
+
+export function visibleFindingLifecycles(events: SecurityEvent[], alerts: HavenAlert[]): FindingLifecycle[] {
+  const activeKeys = new Set(alerts.filter((alert) => alert.kind === "finding").map((alert) => {
+    const prefix = `finding:${alert.deviceId}:`;
+    const findingId = alert.id.startsWith(prefix) ? alert.id.slice(prefix.length) : alert.id;
+    return `${alert.deviceId}:${findingId}`;
+  }));
+  return latestFindingLifecycles(events).filter(({ event }) => !retiredFindingIDs.has(event.findingId) && (event.kind === "resolved" || activeKeys.has(`${event.deviceId}:${event.findingId}`)));
+}
+
+function ActivityPanel({ events, alerts }: { events: SecurityEvent[]; alerts: HavenAlert[] }) {
+  const recent = useMemo(() => visibleFindingLifecycles(events, alerts).slice(0, 12), [alerts, events]);
   const activeCount = recent.filter((item) => item.event.kind === "opened").length;
   const resolvedCount = recent.filter((item) => item.event.kind === "resolved").length;
   return (
@@ -1022,7 +1042,7 @@ function Application({ snapshot, devices, networkDevices, events, networkEvents,
           <SummaryCard icon={<ActivityIcon />} accent="green" title="Monitor" label={runtime?.localCollection && runtime.monitor.enabled ? `Every ${formatInterval(runtime.monitor.intervalSeconds)}` : formatRelativeTime(snapshot.collectedAt)} tone={selectedDevice?.status === "stale" || runtime?.monitor.lastCollectionError ? "attention" : "healthy"}>{runtime?.localCollection ? (runtime.monitor.lastCollectionError || (runtime.monitor.lastSuccessfulAt ? `Last automatic observation succeeded ${formatDate(runtime.monitor.lastSuccessfulAt)}.` : "Automatic monitoring is starting.")) : `Latest authenticated report was collected ${formatDate(snapshot.collectedAt)}. The view checks for newer hub data every minute.`}</SummaryCard>
         </section>
         {!demoMode && <><NotificationPanel status={notificationStatus} supported={alertsSupported} enabled={alertsEnabled} busy={actionBusy} enable={enableAlerts} disable={disableAlerts} /><PasskeyPanel passkeys={passkeys} add={addOwnerPasskey} remove={removeOwnerPasskey} busy={actionBusy} /><ActionCenter actions={actions} audit={audit} capabilities={runtime?.actionCapabilities || []} run={runAction} busy={actionBusy} /></>}
-        <ActivityPanel events={events} />
+        <ActivityPanel events={events} alerts={alerts} />
         {(snapshot.baselineChecks || []).length > 0 && <><FindingsPanel findings={snapshot.findings || []} checks={snapshot.baselineChecks || []} reviews={reviews} review={reviewFinding} /><BaselinePanel checks={snapshot.baselineChecks || []} collectedAt={snapshot.collectedAt} platform={isLinux ? "Linux" : "Windows"} /></>}
         {snapshot.notices.length > 0 && <section className="panel notices-panel" aria-labelledby="notices-title"><PanelHeading eyebrow="COLLECTION NOTES" title="Some signals could not be verified" id="notices-title" icon={<AlertIcon />} accent="amber">A collection limitation is not automatically a security problem</PanelHeading><ul className="notices-list">{snapshot.notices.map((notice, index) => <li className="notice" key={`${notice.source}-${index}`}><strong>{notice.source}: </strong>{notice.message}</li>)}</ul></section>}
         {isLinux && snapshot.linuxBaseline ? <LinuxPanel baseline={snapshot.linuxBaseline} /> : <DefenderPanel defender={snapshot.defender} />}

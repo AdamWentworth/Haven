@@ -301,8 +301,7 @@ func evaluateEncryption(snapshot *model.SecuritySnapshot) {
 	}
 	encryption := snapshot.WindowsBaseline.SystemEncryption
 	if !strings.EqualFold(encryption.ProtectionStatus, "On") {
-		addCheck(snapshot, "encryption", "Data", "System drive encryption", "attention", "BitLocker protection is not reported as on for the system drive.", encryption.ProtectionStatus)
-		addFinding(snapshot, "drive-encryption", "Data", "System-drive encryption is not protected", "medium", "BitLocker protection for "+encryption.SystemDrive+" is reported as "+fallback(encryption.ProtectionStatus, "unknown")+".", "Review Device Encryption or BitLocker settings and protect the system drive after confirming that a recovery key is stored safely.")
+		addCheck(snapshot, "encryption", "Data at rest", "System drive encryption", "configured", "BitLocker is off. This affects data at rest after physical loss; HAVEN does not treat it as a network or malware-protection alert.", fallback(encryption.ProtectionStatus, "Off"))
 		return
 	}
 	addCheck(snapshot, "encryption", "Data", "System drive encryption", "pass", "BitLocker protection is on for the system drive.", fallback(encryption.VolumeStatus, "Protected"))
@@ -372,15 +371,13 @@ func evaluateRemoteAccess(snapshot *model.SecuritySnapshot) {
 		addFinding(snapshot, "remote-assistance", "Network", "Remote Assistance is enabled", "low", "This computer permits Remote Assistance invitations.", "Disable Remote Assistance if you do not use it, or review who can initiate and approve sessions.")
 		return
 	}
-	if remote.OpenSSHServerRunning != nil && *remote.OpenSSHServerRunning {
-		addCheck(snapshot, "remote-access", "Network", "Remote access", "attention", "The OpenSSH server is running.", "sshd running")
-		addFinding(snapshot, "openssh-running", "Network", "OpenSSH server is running", "low", "This computer is accepting SSH connections.", "Confirm SSH is intentional, use key-based access, and restrict its firewall scope.")
-		return
-	}
 	if remote.RemoteDesktopEnabled != nil && *remote.RemoteDesktopEnabled {
 		ruleEvidence := "RDP enabled; NLA required"
 		if remote.RDPFirewallRuleCount != nil {
 			ruleEvidence = fmt.Sprintf("%s; %d applicable inbound allow rule(s)", ruleEvidence, *remote.RDPFirewallRuleCount)
+		}
+		if remote.OpenSSHServerRunning != nil && *remote.OpenSSHServerRunning {
+			ruleEvidence += "; OpenSSH running"
 		}
 		switch remote.RDPFirewallScope {
 		case "restricted":
@@ -394,6 +391,10 @@ func evaluateRemoteAccess(snapshot *model.SecuritySnapshot) {
 			addCheck(snapshot, "remote-access", "Network", "Remote access", "unknown", "Remote Desktop is enabled with NLA, but its inbound firewall scope could not be verified.", ruleEvidence+"; firewall scope unknown")
 			addFinding(snapshot, "rdp-firewall-unknown", "Network", "Verify Remote Desktop firewall scope", "low", "HAVEN could not determine which inbound firewall boundaries protect RDP.", "Review enabled Remote Desktop firewall rules and restrict them to a trusted VPN subnet or interface.")
 		}
+		return
+	}
+	if remote.OpenSSHServerRunning != nil && *remote.OpenSSHServerRunning {
+		addCheck(snapshot, "remote-access", "Network", "Remote access", "configured", "OpenSSH is running as a remote-administration service. Service presence alone is not treated as a threat.", "sshd running; evaluate authentication and firewall boundaries separately")
 		return
 	}
 	if remote.RemoteDesktopEnabled == nil || remote.RemoteAssistanceEnabled == nil || remote.SMB1Enabled == nil || remote.OpenSSHServerRunning == nil {
