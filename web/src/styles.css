@@ -115,7 +115,7 @@ main, footer { width: min(1180px, 92vw); margin-inline: auto; }
 .network-subsection, .network-flows { min-width: 0; padding: 1rem; border: 1px solid var(--line); border-radius: .85rem; background: rgba(0, 0, 0, .09); }
 .network-flows { margin-top: .7rem; }
 .network-appliances { min-width: 0; margin-top: .7rem; padding: 1rem; border: 1px solid rgba(111, 216, 229, .2); border-radius: .85rem; background: rgba(111, 216, 229, .025); }
-.appliance-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .65rem; }
+.appliance-grid { display: grid; grid-template-columns: 1fr; gap: .65rem; }
 .appliance-card { min-width: 0; padding: .85rem; border: 1px solid var(--line); border-radius: .75rem; background: rgba(0, 0, 0, .1); }
 .appliance-card > header { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: .65rem; }
 .appliance-card > header strong, .appliance-card > header small { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
@@ -126,6 +126,26 @@ main, footer { width: min(1180px, 92vw); margin-inline: auto; }
 .appliance-card li strong, .appliance-card li small { display: block; }
 .appliance-card li strong { font-size: .7rem; }
 .appliance-card li small { margin-top: .16rem; color: var(--muted); font-size: .6rem; line-height: 1.35; }
+.appliance-health { margin-top: .75rem; padding: .75rem; border: 1px solid rgba(111, 216, 229, .17); border-radius: .68rem; background: rgba(111, 216, 229, .025); }
+.appliance-health-heading { display: flex; align-items: center; justify-content: space-between; gap: .75rem; }
+.appliance-health-heading strong, .appliance-health-heading small { display: block; }
+.appliance-health-heading strong { font-size: .74rem; }
+.appliance-health-heading small { margin-top: .18rem; color: var(--muted); font-size: .6rem; }
+.appliance-health-system { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 1px; margin-top: .65rem; overflow: hidden; border: 1px solid var(--line); border-radius: .55rem; background: var(--line); }
+.appliance-health-system > span { min-width: 0; padding: .55rem; background: #0d1618; }
+.appliance-health-system small, .appliance-health-system strong { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.appliance-health-system small { color: var(--muted); font-size: .56rem; letter-spacing: .05em; text-transform: uppercase; }
+.appliance-health-system strong { margin-top: .24rem; color: #dceae2; font-size: .64rem; }
+.appliance-coverage { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: .4rem; margin-top: .6rem; }
+.appliance-coverage > span { display: flex; align-items: center; justify-content: space-between; gap: .35rem; min-width: 0; padding: .45rem; border: 1px solid var(--line); border-radius: .5rem; background: rgba(255, 255, 255, .012); }
+.appliance-coverage small { overflow: hidden; color: var(--muted); font-size: .55rem; text-overflow: ellipsis; white-space: nowrap; }
+.appliance-coverage .status-chip { flex: 0 0 auto; font-size: .52rem; }
+.appliance-health-group { margin-top: .65rem; }
+.appliance-health-group h4 { margin: 0; color: var(--muted); font-size: .59rem; font-weight: 750; letter-spacing: .08em; text-transform: uppercase; }
+.appliance-health-group ul { grid-template-columns: repeat(2, minmax(0, 1fr)); margin-top: .35rem; }
+.appliance-health-note { margin: .6rem 0 0; color: var(--muted); font-size: .61rem; line-height: 1.45; }
+.capacity-track { display: block; height: .22rem; margin-top: .42rem; overflow: hidden; border-radius: 99px; background: rgba(157, 176, 165, .14); }
+.capacity-track > span { display: block; height: 100%; border-radius: inherit; background: var(--cyan); }
 .network-subheading { display: flex; align-items: center; justify-content: space-between; gap: .8rem; margin-bottom: .8rem; }
 .network-subheading .eyebrow, .network-subheading h3 { margin: 0; }
 .network-subheading h3 { margin-top: .18rem; font-size: .94rem; }
@@ -433,6 +453,7 @@ footer { display: flex; justify-content: space-between; padding: 2.5rem 0 3rem; 
 	.network-device-card dl { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 	.network-device-heading { grid-template-columns: auto 1fr; }
 	.network-device-heading .status-chip { grid-column: 2; width: fit-content; }
+	.appliance-health-system, .appliance-coverage, .appliance-health-group ul { grid-template-columns: 1fr; }
   .device-list { grid-template-columns: 1fr; }
   .section-heading { align-items: start; flex-direction: column; gap: .75rem; }
   .search-field, .search-field input { width: 100%; }

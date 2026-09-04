@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { addPasskey, collectSnapshot, getAuthStatus, getDevice, getLatestSnapshot, getNotificationStatus, getRuntimeStatus, listAlerts, listAuditEvents, listDevices, listEvents, listExpectedServices, listFindingReviews, listManagedAppliances, listObservedListeners, listPasskeys, listSecurityActions, loginWithPasskey, logout, registerPasskey, registerPushDestination, removeExpectedService, removePasskey, removePushDestination, requestSecurityAction, saveExpectedService, saveExpectedServices, saveFindingReview } from "./api";
 import { ActivityIcon, AlertIcon, BellIcon, CheckIcon, ChipIcon, DefenderIcon, DevicesIcon, FirewallIcon, HavenIcon, HelpIcon, LaptopIcon, LockIcon, MonitorIcon, NetworkIcon, RefreshIcon, RemoteAccessIcon, ServerIcon, UpdateIcon, UsersIcon, WorkloadIcon } from "./icons";
+import { componentHealthTone, coverageTone, healthStatusLabel, managedHealthTone } from "./appliance-health";
 import { bindScopeLabel, canonicalOwnerName, endpoint, endpointScope, expectedServiceMatches, expectedServiceOwnerConstrained, isPrivateNetworkAddress, listenerOwnerSummary, liveNetworkRelationships, logicalListeners, networkServiceLabel, normalizeAddress, workloadAttribution, type LogicalListener, type NetworkDeviceObservation } from "./network";
 import { decodeApplicationServerKey, normalizePushDestinationLabel, serializePushSubscription, supportsBackgroundPush } from "./push";
 import type {
@@ -21,6 +22,7 @@ import type {
   HavenAlert,
   LinuxBaseline,
   ManagedApplianceStatus,
+  ManagedHealthStatus,
   NetworkConnection,
   ObservedListener,
   PasskeyInfo,
@@ -515,6 +517,36 @@ function PanelHeading({
   );
 }
 
+function ApplianceHealthPanel({ health }: { health: ManagedHealthStatus }) {
+	const coverage = [
+		["Disks + SMART", health.coverage.disks],
+		["RAID", health.coverage.raid],
+		["Temperature", health.coverage.temperature],
+		["Capacity", health.coverage.capacity],
+		["Firmware", health.coverage.firmware],
+	] as const;
+	const systemTemperatures = health.temperatures.filter((temperature) => temperature.kind !== "disk");
+	return <section className="appliance-health" aria-label="Read-only NAS health">
+		<div className="appliance-health-heading"><div><strong>Storage health</strong><small>Read-only evidence · checked {formatRelativeTime(health.lastCheckedAt)}</small></div><StatusChip label={healthStatusLabel(health.status)} tone={managedHealthTone(health.status)} /></div>
+		<div className="appliance-health-system">
+			<span><small>Model</small><strong>{health.system.model || "Not exposed"}</strong></span>
+			<span><small>Firmware</small><strong>{health.system.firmwareVersion || "Not exposed"}</strong></span>
+			<span><small>Kernel</small><strong>{health.system.kernelVersion || "Not exposed"}</strong></span>
+			<span><small>Uptime</small><strong>{health.system.uptimeSeconds === undefined ? "Not exposed" : formatDuration(health.system.uptimeSeconds)}</strong></span>
+		</div>
+		<div className="appliance-coverage" aria-label="Health evidence coverage">{coverage.map(([label, state]) => <span key={label}><small>{label}</small><StatusChip label={state} tone={coverageTone(state)} /></span>)}</div>
+		{health.errorClass && <p className="appliance-health-note">One read-only source was unavailable during this check. Available evidence remains visible and is not promoted to fully healthy.</p>}
+		{health.disks.length > 0 && <div className="appliance-health-group"><h4>Physical disks</h4><ul>{health.disks.map((disk) => <li key={disk.name}><span><strong>{disk.name}{disk.model ? ` · ${disk.model}` : ""}</strong><small>{formatBytes(disk.capacityBytes)}{disk.temperatureC === undefined ? "" : ` · ${disk.temperatureC.toFixed(0)}°C`} · SMART {disk.smart}</small></span><StatusChip label={disk.state} tone={componentHealthTone(disk.state)} /></li>)}</ul></div>}
+		{health.pools.length > 0 && <div className="appliance-health-group"><h4>RAID arrays</h4><ul>{health.pools.map((pool) => <li key={pool.name}><span><strong>{pool.name} · {pool.raidLevel || "RAID"}</strong><small>{pool.activeCount}/{pool.memberCount} members active</small></span><StatusChip label={pool.state} tone={componentHealthTone(pool.state)} /></li>)}</ul></div>}
+		{health.volumes.length > 0 && <div className="appliance-health-group"><h4>Volume capacity</h4><ul>{health.volumes.map((volume) => {
+			const width = Math.min(100, Math.max(0, volume.usedPercentage));
+			return <li className="appliance-volume" key={volume.name}><span><strong>{volume.name}</strong><small>{volume.usedPercentage.toFixed(1)}% used · {formatBytes(volume.availableBytes)} available of {formatBytes(volume.capacityBytes)}</small><span className="capacity-track" aria-hidden="true"><span style={{ width: `${width}%` }} /></span></span><StatusChip label={volume.state} tone={componentHealthTone(volume.state)} /></li>;
+		})}</ul></div>}
+		{systemTemperatures.length > 0 && <div className="appliance-health-group"><h4>System temperature</h4><ul>{systemTemperatures.map((temperature) => <li key={`${temperature.kind}:${temperature.name}`}><span><strong>{temperature.name}</strong><small>{temperature.celsius.toFixed(1)}°C</small></span><StatusChip label={temperature.state} tone={componentHealthTone(temperature.state)} /></li>)}</ul></div>}
+		{health.status === "partial" && <p className="appliance-health-note">No alert is inferred from missing coverage. HAVEN reports it as partly verified until the appliance exposes that signal.</p>}
+	</section>;
+}
+
 function NetworkOverview({ devices, appliances, events, alerts, selectedId, selectDevice, demoMode }: { devices: NetworkDeviceObservation[]; appliances: ManagedApplianceStatus[]; events: SecurityEvent[]; alerts: HavenAlert[]; selectedId: string; selectDevice: (id: string) => void; demoMode: boolean }) {
 	const summaries = useMemo(() => devices.map((entry) => {
 		const snapshot = entry.snapshot;
@@ -613,11 +645,13 @@ function NetworkOverview({ devices, appliances, events, alerts, selectedId, sele
 			</div>
 			<section className="network-appliances" aria-labelledby="managed-appliances-title">
 				<div className="network-subheading"><div><p className="eyebrow">EXPLICITLY CONFIGURED · AGENTLESS</p><h3 id="managed-appliances-title">Managed appliances</h3></div><span>{appliances.length} monitored</span></div>
-				<p className="network-privacy-note">The hub checks only the private addresses and ports declared in private deployment configuration. It does not discover services, authenticate to the appliance, retain response bodies, or scan the LAN.</p>
+				<p className="network-privacy-note">The hub checks only addresses and ports declared in private deployment configuration. Optional health collection uses file-backed credentials, a pinned host key, and a fixed read-only command; credentials, filenames, shares, disk serials, and raw responses are never returned or retained.</p>
 				{appliances.length === 0 ? <p className="activity-empty"><strong>No managed appliances configured.</strong><span>Network appliances remain observed-only until explicitly added by the owner.</span></p> : <div className="appliance-grid">{appliances.map((appliance) => {
-					const tone: Tone = appliance.status === "healthy" || appliance.status === "observed" ? "healthy" : appliance.status === "attention" ? "attention" : appliance.status === "rechecking" ? "configured" : "unknown";
+					const tone: Tone = appliance.health ? managedHealthTone(appliance.health.status) : appliance.status === "healthy" || appliance.status === "observed" ? "healthy" : appliance.status === "attention" ? "attention" : appliance.status === "rechecking" ? "configured" : "unknown";
+					const statusLabel = appliance.health ? healthStatusLabel(appliance.health.status) : appliance.status;
 					return <article className="appliance-card" key={appliance.id}>
-						<header><span className="device-icon"><ServerIcon /></span><span><strong>{appliance.displayName}</strong><small>{appliance.kind.toUpperCase()} · {appliance.address} · checked {formatRelativeTime(appliance.lastCheckedAt)}</small></span><StatusChip label={appliance.status} tone={tone} /></header>
+						<header><span className="device-icon"><ServerIcon /></span><span><strong>{appliance.displayName}</strong><small>{appliance.kind.toUpperCase()} · {appliance.address} · checked {formatRelativeTime(appliance.lastCheckedAt)}</small></span><StatusChip label={statusLabel} tone={tone} /></header>
+						{appliance.health && <ApplianceHealthPanel health={appliance.health} />}
 						<ul>{appliance.services.map((service) => {
 							const serviceTone: Tone = service.reachable ? "healthy" : !service.lastCheckedAt ? "unknown" : service.required && service.consecutiveFailures >= 2 ? "attention" : "configured";
 							return <li key={service.id}><span><strong>{service.name}</strong><small>{service.protocol} {service.port}{service.tls ? " · TLS" : ""}{service.required ? " · required" : " · visibility only"}</small>{service.certificate && <small>Certificate valid until {formatDate(service.certificate.notAfter)} · {service.certificate.nameValid ? "address matches" : "address does not match certificate name"}</small>}</span><StatusChip label={service.reachable ? "reachable" : !service.lastCheckedAt ? "pending" : "not reached"} tone={serviceTone} /></li>;

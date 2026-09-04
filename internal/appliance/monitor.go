@@ -15,6 +15,7 @@ import (
 	"net"
 	"net/netip"
 	"os"
+	"path"
 	"regexp"
 	"sort"
 	"strings"
@@ -33,6 +34,8 @@ const (
 )
 
 var identifierPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,39}$`)
+var sshUsernamePattern = regexp.MustCompile(`^[A-Za-z0-9._-]{1,64}$`)
+var sshHostKeyPattern = regexp.MustCompile(`^SHA256:[A-Za-z0-9+/]{43}$`)
 
 type configFile struct {
 	Appliances []model.ManagedApplianceDefinition `json:"appliances"`
@@ -41,6 +44,7 @@ type configFile struct {
 type StatusStore interface {
 	SyncManagedAppliances(context.Context, []model.ManagedApplianceDefinition, time.Time) error
 	RecordManagedApplianceProbe(context.Context, string, []model.ManagedServiceStatus, time.Time) error
+	RecordManagedApplianceHealth(context.Context, string, model.ManagedHealthStatus, time.Time) error
 	ListManagedAppliances(context.Context) ([]model.ManagedApplianceStatus, error)
 }
 
@@ -104,6 +108,41 @@ func LoadDefinitions(path string) ([]model.ManagedApplianceDefinition, error) {
 			return nil, fmt.Errorf("managed appliance %q must use a literal private unicast address", definition.ID)
 		}
 		definition.Address = address.Unmap().String()
+		if definition.Health != nil {
+			health := definition.Health
+			health.Provider = strings.ToLower(strings.TrimSpace(health.Provider))
+			health.CommunityFile = strings.TrimSpace(health.CommunityFile)
+			health.SSHUsername = strings.TrimSpace(health.SSHUsername)
+			health.SSHPrivateKeyFile = strings.TrimSpace(health.SSHPrivateKeyFile)
+			health.SSHHostKeySHA256 = strings.TrimSpace(health.SSHHostKeySHA256)
+			if health.Provider != "terramaster-tos5" {
+				return nil, fmt.Errorf("managed appliance %q has unsupported health provider %q", definition.ID, health.Provider)
+			}
+			if health.SNMPPort == 0 {
+				health.SNMPPort = 161
+			}
+			if health.SNMPPort < 1 || health.SNMPPort > 65535 {
+				return nil, fmt.Errorf("managed appliance %q has an invalid SNMP port", definition.ID)
+			}
+			if !safeMountedSecretPath(health.CommunityFile) {
+				return nil, fmt.Errorf("managed appliance %q must use an absolute mounted SNMP community file", definition.ID)
+			}
+			if health.SSHPort == 0 {
+				health.SSHPort = 9222
+			}
+			if health.SSHPort < 1 || health.SSHPort > 65535 {
+				return nil, fmt.Errorf("managed appliance %q has an invalid SSH port", definition.ID)
+			}
+			if !sshUsernamePattern.MatchString(health.SSHUsername) {
+				return nil, fmt.Errorf("managed appliance %q has an invalid SSH username", definition.ID)
+			}
+			if !safeMountedSecretPath(health.SSHPrivateKeyFile) {
+				return nil, fmt.Errorf("managed appliance %q must use an absolute mounted SSH private-key file", definition.ID)
+			}
+			if !sshHostKeyPattern.MatchString(health.SSHHostKeySHA256) {
+				return nil, fmt.Errorf("managed appliance %q must pin an SHA-256 SSH host-key fingerprint", definition.ID)
+			}
+		}
 		if len(definition.Services) == 0 || len(definition.Services) > maximumServices {
 			return nil, fmt.Errorf("managed appliance %q must declare 1 through %d services", definition.ID, maximumServices)
 		}
@@ -139,6 +178,10 @@ func LoadDefinitions(path string) ([]model.ManagedApplianceDefinition, error) {
 	}
 	sort.Slice(configured.Appliances, func(left, right int) bool { return configured.Appliances[left].ID < configured.Appliances[right].ID })
 	return configured.Appliances, nil
+}
+
+func safeMountedSecretPath(value string) bool {
+	return strings.HasPrefix(value, "/run/secrets/") && path.Clean(value) == value && path.Base(value) != "." && len(value) <= 240
 }
 
 func ensureJSONEnd(decoder *json.Decoder) error {
@@ -184,6 +227,12 @@ func (monitor *Monitor) Probe(ctx context.Context) error {
 		}
 		if err := monitor.store.RecordManagedApplianceProbe(ctx, definition.ID, results, checkedAt); err != nil {
 			return fmt.Errorf("record managed appliance %q: %w", definition.ID, err)
+		}
+		if definition.Health != nil {
+			health := probeManagedHealth(ctx, definition.Address, *definition.Health, checkedAt)
+			if err := monitor.store.RecordManagedApplianceHealth(ctx, definition.ID, health, checkedAt); err != nil {
+				return fmt.Errorf("record managed appliance %q health: %w", definition.ID, err)
+			}
 		}
 	}
 	return nil
@@ -286,7 +335,7 @@ func DeriveAlerts(appliances []model.ManagedApplianceStatus, evaluatedAt time.Ti
 			alerts = append(alerts, model.Alert{
 				ID: "appliance-stale:" + appliance.ID, InstanceID: "appliance-stale:" + appliance.ID + ":" + appliance.LastCheckedAt.UTC().Format(time.RFC3339Nano),
 				DeviceID: "appliance:" + appliance.ID, DeviceName: appliance.DisplayName, Kind: "appliance-stale", Severity: "medium",
-				Title: "Managed appliance checks are overdue", Summary: "HAVEN has not completed the configured credential-free appliance checks within the expected window.",
+				Title: "Managed appliance checks are overdue", Summary: "HAVEN has not completed the configured appliance checks within the expected window.",
 				Evidence: "Last hub check: " + appliance.LastCheckedAt.UTC().Format(time.RFC3339), StartedAt: appliance.LastCheckedAt.Add(StaleAfter),
 			})
 			continue
@@ -353,8 +402,104 @@ func DeriveAlerts(appliances []model.ManagedApplianceStatus, evaluatedAt time.Ti
 				Evidence: "Expires: " + service.Certificate.NotAfter.UTC().Format(time.RFC3339), StartedAt: startedAt,
 			})
 		}
+		alerts = append(alerts, deriveHealthAlerts(appliance, evaluatedAt)...)
 	}
 	return alerts
+}
+
+func deriveHealthAlerts(appliance model.ManagedApplianceStatus, evaluatedAt time.Time) []model.Alert {
+	health := appliance.Health
+	if health == nil || health.LastCheckedAt == nil {
+		return nil
+	}
+	if health.Status == "unavailable" {
+		if health.ConsecutiveFailures < FailureThreshold {
+			return nil
+		}
+		startedAt := statusTime(health.LastChangedAt, *health.LastCheckedAt)
+		return []model.Alert{{
+			ID: "appliance-health:" + appliance.ID, InstanceID: "appliance-health:" + appliance.ID + ":" + timestampIdentity(startedAt),
+			DeviceID: "appliance:" + appliance.ID, DeviceName: appliance.DisplayName, Kind: "appliance-health", Severity: "medium",
+			Title: "NAS health telemetry is unavailable", Summary: "Both configured read-only NAS health sources failed at least two consecutive checks.",
+			Evidence: health.ErrorClass, StartedAt: startedAt,
+		}}
+	}
+	alerts := make([]model.Alert, 0)
+	for _, disk := range health.Disks {
+		state := disk.State
+		if healthStateRank(disk.SMART) > healthStateRank(state) {
+			state = disk.SMART
+		}
+		if !healthStateAttention(state) {
+			continue
+		}
+		severity := healthSeverity(state)
+		startedAt := statusTime(disk.LastChangedAt, *health.LastCheckedAt)
+		alerts = append(alerts, healthAlert(appliance, "disk", disk.Name, severity, "NAS disk health needs attention", fmt.Sprintf("%s · device %s · SMART %s", disk.Model, disk.State, disk.SMART), startedAt))
+	}
+	for _, pool := range health.Pools {
+		if !healthStateAttention(pool.State) && pool.State != "rebuilding" {
+			continue
+		}
+		severity := healthSeverity(pool.State)
+		startedAt := statusTime(pool.LastChangedAt, *health.LastCheckedAt)
+		alerts = append(alerts, healthAlert(appliance, "raid", pool.Name, severity, "NAS storage pool needs attention", fmt.Sprintf("%s · %s · %d of %d members active", pool.RAIDLevel, pool.State, pool.ActiveCount, pool.MemberCount), startedAt))
+	}
+	for _, volume := range health.Volumes {
+		if !healthStateAttention(volume.State) {
+			continue
+		}
+		severity := healthSeverity(volume.State)
+		startedAt := statusTime(volume.LastChangedAt, *health.LastCheckedAt)
+		alerts = append(alerts, healthAlert(appliance, "capacity", volume.Name, severity, "NAS volume capacity needs attention", fmt.Sprintf("%s is %.1f%% used", volume.Name, volume.UsedPercentage), startedAt))
+	}
+	for _, temperature := range health.Temperatures {
+		if !healthStateAttention(temperature.State) {
+			continue
+		}
+		severity := healthSeverity(temperature.State)
+		startedAt := statusTime(temperature.LastChangedAt, *health.LastCheckedAt)
+		alerts = append(alerts, healthAlert(appliance, "temperature", temperature.Name, severity, "NAS temperature needs attention", fmt.Sprintf("%s is %.1f°C", temperature.Name, temperature.Celsius), startedAt))
+	}
+	return alerts
+}
+
+func healthAlert(appliance model.ManagedApplianceStatus, kind, name, severity, title, evidence string, startedAt time.Time) model.Alert {
+	id := "appliance-" + kind + ":" + appliance.ID + ":" + componentIdentity(name)
+	return model.Alert{
+		ID: id, InstanceID: id + ":" + timestampIdentity(startedAt) + ":" + severity,
+		DeviceID: "appliance:" + appliance.ID, DeviceName: appliance.DisplayName, Kind: "appliance-" + kind, Severity: severity,
+		Title: title, Summary: "A read-only NAS health observation crossed HAVEN's reviewed warning threshold.", Evidence: strings.TrimSpace(evidence), StartedAt: startedAt,
+	}
+}
+
+func healthStateRank(state string) int {
+	switch state {
+	case "critical", "failed":
+		return 3
+	case "warning", "degraded":
+		return 2
+	case "rebuilding":
+		return 1
+	default:
+		return 0
+	}
+}
+
+func healthSeverity(state string) string {
+	if state == "critical" || state == "failed" || state == "degraded" {
+		return "high"
+	}
+	return "medium"
+}
+
+func componentIdentity(name string) string {
+	digest := sha256.Sum256([]byte(strings.ToLower(strings.TrimSpace(name))))
+	return fmt.Sprintf("%x", digest[:6])
+}
+
+func timestampIdentity(value time.Time) string {
+	return value.UTC().Format(time.RFC3339Nano)
 }
 
 func earliestFailure(services []model.ManagedServiceStatus, fallback time.Time) time.Time {

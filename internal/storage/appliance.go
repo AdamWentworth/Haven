@@ -3,6 +3,7 @@ package storage
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"time"
@@ -20,22 +21,37 @@ func (store *Store) SyncManagedAppliances(ctx context.Context, definitions []mod
 	configuredAppliances := make(map[string]struct{}, len(definitions))
 	for _, definition := range definitions {
 		configuredAppliances[definition.ID] = struct{}{}
-		var previousAddress string
-		addressErr := transaction.QueryRowContext(ctx, `SELECT address FROM managed_appliances WHERE id = ?`, definition.ID).Scan(&previousAddress)
+		var previousAddress, previousHealthProvider string
+		addressErr := transaction.QueryRowContext(ctx, `SELECT address, health_provider FROM managed_appliances WHERE id = ?`, definition.ID).Scan(&previousAddress, &previousHealthProvider)
 		if addressErr != nil && !errors.Is(addressErr, sql.ErrNoRows) {
 			return fmt.Errorf("read managed appliance %q address: %w", definition.ID, addressErr)
 		}
+		healthProvider := ""
+		if definition.Health != nil {
+			healthProvider = definition.Health.Provider
+		}
 		addressChanged := addressErr == nil && previousAddress != definition.Address
+		healthChanged := addressErr == nil && previousHealthProvider != healthProvider
 		if _, err := transaction.ExecContext(ctx,
-			`INSERT INTO managed_appliances (id, display_name, kind, address, configured_at)
-			 VALUES (?, ?, ?, ?, ?)
+			`INSERT INTO managed_appliances (id, display_name, kind, address, configured_at, health_provider)
+			 VALUES (?, ?, ?, ?, ?, ?)
 			 ON CONFLICT(id) DO UPDATE SET
 				display_name = excluded.display_name,
 				kind = excluded.kind,
-				address = excluded.address`,
-			definition.ID, definition.DisplayName, definition.Kind, definition.Address, configuredAt.UTC().Format(time.RFC3339Nano),
+				address = excluded.address,
+				health_provider = excluded.health_provider`,
+			definition.ID, definition.DisplayName, definition.Kind, definition.Address, configuredAt.UTC().Format(time.RFC3339Nano), healthProvider,
 		); err != nil {
 			return fmt.Errorf("save managed appliance %q: %w", definition.ID, err)
+		}
+		if addressChanged || healthChanged {
+			if _, err := transaction.ExecContext(ctx,
+				`UPDATE managed_appliances
+				    SET health_payload_json = NULL, health_last_checked_at = NULL,
+				        health_consecutive_failures = 0, health_error_class = ''
+				  WHERE id = ?`, definition.ID); err != nil {
+				return fmt.Errorf("reset managed appliance %q health status: %w", definition.ID, err)
+			}
 		}
 
 		configuredServices := make(map[string]struct{}, len(definition.Services))
@@ -82,6 +98,91 @@ func (store *Store) SyncManagedAppliances(ctx context.Context, definitions []mod
 		return fmt.Errorf("commit managed-appliance synchronization: %w", err)
 	}
 	return nil
+}
+
+func (store *Store) RecordManagedApplianceHealth(ctx context.Context, applianceID string, health model.ManagedHealthStatus, checkedAt time.Time) error {
+	var previousPayload []byte
+	if err := store.database.QueryRowContext(ctx, `SELECT health_payload_json FROM managed_appliances WHERE id = ?`, applianceID).Scan(&previousPayload); err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return fmt.Errorf("read managed appliance %q previous health: %w", applianceID, err)
+	}
+	var previous model.ManagedHealthStatus
+	if len(previousPayload) > 0 {
+		if err := json.Unmarshal(previousPayload, &previous); err != nil {
+			return fmt.Errorf("decode managed appliance %q previous health: %w", applianceID, err)
+		}
+	}
+	preserveHealthTransitions(&health, previous, checkedAt.UTC())
+	health.LastCheckedAt = nil
+	health.ConsecutiveFailures = 0
+	payload, err := json.Marshal(health)
+	if err != nil {
+		return fmt.Errorf("encode managed appliance %q health: %w", applianceID, err)
+	}
+	failed := health.Status == "unavailable"
+	result, err := store.database.ExecContext(ctx,
+		`UPDATE managed_appliances
+		    SET health_payload_json = ?, health_last_checked_at = ?,
+		        health_consecutive_failures = CASE WHEN ? = 1 THEN health_consecutive_failures + 1 ELSE 0 END,
+		        health_error_class = ?
+		  WHERE id = ? AND health_provider <> ''`,
+		payload, checkedAt.UTC().Format(time.RFC3339Nano), boolInt(failed), health.ErrorClass, applianceID,
+	)
+	if err != nil {
+		return fmt.Errorf("record managed appliance %q health: %w", applianceID, err)
+	}
+	updated, err := result.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("count managed appliance %q health update: %w", applianceID, err)
+	}
+	if updated != 1 {
+		return fmt.Errorf("managed appliance %q health provider is not configured", applianceID)
+	}
+	return nil
+}
+
+func preserveHealthTransitions(current *model.ManagedHealthStatus, previous model.ManagedHealthStatus, checkedAt time.Time) {
+	current.LastChangedAt = transitionTime(current.Status, previous.Status, previous.LastChangedAt, checkedAt)
+	previousDisks := make(map[string]model.ManagedDiskHealth, len(previous.Disks))
+	for _, item := range previous.Disks {
+		previousDisks[item.Name] = item
+	}
+	for index := range current.Disks {
+		prior := previousDisks[current.Disks[index].Name]
+		current.Disks[index].LastChangedAt = transitionTime(current.Disks[index].State+"|"+current.Disks[index].SMART, prior.State+"|"+prior.SMART, prior.LastChangedAt, checkedAt)
+	}
+	previousPools := make(map[string]model.ManagedPoolHealth, len(previous.Pools))
+	for _, item := range previous.Pools {
+		previousPools[item.Name] = item
+	}
+	for index := range current.Pools {
+		prior := previousPools[current.Pools[index].Name]
+		current.Pools[index].LastChangedAt = transitionTime(current.Pools[index].State, prior.State, prior.LastChangedAt, checkedAt)
+	}
+	previousVolumes := make(map[string]model.ManagedVolumeHealth, len(previous.Volumes))
+	for _, item := range previous.Volumes {
+		previousVolumes[item.Name] = item
+	}
+	for index := range current.Volumes {
+		prior := previousVolumes[current.Volumes[index].Name]
+		current.Volumes[index].LastChangedAt = transitionTime(current.Volumes[index].State, prior.State, prior.LastChangedAt, checkedAt)
+	}
+	previousTemperatures := make(map[string]model.ManagedTemperature, len(previous.Temperatures))
+	for _, item := range previous.Temperatures {
+		previousTemperatures[item.Name] = item
+	}
+	for index := range current.Temperatures {
+		prior := previousTemperatures[current.Temperatures[index].Name]
+		current.Temperatures[index].LastChangedAt = transitionTime(current.Temperatures[index].State, prior.State, prior.LastChangedAt, checkedAt)
+	}
+}
+
+func transitionTime(current, previous string, previousChanged *time.Time, checkedAt time.Time) *time.Time {
+	if current == previous && previousChanged != nil {
+		value := previousChanged.UTC()
+		return &value
+	}
+	value := checkedAt.UTC()
+	return &value
 }
 
 func resetManagedServiceStatus(ctx context.Context, transaction *sql.Tx, applianceID, serviceID string) error {
@@ -221,7 +322,11 @@ func (store *Store) RecordManagedApplianceProbe(ctx context.Context, applianceID
 }
 
 func (store *Store) ListManagedAppliances(ctx context.Context) ([]model.ManagedApplianceStatus, error) {
-	rows, err := store.database.QueryContext(ctx, `SELECT id, display_name, kind, address, configured_at FROM managed_appliances ORDER BY lower(display_name), id`)
+	rows, err := store.database.QueryContext(ctx,
+		`SELECT id, display_name, kind, address, configured_at,
+		        health_provider, health_payload_json, health_last_checked_at,
+		        health_consecutive_failures, health_error_class
+		   FROM managed_appliances ORDER BY lower(display_name), id`)
 	if err != nil {
 		return nil, fmt.Errorf("list managed appliances: %w", err)
 	}
@@ -229,7 +334,14 @@ func (store *Store) ListManagedAppliances(ctx context.Context) ([]model.ManagedA
 	for rows.Next() {
 		var appliance model.ManagedApplianceStatus
 		var configuredAt string
-		if err := rows.Scan(&appliance.ID, &appliance.DisplayName, &appliance.Kind, &appliance.Address, &configuredAt); err != nil {
+		var healthProvider, healthErrorClass string
+		var healthPayload []byte
+		var healthChecked sql.NullString
+		var healthFailures int
+		if err := rows.Scan(
+			&appliance.ID, &appliance.DisplayName, &appliance.Kind, &appliance.Address, &configuredAt,
+			&healthProvider, &healthPayload, &healthChecked, &healthFailures, &healthErrorClass,
+		); err != nil {
 			rows.Close()
 			return nil, fmt.Errorf("read managed appliance: %w", err)
 		}
@@ -237,6 +349,23 @@ func (store *Store) ListManagedAppliances(ctx context.Context) ([]model.ManagedA
 		if err != nil {
 			rows.Close()
 			return nil, err
+		}
+		if healthProvider != "" {
+			health := model.ManagedHealthStatus{Provider: healthProvider, Status: "pending", Coverage: model.ManagedHealthCoverage{Disks: "unavailable", RAID: "unavailable", Temperature: "unavailable", Capacity: "unavailable", Firmware: "unavailable"}}
+			if len(healthPayload) > 0 {
+				if err := json.Unmarshal(healthPayload, &health); err != nil {
+					rows.Close()
+					return nil, fmt.Errorf("decode managed appliance %q health: %w", appliance.ID, err)
+				}
+			}
+			health.Provider = healthProvider
+			health.ConsecutiveFailures = healthFailures
+			health.ErrorClass = healthErrorClass
+			if health.LastCheckedAt, err = optionalDatabaseTime(healthChecked); err != nil {
+				rows.Close()
+				return nil, err
+			}
+			appliance.Health = &health
 		}
 		appliances = append(appliances, appliance)
 	}
@@ -259,7 +388,11 @@ func (store *Store) ListManagedAppliances(ctx context.Context) ([]model.ManagedA
 				appliances[index].LastCheckedAt = &checked
 			}
 		}
-		appliances[index].Status = managedApplianceStatus(services)
+		if health := appliances[index].Health; health != nil && health.LastCheckedAt != nil && (appliances[index].LastCheckedAt == nil || health.LastCheckedAt.After(*appliances[index].LastCheckedAt)) {
+			checked := health.LastCheckedAt.UTC()
+			appliances[index].LastCheckedAt = &checked
+		}
+		appliances[index].Status = managedApplianceStatus(services, appliances[index].Health)
 	}
 	return appliances, nil
 }
@@ -325,7 +458,7 @@ func (store *Store) listManagedApplianceServices(ctx context.Context, applianceI
 	return services, nil
 }
 
-func managedApplianceStatus(services []model.ManagedServiceStatus) string {
+func managedApplianceStatus(services []model.ManagedServiceStatus, health *model.ManagedHealthStatus) string {
 	requiredCount := 0
 	rechecking := false
 	for _, service := range services {
@@ -346,6 +479,17 @@ func managedApplianceStatus(services []model.ManagedServiceStatus) string {
 	}
 	if rechecking {
 		return "rechecking"
+	}
+	if health != nil {
+		if health.LastCheckedAt == nil {
+			return "pending"
+		}
+		if health.Status == "attention" || (health.Status == "unavailable" && health.ConsecutiveFailures >= 2) {
+			return "attention"
+		}
+		if health.Status == "unavailable" || health.Status == "partial" {
+			return "observed"
+		}
 	}
 	if requiredCount == 0 {
 		return "observed"

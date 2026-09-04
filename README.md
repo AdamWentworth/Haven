@@ -4,9 +4,9 @@
 
 HAVEN is a personal security observatory for home devices and networks. It presents native operating-system protections in one understandable console without trying to replace Microsoft Defender, host firewalls, or other trusted security controls.
 
-HAVEN is pre-release software. The current milestone adds durable, encrypted background delivery to fact-based alert baselines. It combines authenticated endpoint reports without turning the hub into a network scanner or silently trusting observed assets; it is not a replacement for native protection.
+HAVEN is pre-release software. The current milestone adds bounded, read-only NAS health evidence to authenticated endpoint and network monitoring without turning the hub into a network scanner or a repository for infrastructure secrets; it is not a replacement for native protection.
 
-## Milestone 0.10 — Durable Background Alerts
+## Milestone 0.12 — Read-only NAS Health
 
 The current implementation provides:
 
@@ -28,7 +28,9 @@ The current implementation provides:
 - Strictly increasing report sequences, timestamp checks, payload limits, rate limits, device revocation, and versioned messages
 - A device inventory and detail view with explicitly synthetic demo fixtures for portfolio work
 - A network-wide coverage view that summarizes report freshness, verified host firewalls, current findings, and unreviewed service exposure across enrolled devices
-- Credential-free monitoring for explicitly configured private network appliances, with bounded TCP/TLS health checks and no LAN discovery
+- Credential-free TCP/TLS reachability for explicitly configured private network appliances, plus optional SNMP and forced-command SSH health collection from file-backed credentials
+- NAS disk inventory and SMART status without serial numbers, RAID member/state monitoring, volume capacity, non-waking disk temperature checks, system thermal sensors, uptime, kernel, and firmware metadata when safely exposed
+- Explicit verified, partial, unsupported, and unavailable coverage so missing NAS telemetry is never presented as healthy
 - Live relationship grouping that distinguishes explicitly enrolled peers, observed-only private endpoints, and Internet destinations grouped by source owner and destination service
 - Cross-device finding lifecycle context without retaining raw remote endpoints, connection history, packet contents, or inferred device trust
 - A hub-owned current-alert view derived only from server-classified report freshness, evaluated posture findings, and owner-reviewed service expectations
@@ -71,6 +73,15 @@ Managed appliances are configured separately from endpoint enrollment. Set `HAVE
     "displayName": "Home NAS",
     "kind": "nas",
     "address": "<private IPv4 address>",
+    "health": {
+      "provider": "terramaster-tos5",
+      "snmpPort": 161,
+      "communityFile": "/run/secrets/nas-snmp-community",
+      "sshPort": 9222,
+      "sshUsername": "<dedicated or administrator account>",
+      "sshPrivateKeyFile": "/run/secrets/nas-monitor-key",
+      "sshHostKeySHA256": "SHA256:<pinned ED25519 fingerprint>"
+    },
     "services": [
       { "id": "smb", "name": "SMB file service", "protocol": "TCP", "port": 445, "tls": false, "required": true },
       { "id": "management", "name": "Management HTTPS", "protocol": "TCP", "port": 5443, "tls": true, "required": true }
@@ -79,7 +90,11 @@ Managed appliances are configured separately from endpoint enrollment. Set `HAVE
 }
 ```
 
-The hub records only current reachability, bounded error classes, check timestamps, and the public metadata of a presented TLS certificate. It never stores appliance credentials, response bodies, packet payloads, or newly discovered services. A required endpoint must fail two consecutive checks before HAVEN creates an outage alert; visibility-only endpoints do not create availability alerts.
+The health block is optional. Its community and private-key values must live in owner-readable files mounted by private deployment configuration; inline credentials and relative secret paths are rejected. The SSH key must be pinned to the appliance's ED25519 host fingerprint and constrained appliance-side to the fixed `haven-nas-probe` command, with forwarding and PTY allocation disabled. SNMP v2c is not encrypted, so it belongs only on a trusted private segment with a unique random community—not the default `public` value.
+
+The helper emits a bounded JSON schema containing only current health facts. It excludes accounts, shares, filenames, disk serial numbers, network configuration, commands, and arbitrary vendor responses. SMART is invoked with `-n standby,3`, which leaves a sleeping disk asleep and reports that limitation instead of waking it for a check. Capacity warnings begin at 85% used and become critical at 95%; disk temperature warnings begin at 50°C and become critical at 60°C; system temperature boundaries are 75°C and 90°C. RAID degraded, failed, and rebuilding states remain visible and actionable. Vendor firmware may remain partially verified when the installed TOS release is not available through these bounded sources.
+
+The hub records only current reachability, normalized health evidence, bounded error classes, check timestamps, and the public metadata of a presented TLS certificate. It never stores appliance credentials, raw responses, packet payloads, or newly discovered services. A required endpoint or complete health source must fail two consecutive checks before HAVEN creates an availability alert; visibility-only endpoints and incomplete-but-non-actionable health coverage remain quiet.
 
 Because HAVEN is pre-release and observation schema 2 is still evolving, hubs and agents should run the same repository revision.
 
@@ -190,13 +205,16 @@ The production profile uses `haven.home.arpa` as a private DNS name, a private c
 Haven/
 ├── cmd/
 │   ├── haven-hub/       # API, embedded dashboard, and SQLite owner
-│   └── haven-agent/     # Native read-only collection entry point
+│   ├── haven-agent/     # Native read-only collection entry point
+│   └── haven-nas-probe/ # Fixed-schema, appliance-side health helper
 ├── internal/
 │   ├── collector/       # Fixed, platform-specific collectors
 │   ├── agent/           # Enrollment, identity persistence, and reporting client
 │   ├── alert/           # Server-owned current-alert projection
 │   ├── hub/             # Local dashboard and mutually authenticated agent APIs
+│   ├── healthpolicy/    # Explicit capacity and temperature thresholds
 │   ├── model/           # Versionable observation model
+│   ├── nasprobe/        # Bounded disk, RAID, volume, and thermal collection
 │   ├── notification/    # Encrypted, durable Web Push delivery
 │   ├── storage/         # SQLite persistence and retention
 │   ├── workload/        # Sanitized, fixed-purpose runtime inventory
@@ -220,6 +238,6 @@ Haven/
 
 ## Current and next security milestone
 
-Milestone 0.7 adds native Linux monitoring and boot-persistent endpoint-agent scheduling. Milestone 0.7.1 makes its network results explainable, 0.7.2 makes report freshness and finding lifecycles explicit, and 0.7.3 correlates host listeners with sanitized Docker port mappings. Milestone 0.7.4 adds deliberate suggested-baseline review; 0.7.5 adds live systemd ownership and service-constrained expectations for Linux listeners. Milestone 0.8 combines the latest authenticated reports into a network-wide coverage, change, and live-relationship view while keeping merely observed private endpoints separate from explicitly enrolled devices. Milestone 0.9 turns current findings, server-classified stale agents, incomplete enrollments, new non-local listeners, and changed service attribution into explainable active alerts. Milestone 0.10 moves that derivation to the hub and adds opt-in, encrypted, durable Web Push delivery with bounded retries and per-destination receipts; its expectation model also supports owner-constrained dynamic ranges and expiring development approvals. Milestone 0.11 adds reproducible console-free Windows scheduled-task packaging and credential-free monitoring of explicitly configured private network appliances. A later event-driven Windows sensor may move under Service Control Manager only when real-time Defender and Windows Event Log monitoring justify an always-running process; it must remain outbound-only and use the least privilege its collectors require. HAVEN does not scan the LAN, retain remote endpoints, or claim that an alert proves compromise. See [verification](docs/VERIFICATION.md) for the claim-to-test map. The Ubuntu hub does not execute Windows actions on another machine. GitHub Actions verifies the Go, frontend, dependency, concurrency, vulnerability, Windows process isolation, image, and public-repository safety checks on each proposed change.
+Milestone 0.7 adds native Linux monitoring and boot-persistent endpoint-agent scheduling. Milestone 0.7.1 makes its network results explainable, 0.7.2 makes report freshness and finding lifecycles explicit, and 0.7.3 correlates host listeners with sanitized Docker port mappings. Milestone 0.7.4 adds deliberate suggested-baseline review; 0.7.5 adds live systemd ownership and service-constrained expectations for Linux listeners. Milestone 0.8 combines the latest authenticated reports into a network-wide coverage, change, and live-relationship view while keeping merely observed private endpoints separate from explicitly enrolled devices. Milestone 0.9 turns current findings, server-classified stale agents, incomplete enrollments, new non-local listeners, and changed service attribution into explainable active alerts. Milestone 0.10 moves that derivation to the hub and adds opt-in, encrypted, durable Web Push delivery with bounded retries and per-destination receipts; its expectation model also supports owner-constrained dynamic ranges and expiring development approvals. Milestone 0.11 adds reproducible console-free Windows scheduled-task packaging and credential-free monitoring of explicitly configured private network appliances. Milestone 0.12 adds optional read-only NAS health through bounded SNMP plus a host-key-pinned, forced-command SSH helper. A later event-driven Windows sensor may move under Service Control Manager only when real-time Defender and Windows Event Log monitoring justify an always-running process; it must remain outbound-only and use the least privilege its collectors require. HAVEN does not scan the LAN, retain remote endpoints, or claim that an alert proves compromise. See [verification](docs/VERIFICATION.md) for the claim-to-test map. The Ubuntu hub does not execute Windows actions on another machine. GitHub Actions verifies the Go, frontend, dependency, concurrency, vulnerability, Windows process isolation, image, and public-repository safety checks on each proposed change.
 
 Read the [architecture](docs/ARCHITECTURE.md), [threat model](docs/THREAT_MODEL.md), and [public repository policy](docs/PUBLIC_REPOSITORY.md) before expanding the trust boundary.

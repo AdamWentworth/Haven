@@ -391,6 +391,16 @@ var migrations = []migration{
 				ON managed_appliance_services (appliance_id, last_checked_at)`,
 		},
 	},
+	{
+		version: 13,
+		statements: []string{
+			`ALTER TABLE managed_appliances ADD COLUMN health_provider TEXT NOT NULL DEFAULT ''`,
+			`ALTER TABLE managed_appliances ADD COLUMN health_payload_json BLOB`,
+			`ALTER TABLE managed_appliances ADD COLUMN health_last_checked_at TEXT`,
+			`ALTER TABLE managed_appliances ADD COLUMN health_consecutive_failures INTEGER NOT NULL DEFAULT 0`,
+			`ALTER TABLE managed_appliances ADD COLUMN health_error_class TEXT NOT NULL DEFAULT ''`,
+		},
+	},
 }
 
 func Open(ctx context.Context, path string) (*Store, error) {

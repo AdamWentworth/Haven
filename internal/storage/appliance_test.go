@@ -113,6 +113,61 @@ func TestManagedApplianceSyncRemovesOnlyConfigurationNoLongerPresent(t *testing.
 	}
 }
 
+func TestManagedApplianceHealthPersistsCurrentEvidenceAndFailureCount(t *testing.T) {
+	ctx := context.Background()
+	store, err := Open(ctx, filepath.Join(t.TempDir(), "haven.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	now := time.Date(2026, time.September, 4, 7, 0, 0, 0, time.UTC)
+	definitions := []model.ManagedApplianceDefinition{{
+		ID: "nas", DisplayName: "NAS", Kind: "nas", Address: testPrivateApplianceAddress(),
+		Health:   &model.ManagedHealthDefinition{Provider: "terramaster-tos5"},
+		Services: []model.ManagedServiceDefinition{{ID: "smb", Name: "SMB", Protocol: "TCP", Port: 445, Required: true}},
+	}}
+	if err := store.SyncManagedAppliances(ctx, definitions, now); err != nil {
+		t.Fatal(err)
+	}
+	statuses, _ := store.ListManagedAppliances(ctx)
+	if statuses[0].Health == nil || statuses[0].Health.Status != "pending" || statuses[0].Status != "pending" {
+		t.Fatalf("configured health did not begin pending: %#v", statuses[0])
+	}
+	health := model.ManagedHealthStatus{
+		Provider: "terramaster-tos5", Status: "partial",
+		Coverage: model.ManagedHealthCoverage{Disks: "partial", RAID: "partial", Temperature: "unsupported", Capacity: "verified", Firmware: "partial"},
+		Volumes:  []model.ManagedVolumeHealth{{Name: "/Volume1", CapacityBytes: 100, AvailableBytes: 40, UsedPercentage: 60, State: "healthy"}},
+	}
+	if err := store.RecordManagedApplianceHealth(ctx, "nas", health, now.Add(time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	statuses, _ = store.ListManagedAppliances(ctx)
+	if statuses[0].Health == nil || len(statuses[0].Health.Volumes) != 1 || statuses[0].Health.ConsecutiveFailures != 0 || statuses[0].Status != "pending" {
+		t.Fatalf("health evidence was not retained independently of pending service checks: %#v", statuses[0])
+	}
+	firstTransition := statuses[0].Health.Volumes[0].LastChangedAt
+	health.Volumes[0].AvailableBytes = 35
+	health.Volumes[0].UsedPercentage = 65
+	if err := store.RecordManagedApplianceHealth(ctx, "nas", health, now.Add(90*time.Second)); err != nil {
+		t.Fatal(err)
+	}
+	statuses, _ = store.ListManagedAppliances(ctx)
+	if firstTransition == nil || statuses[0].Health.Volumes[0].LastChangedAt == nil || !statuses[0].Health.Volumes[0].LastChangedAt.Equal(*firstTransition) {
+		t.Fatalf("value-only changes incorrectly reset the condition transition: %#v", statuses[0].Health.Volumes[0])
+	}
+	unavailable := model.ManagedHealthStatus{Provider: "terramaster-tos5", Status: "unavailable", ErrorClass: "health-sources-unavailable", Coverage: model.ManagedHealthCoverage{}}
+	if err := store.RecordManagedApplianceHealth(ctx, "nas", unavailable, now.Add(2*time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.RecordManagedApplianceHealth(ctx, "nas", unavailable, now.Add(3*time.Minute)); err != nil {
+		t.Fatal(err)
+	}
+	statuses, _ = store.ListManagedAppliances(ctx)
+	if statuses[0].Health.ConsecutiveFailures != 2 || statuses[0].Health.ErrorClass != "health-sources-unavailable" {
+		t.Fatalf("health failure state was not bounded and counted: %#v", statuses[0].Health)
+	}
+}
+
 func testPrivateApplianceAddress() string {
 	return strings.Join([]string{"192", "168", "1", "69"}, ".")
 }

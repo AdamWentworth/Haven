@@ -88,7 +88,7 @@ export interface SecurityEvent {
 }
 
 export type AlertSeverity = "high" | "medium" | "low";
-export type AlertKind = "finding" | "stale-agent" | "awaiting-agent" | "new-service" | "service-drift" | "expired-service-expectation" | "appliance-stale" | "appliance-unreachable" | "appliance-service" | "appliance-certificate";
+export type AlertKind = "finding" | "stale-agent" | "awaiting-agent" | "new-service" | "service-drift" | "expired-service-expectation" | "appliance-stale" | "appliance-unreachable" | "appliance-service" | "appliance-certificate" | "appliance-health" | "appliance-disk" | "appliance-raid" | "appliance-capacity" | "appliance-temperature";
 
 export interface HavenAlert {
   id: string;
@@ -242,6 +242,73 @@ export interface ManagedApplianceStatus {
   configuredAt: string;
   lastCheckedAt: string | null;
   services: ManagedServiceStatus[];
+  health?: ManagedHealthStatus;
+}
+
+export type ManagedHealthCoverageState = "verified" | "partial" | "unsupported" | "unavailable";
+export type ManagedHealthComponentState = "healthy" | "observed" | "standby" | "warning" | "critical" | "degraded" | "failed" | "rebuilding" | "unavailable" | "unknown";
+
+export interface ManagedHealthStatus {
+  provider: string;
+  status: "pending" | "unavailable" | "partial" | "healthy" | "attention";
+  lastCheckedAt: string | null;
+  lastChangedAt: string | null;
+  consecutiveFailures: number;
+  errorClass?: string;
+  system: {
+    model?: string;
+    firmwareVersion?: string;
+    kernelVersion?: string;
+    uptimeSeconds?: number;
+  };
+  coverage: {
+    disks: ManagedHealthCoverageState;
+    raid: ManagedHealthCoverageState;
+    temperature: ManagedHealthCoverageState;
+    capacity: ManagedHealthCoverageState;
+    firmware: ManagedHealthCoverageState;
+  };
+  disks: ManagedDiskHealth[];
+  pools: ManagedPoolHealth[];
+  volumes: ManagedVolumeHealth[];
+  temperatures: ManagedTemperature[];
+}
+
+export interface ManagedDiskHealth {
+  name: string;
+  model?: string;
+  capacityBytes?: number;
+  state: ManagedHealthComponentState;
+  smart: ManagedHealthComponentState;
+  temperatureC?: number;
+  lastChangedAt: string | null;
+}
+
+export interface ManagedPoolHealth {
+  name: string;
+  raidLevel?: string;
+  state: ManagedHealthComponentState;
+  memberCount: number;
+  activeCount: number;
+  lastChangedAt: string | null;
+}
+
+export interface ManagedVolumeHealth {
+  name: string;
+  capacityBytes: number;
+  availableBytes: number;
+  usedPercentage: number;
+  state: ManagedHealthComponentState;
+  lastChangedAt: string | null;
+}
+
+export interface ManagedTemperature {
+  name: string;
+  celsius: number;
+  kind: string;
+  state: ManagedHealthComponentState;
+  driveStandby?: boolean;
+  lastChangedAt: string | null;
 }
 
 export interface ManagedServiceStatus {

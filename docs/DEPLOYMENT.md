@@ -20,6 +20,14 @@ The dashboard is published only on the configured LAN address and high HTTPS por
 
 Web Push is disabled until an owner enrolls a browser. Once enabled, the hub needs outbound DNS and HTTPS access to that browser's vendor push service; it does not need another inbound port. The sender rejects redirects and any destination that resolves to a private, loopback, link-local, multicast, or non-global address. Browser push services observe delivery metadata even though payload contents are encrypted.
 
+## Optional managed-NAS health
+
+Basic appliance reachability needs no credentials. Full NAS health is an explicit private deployment choice. Store a unique random SNMP community and a dedicated unencrypted Ed25519 private key as owner-readable files outside Git, mount them read-only into the hub, and reference only their container paths from the private managed-appliance configuration. SNMP v2c must remain restricted to the trusted LAN because it does not encrypt its community or response.
+
+Install the matching architecture's `haven-nas-probe` binary on the appliance as a root-owned mode-0755 file. The corresponding `authorized_keys` entry must be limited to the hub host and use `command="/usr/local/sbin/haven-nas-probe",no-agent-forwarding,no-port-forwarding,no-X11-forwarding,no-pty`. Verify that requesting an unrelated SSH command still returns only the health JSON before enabling the provider. Password-based administrator access is separate from this key and is not used or stored by HAVEN.
+
+The helper does not accept arguments and must not be generalized into a remote shell. It excludes disk serials, accounts, shares, filenames, and network configuration; SMART checks use standby-safe behavior. Appliance firmware upgrades may remove a manually installed helper, so revalidate the forced command, file ownership, and health coverage after each vendor OS upgrade.
+
 The container must set `HAVEN_LOCAL_COLLECTION_ENABLED=false`. A container cannot truthfully observe its Linux host without weakening isolation, and its generated container hostname is not a household device identity. Only native agents appear in the production trusted inventory. If an earlier pre-release deployment created container-host records, back up the hub and run `haven-hub device prune-local --confirm`; the command removes only `local` collector devices and their observation history, preserving enrolled devices, authentication, audit history, and PKI.
 
 Passkeys are bound to the exact private HTTPS origin. Choose the permanent hostname and port before enrolling production passkeys.
