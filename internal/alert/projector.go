@@ -25,6 +25,7 @@ type DeviceObservation struct {
 	Snapshot         *model.SecuritySnapshot
 	ExpectedServices []storage.ExpectedService
 	Listeners        []storage.ObservedListener
+	FindingReviews   []storage.FindingReview
 }
 
 type logicalListener struct {
@@ -74,7 +75,11 @@ func (projector *Projector) Current(ctx context.Context, demoMode bool) ([]model
 		if err != nil {
 			return nil, fmt.Errorf("load alert listener history for %s: %w", device.ID, err)
 		}
-		observations = append(observations, DeviceObservation{Device: device, Snapshot: detail.Snapshot, ExpectedServices: expected, Listeners: listeners})
+		reviews, err := projector.store.ListFindingReviews(ctx, device.ID)
+		if err != nil {
+			return nil, fmt.Errorf("load alert finding reviews for %s: %w", device.ID, err)
+		}
+		observations = append(observations, DeviceObservation{Device: device, Snapshot: detail.Snapshot, ExpectedServices: expected, Listeners: listeners, FindingReviews: reviews})
 	}
 	return Derive(observations, events, storage.EnrolledDeviceStaleAfter, now), nil
 }
@@ -140,6 +145,9 @@ func Derive(devices []DeviceObservation, events []model.SecurityEvent, freshness
 			continue
 		}
 		for _, finding := range device.Snapshot.Findings {
+			if findingReviewSuppressesAlert(finding.ID, device.FindingReviews, evaluatedAt) {
+				continue
+			}
 			startedAt := device.Snapshot.CollectedAt
 			if event, exists := opened[device.Device.ID+":"+finding.ID]; exists && !event.OccurredAt.IsZero() {
 				startedAt = event.OccurredAt
@@ -236,6 +244,23 @@ func Derive(devices []DeviceObservation, events []model.SecurityEvent, freshness
 		return alerts[left].ID < alerts[right].ID
 	})
 	return alerts
+}
+
+func findingReviewSuppressesAlert(findingID string, reviews []storage.FindingReview, evaluatedAt time.Time) bool {
+	for _, review := range reviews {
+		if review.FindingID != findingID {
+			continue
+		}
+		switch review.State {
+		case "accepted-risk":
+			return true
+		case "snoozed":
+			return review.SnoozedUntil != nil && review.SnoozedUntil.After(evaluatedAt)
+		default:
+			return false
+		}
+	}
+	return false
 }
 
 func logicalListeners(connections []model.NetworkConnection) []logicalListener {

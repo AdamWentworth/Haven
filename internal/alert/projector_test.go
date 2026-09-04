@@ -47,6 +47,32 @@ func TestDeriveUsesOnlyCurrentFindingsAndLatestOpenLifecycle(t *testing.T) {
 	}
 }
 
+func TestDeriveAppliesOwnerFindingReviewSemantics(t *testing.T) {
+	device := observedDevice("current")
+	device.Snapshot.Findings = []model.SecurityFinding{
+		{ID: "accepted", Severity: "medium", Title: "Accepted", Summary: "Deliberate risk."},
+		{ID: "snoozed", Severity: "medium", Title: "Snoozed", Summary: "Review later."},
+		{ID: "expired-snooze", Severity: "medium", Title: "Expired snooze", Summary: "Review again."},
+		{ID: "acknowledged", Severity: "low", Title: "Acknowledged", Summary: "Still active."},
+	}
+	future := fixedTime.Add(time.Hour)
+	past := fixedTime.Add(-time.Hour)
+	device.FindingReviews = []storage.FindingReview{
+		{DeviceID: "device-a", FindingID: "accepted", State: "accepted-risk", ReviewedAt: fixedTime.Add(-2 * time.Hour)},
+		{DeviceID: "device-a", FindingID: "snoozed", State: "snoozed", SnoozedUntil: &future, ReviewedAt: fixedTime.Add(-time.Hour)},
+		{DeviceID: "device-a", FindingID: "expired-snooze", State: "snoozed", SnoozedUntil: &past, ReviewedAt: fixedTime.Add(-2 * time.Hour)},
+		{DeviceID: "device-a", FindingID: "acknowledged", State: "acknowledged", ReviewedAt: fixedTime.Add(-time.Hour)},
+	}
+
+	alerts := Derive([]DeviceObservation{device}, nil, 30*time.Minute, fixedTime)
+	if len(alerts) != 2 {
+		t.Fatalf("accepted risk and active snooze must leave two visible alerts, got %#v", alerts)
+	}
+	if alerts[0].ID != "finding:device-a:expired-snooze" || alerts[1].ID != "finding:device-a:acknowledged" {
+		t.Fatalf("expired snooze and acknowledgement must remain visible, got %#v", alerts)
+	}
+}
+
 func TestDeriveSeparatesNewServiceFromOwnerDrift(t *testing.T) {
 	device := observedDevice("current",
 		listener(443, "0.0.0.0", "caddy", "caddy.service"),

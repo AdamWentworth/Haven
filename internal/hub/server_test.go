@@ -301,6 +301,17 @@ func TestAlertEndpointUsesServerOwnedCurrentProjection(t *testing.T) {
 	if response.Code != http.StatusOK || !strings.Contains(response.Body.String(), `"kind":"finding"`) || !strings.Contains(response.Body.String(), `"severity":"high"`) {
 		t.Fatalf("expected a server-projected current alert: %d %s", response.Code, response.Body.String())
 	}
+
+	if err := store.UpsertFindingReview(context.Background(), storage.FindingReview{
+		DeviceID: "test-device", FindingID: "defender-disabled", State: "accepted-risk", Note: "Deliberate test policy.", ReviewedAt: time.Now().UTC(),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	reviewed := httptest.NewRecorder()
+	server.Handler().ServeHTTP(reviewed, httptest.NewRequest(http.MethodGet, "/api/alerts", nil))
+	if reviewed.Code != http.StatusOK || strings.Contains(reviewed.Body.String(), `"findingId":"defender-disabled"`) || strings.Contains(reviewed.Body.String(), `"title":"Microsoft Defender is disabled"`) {
+		t.Fatalf("accepted risk must leave the server-owned active-alert projection: %d %s", reviewed.Code, reviewed.Body.String())
+	}
 }
 
 func TestNotificationStatusIsExplicitlyUnavailableWithoutService(t *testing.T) {

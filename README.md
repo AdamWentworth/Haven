@@ -51,7 +51,7 @@ The current implementation provides:
 - Passwordless owner authentication using the cross-platform WebAuthn passkey standard (Windows Hello is one supported provider)
 - Multiple labeled owner passkeys for trusted computers, phones, and hardware security keys, with local terminal recovery
 - Expiring server-side sessions, strict same-origin checks, anti-forgery tokens, and rate-limited authentication ceremonies
-- Finding acknowledgement, 24-hour snooze, accepted-risk notes, and a privacy-bounded audit trail
+- Finding acknowledgement, 24-hour snooze, accepted-risk notes, immediate alert refresh, and a privacy-bounded audit trail; accepted risks and active snoozes leave the interruptive alert queue without erasing current posture
 - Provider-advertised action capabilities with fresh passkey confirmation; the first Windows provider offers a Defender quick scan and security-intelligence update
 - No browser endpoint for arbitrary commands, scripts, paths, process launches, firewall changes, or Defender exclusions
 - Privacy-bounded collection: administrator names, update titles, threat names, and detected resource paths are not collected

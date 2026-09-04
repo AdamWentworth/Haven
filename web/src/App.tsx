@@ -1158,7 +1158,7 @@ export function App() {
     if (state === "snoozed") snoozedUntil = new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString();
     try {
       await saveFindingReview({ deviceId: selectedId, findingId: finding.id, state, note, snoozedUntil });
-      await loadControls(selectedId);
+      await Promise.all([loadControls(selectedId), listAlerts().then(setCurrentAlerts)]);
       setError(null);
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "The finding review could not be saved.");
