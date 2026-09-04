@@ -3,7 +3,7 @@
 FROM node:24-alpine@sha256:e67514e5d0f6c46656005e1b693b2ec9d52e80b641307de684d4a015ba7a4eaf AS web-build
 WORKDIR /source/web
 COPY web/package.json web/package-lock.json ./
-RUN npm ci
+RUN npm ci --no-audit --no-fund
 COPY testdata/ /source/testdata/
 COPY web/ ./
 RUN npm run build

@@ -33,7 +33,7 @@ jobs:
 
       - name: Install frontend dependencies
         working-directory: web
-        run: npm ci
+        run: npm ci --no-audit --no-fund
 
       - name: Test security projection logic with coverage gates
         working-directory: web
