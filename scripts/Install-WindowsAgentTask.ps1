@@ -18,6 +18,13 @@ if ($env:OS -ne 'Windows_NT') {
     throw 'The Windows agent task can only be installed on Windows.'
 }
 
+$windowsIdentity = [System.Security.Principal.WindowsIdentity]::GetCurrent()
+$windowsPrincipal = [System.Security.Principal.WindowsPrincipal]::new($windowsIdentity)
+if (-not $windowsPrincipal.IsInRole([System.Security.Principal.WindowsBuiltInRole]::Administrator)) {
+    throw 'Run this installer from an elevated PowerShell session. HAVEN needs an elevated reporting task to read protected posture signals such as BitLocker status.'
+}
+$identity = $windowsIdentity.Name
+
 $repositoryRoot = Split-Path -Parent $PSScriptRoot
 if (-not (Test-Path -LiteralPath (Join-Path $repositoryRoot 'go.mod') -PathType Leaf)) {
     throw 'Run the installer from a complete HAVEN source checkout.'
@@ -78,25 +85,29 @@ try {
     Move-Item -LiteralPath $temporaryAgentPath -Destination $backgroundAgentPath -Force
 
     $action = New-ScheduledTaskAction -Execute $backgroundAgentPath -Argument 'report' -WorkingDirectory $resolvedInstallDirectory
+    $principal = New-ScheduledTaskPrincipal -UserId $identity -LogonType Interactive -RunLevel Highest
     if ($null -ne $existingTask) {
-        Set-ScheduledTask -TaskPath $taskPath -TaskName $TaskName -Action $action | Out-Null
+        Set-ScheduledTask -TaskPath $taskPath -TaskName $TaskName -Action $action -Principal $principal | Out-Null
     }
     else {
-        $identity = [System.Security.Principal.WindowsIdentity]::GetCurrent().Name
         $triggers = @(
             New-ScheduledTaskTrigger -AtLogOn -User $identity
             New-ScheduledTaskTrigger -Once -At (Get-Date).AddMinutes(1) -RepetitionInterval (New-TimeSpan -Minutes $IntervalMinutes) -RepetitionDuration (New-TimeSpan -Days 3650)
         )
-        $principal = New-ScheduledTaskPrincipal -UserId $identity -LogonType Interactive -RunLevel Limited
         $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable -MultipleInstances IgnoreNew -ExecutionTimeLimit (New-TimeSpan -Minutes 5)
-        Register-ScheduledTask -TaskPath $taskPath -TaskName $TaskName -Description 'Reports read-only Windows security posture to the private HAVEN hub without displaying a window.' -Action $action -Trigger $triggers -Principal $principal -Settings $settings | Out-Null
+        Register-ScheduledTask -TaskPath $taskPath -TaskName $TaskName -Description 'Reports read-only Windows security posture, including protected signals such as BitLocker status, to the private HAVEN hub without displaying a window.' -Action $action -Trigger $triggers -Principal $principal -Settings $settings | Out-Null
+    }
+
+    $installedTask = Get-ScheduledTask -TaskPath $taskPath -TaskName $TaskName
+    if ($installedTask.Principal.RunLevel -ne 'Highest') {
+        throw "Scheduled task '$TaskName' was installed without the required elevated run level."
     }
 
     if (-not $DoNotStart) {
         Start-ScheduledTask -TaskPath $taskPath -TaskName $TaskName
     }
 
-    Write-Host "Installed the console-free HAVEN reporter and updated scheduled task '$TaskName'."
+    Write-Host "Installed the console-free HAVEN reporter and updated elevated scheduled task '$TaskName'."
 }
 finally {
     if (Test-Path -LiteralPath $temporaryAgentPath) {

@@ -110,13 +110,13 @@ go run .\cmd\haven-agent report
 
 The enrollment command prompts for the token so it is not placed in shell history. Private keys, certificates, state, and observations are written under the operating system's per-user application-data directory, never the repository.
 
-After enrollment, install or update the per-user Windows reporting task from the HAVEN source directory:
+After enrollment, install or update the per-user Windows reporting task from an **elevated PowerShell session** in the HAVEN source directory:
 
 ```powershell
 pwsh -NoProfile -File .\scripts\Install-WindowsAgentTask.ps1
 ```
 
-The installer builds a separate GUI-subsystem reporter under the current user's application-data directory and points Task Scheduler directly at it. The interactive `haven-agent.exe` remains available for enrollment and diagnostics, while the scheduled reporter and its fixed PowerShell collector run without allocating a visible console. It preserves an existing task's triggers; a new task reports at logon and every 15 minutes. No administrator privileges or Windows service are required.
+The installer builds a separate GUI-subsystem reporter under the current user's application-data directory and points Task Scheduler directly at it. The interactive `haven-agent.exe` remains available for enrollment and diagnostics, while the scheduled reporter and its fixed PowerShell collector run without allocating a visible console. It preserves an existing task's triggers; a new task reports at logon and every 15 minutes. The task runs at Windows' highest available level so read-only collection can inspect protected posture signals such as BitLocker status; the installer refuses to create a misleading limited task when it is not elevated. Native service packaging with tighter capability separation remains a future hardening milestone.
 
 Create portfolio-safe inventory fixtures or a consistent SQLite backup with:
 

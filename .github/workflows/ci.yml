@@ -84,6 +84,27 @@ jobs:
       - name: Test Windows process isolation
         run: go test ./internal/action ./internal/collector ./internal/subprocess
 
+      - name: Validate elevated reporter task contract
+        shell: pwsh
+        run: |
+          $scriptPath = Join-Path $PWD 'scripts\Install-WindowsAgentTask.ps1'
+          $tokens = $null
+          $parseErrors = $null
+          [void][System.Management.Automation.Language.Parser]::ParseFile($scriptPath, [ref]$tokens, [ref]$parseErrors)
+          if ($parseErrors.Count -ne 0) {
+            throw "Windows agent task installer has PowerShell parse errors: $($parseErrors.Message -join '; ')"
+          }
+          $source = Get-Content -LiteralPath $scriptPath -Raw
+          if ($source -notmatch '(?s)New-ScheduledTaskPrincipal.+?-RunLevel\s+Highest') {
+            throw 'Windows reporter must run at the highest available level to collect protected posture signals.'
+          }
+          if ($source -notmatch '(?s)Set-ScheduledTask.+?-Principal\s+\$principal') {
+            throw 'Existing Windows reporter tasks must have their principal upgraded, not only their executable replaced.'
+          }
+          if ($source -notmatch 'WindowsBuiltInRole\]::Administrator') {
+            throw 'Windows reporter installer must reject unelevated installation.'
+          }
+
       - name: Build console-free reporter
         shell: pwsh
         run: |
