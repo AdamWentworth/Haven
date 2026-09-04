@@ -54,7 +54,8 @@ const fixtures = vi.hoisted(() => {
 });
 
 const api = vi.hoisted(() => ({
-	addPasskey: vi.fn(), collectSnapshot: vi.fn(), getAuthStatus: vi.fn(), getDevice: vi.fn(), getLatestSnapshot: vi.fn(), getNotificationStatus: vi.fn(), getRuntimeStatus: vi.fn(), listAccountProfiles: vi.fn(), listAlerts: vi.fn(), listAuditEvents: vi.fn(), listDevices: vi.fn(), listEvents: vi.fn(), listExpectedServices: vi.fn(), listFindingReviews: vi.fn(), listManagedAppliances: vi.fn(), listObservedListeners: vi.fn(), listPasskeys: vi.fn(), listSecurityActions: vi.fn(), loginWithPasskey: vi.fn(), logout: vi.fn(), registerPasskey: vi.fn(), registerPushDestination: vi.fn(), removeAccountProfile: vi.fn(), removeExpectedService: vi.fn(), removePasskey: vi.fn(), removePushDestination: vi.fn(), requestSecurityAction: vi.fn(), saveAccountProfile: vi.fn(), saveExpectedService: vi.fn(), saveExpectedServices: vi.fn(), saveFindingReview: vi.fn(), revokeDevice: vi.fn(),
+	HavenAPIError: class HavenAPIError extends Error { constructor(message: string, readonly status: number) { super(message); } },
+	addPasskey: vi.fn(), collectSnapshot: vi.fn(), getAuthStatus: vi.fn(), getDevice: vi.fn(), getLatestSnapshot: vi.fn(), getNotificationStatus: vi.fn(), getRuntimeStatus: vi.fn(), listAccountProfiles: vi.fn(), listAlerts: vi.fn(), listAuditEvents: vi.fn(), listDevices: vi.fn(), listEvents: vi.fn(), listExpectedServices: vi.fn(), listFindingReviews: vi.fn(), listManagedAppliances: vi.fn(), listObservedListeners: vi.fn(), listPasskeys: vi.fn(), listSecurityActions: vi.fn(), lockAccountNotebook: vi.fn(), loginWithPasskey: vi.fn(), logout: vi.fn(), registerPasskey: vi.fn(), registerPushDestination: vi.fn(), removeAccountProfile: vi.fn(), removeExpectedService: vi.fn(), removePasskey: vi.fn(), removePushDestination: vi.fn(), requestSecurityAction: vi.fn(), saveAccountProfile: vi.fn(), saveExpectedService: vi.fn(), saveExpectedServices: vi.fn(), saveFindingReview: vi.fn(), touchAccountNotebook: vi.fn(), unlockAccountNotebook: vi.fn(), revokeDevice: vi.fn(),
 }));
 
 vi.mock("./api", () => api);
@@ -70,6 +71,9 @@ beforeEach(() => {
 	api.getNotificationStatus.mockResolvedValue({ available: false, vapidPublicKey: "", destinations: [], pendingCount: 0, failedCount: 0, lastSuccessAt: null, lastFailureAt: null, evaluationPeriodSeconds: 60 });
 	api.listManagedAppliances.mockResolvedValue([]);
 	api.listAccountProfiles.mockResolvedValue([]);
+	api.unlockAccountNotebook.mockResolvedValue({ token: "account-access", expiresAt: "2026-09-04T08:15:00Z", absoluteExpiresAt: "2026-09-04T16:00:00Z", idleTimeoutSeconds: 900 });
+	api.touchAccountNotebook.mockResolvedValue({ token: "account-access", expiresAt: "2026-09-04T08:15:00Z", absoluteExpiresAt: "2026-09-04T16:00:00Z", idleTimeoutSeconds: 900 });
+	api.lockAccountNotebook.mockResolvedValue(undefined);
 	api.getDevice.mockResolvedValue({ device: fixtures.device, snapshot: fixtures.snapshot });
 	api.listExpectedServices.mockResolvedValue([]);
 	api.listObservedListeners.mockResolvedValue([]);
@@ -128,8 +132,12 @@ describe("HAVEN routed console", () => {
 		await screen.findByRole("heading", { name: "Home security overview" });
 		await user.click(screen.getByRole("link", { name: "Accounts" }));
 		expect(await screen.findByRole("heading", { name: "Accounts", level: 1 })).toBeInTheDocument();
+		expect(screen.getByRole("heading", { name: "Unlock account details" })).toBeInTheDocument();
+		expect(api.listAccountProfiles).not.toHaveBeenCalled();
+		await user.click(screen.getByRole("button", { name: "Unlock with passkey" }));
 		expect(screen.getByRole("heading", { name: "Account readiness" })).toBeInTheDocument();
 		expect(screen.getByText(/Owner-reported, not provider-verified/)).toBeInTheDocument();
+		expect(api.listAccountProfiles).toHaveBeenCalledWith("account-access");
 		expect(window.location.pathname).toBe("/accounts");
 	});
 

@@ -13,6 +13,7 @@ export const emptyAccountProfile = (): AccountProfileInput => ({
 	recoveryStatus: "unknown",
 	backupCodesStatus: "unknown",
 	lastReviewedAt: null,
+	reviewDetails: [],
 	notes: "",
 });
 

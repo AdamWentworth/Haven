@@ -21,17 +21,29 @@ function profile(overrides: Partial<AccountProfile> = {}): AccountProfile {
 
 describe("account security notebook", () => {
 	it("renders manual posture and separates suggestions from alerts", () => {
-		render(<AccountNotebook profiles={[profile()]} demoMode={false} busy={false} save={vi.fn()} remove={vi.fn()} />);
+		const { container } = render(<AccountNotebook profiles={[profile({ reviewDetails: ["Signed-in devices reviewed; nothing unfamiliar."] })]} demoMode={false} unlocked busy={false} unlock={vi.fn()} lock={vi.fn()} save={vi.fn()} remove={vi.fn()} />);
 		expect(screen.getByRole("heading", { name: "Account readiness" })).toBeInTheDocument();
 		expect(screen.getByRole("heading", { name: "Personal" })).toBeInTheDocument();
 		expect(screen.getByText("Enable two-step verification")).toBeInTheDocument();
 		expect(screen.getByText(/never threat alerts or push notifications/i)).toBeInTheDocument();
+		expect(screen.getByText("Signed-in devices reviewed; nothing unfamiliar.")).toBeInTheDocument();
+		expect(container.querySelector('[data-provider-brand="Google"] svg')).toBeInTheDocument();
+	});
+
+	it("does not render private profiles until the notebook is unlocked", async () => {
+		const user = userEvent.setup();
+		const unlock = vi.fn();
+		render(<AccountNotebook profiles={[profile({ identifier: "owner@example.com" })]} demoMode={false} unlocked={false} busy={false} unlock={unlock} lock={vi.fn()} save={vi.fn()} remove={vi.fn()} />);
+		expect(screen.getByRole("heading", { name: "Unlock account details" })).toBeInTheDocument();
+		expect(screen.queryByText("owner@example.com")).not.toBeInTheDocument();
+		await user.click(screen.getByRole("button", { name: "Unlock with passkey" }));
+		expect(unlock).toHaveBeenCalledOnce();
 	});
 
 	it("creates an account without offering any secret field", async () => {
 		const user = userEvent.setup();
 		const save = vi.fn().mockResolvedValue(true);
-		render(<AccountNotebook profiles={[]} demoMode={false} busy={false} save={save} remove={vi.fn()} />);
+		render(<AccountNotebook profiles={[]} demoMode={false} unlocked busy={false} unlock={vi.fn()} lock={vi.fn()} save={save} remove={vi.fn()} />);
 		await user.click(screen.getByRole("button", { name: "Add your first account" }));
 		expect(screen.getByText(/Never paste a password/)).toBeInTheDocument();
 		expect(screen.queryByLabelText(/^Password$/)).not.toBeInTheDocument();
@@ -46,7 +58,7 @@ describe("account security notebook", () => {
 	it("updates an account without resending derived presentation fields", async () => {
 		const user = userEvent.setup();
 		const save = vi.fn().mockResolvedValue(true);
-		render(<AccountNotebook profiles={[profile()]} demoMode={false} busy={false} save={save} remove={vi.fn()} />);
+		render(<AccountNotebook profiles={[profile()]} demoMode={false} unlocked busy={false} unlock={vi.fn()} lock={vi.fn()} save={save} remove={vi.fn()} />);
 		await user.click(screen.getByRole("button", { name: "Edit" }));
 		await user.clear(screen.getByLabelText("Sign-in or profile identifier optional"));
 		await user.type(screen.getByLabelText("Sign-in or profile identifier optional"), "owner@example.com");
@@ -61,7 +73,7 @@ describe("account security notebook", () => {
 	});
 
 	it("keeps synthetic portfolio profiles read-only", () => {
-		render(<AccountNotebook profiles={[profile({ id: "acct_demo_profile" })]} demoMode busy={false} save={vi.fn()} remove={vi.fn()} />);
+		render(<AccountNotebook profiles={[profile({ id: "acct_demo_profile" })]} demoMode unlocked={false} busy={false} unlock={vi.fn()} lock={vi.fn()} save={vi.fn()} remove={vi.fn()} />);
 		expect(screen.getByText(/Synthetic account notebook/)).toBeInTheDocument();
 		expect(screen.queryByRole("button", { name: "Edit" })).not.toBeInTheDocument();
 		expect(screen.queryByRole("button", { name: "Add account" })).not.toBeInTheDocument();

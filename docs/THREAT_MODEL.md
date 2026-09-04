@@ -38,6 +38,8 @@ The network overview is a browser-side projection of the latest authenticated re
 
 The Accounts workspace is an owner-authenticated private notebook, not an account-provider integration. The owner supplies all facts manually. Each profile is encrypted as one identity-bound AES-GCM envelope with a dedicated key outside SQLite; audit history receives only the opaque profile ID and operation. The schema offers no secret or token fields, strict decoding rejects unknown fields, and recognizable TOTP setup links, private keys, and cookie-header formats are refused in free text. Free-form text cannot be perfectly classified, so the interface repeatedly instructs the owner never to paste secret contents. Losing the notebook key makes the ciphertext unreadable; therefore the complete state directory must be backed up together. Suggestions are deterministic checklist guidance, not incident findings, and are excluded from active alerts and Web Push.
 
+An ordinary long-lived HAVEN session is insufficient to retrieve account profiles. Opening the workspace requires fresh passkey reauthentication, which creates a random in-memory grant bound to that exact session and scope. The server enforces a 15-minute idle timeout and an eight-hour absolute lifetime; explicit account lock and full sign-out revoke the grant, and the browser keeps it only in React memory. This limits casual disclosure from a temporarily unattended unlocked browser, but it cannot protect data already rendered to a browser controlled by malware, a malicious extension, or an attacker acting during the active window.
+
 Managed-appliance monitoring is opt-in deployment configuration, not LAN discovery. Configuration parsing accepts only literal private unicast addresses, explicit TCP ports, bounded identifiers, and a fixed schema. The hub retains the declared address plus current reachability, bounded error classification, timestamps, and presented certificate metadata. It does not send credentials, issue application requests, retain response bodies, inspect shares, or promote the appliance to authenticated endpoint status. TLS certificate collection deliberately completes an observation-only handshake and then reports system-chain and address-name validation separately; a private appliance's name mismatch is factual evidence rather than an automatic compromise claim.
 
 ## Principal threats
@@ -92,6 +94,17 @@ Current mitigations:
 - Omit provider, label, identifier, status, and note contents from audit history and logs.
 - Make no outbound provider request and accept no provider authorization grant.
 - Keep notebook suggestions outside the incident-alert and background-notification pipelines.
+
+### An unattended browser exposes account-security notes
+
+Current mitigations and limits:
+
+- Require a fresh WebAuthn assertion before returning any account profile, even when the general HAVEN session is still valid.
+- Bind the resulting random grant to the exact authenticated session and account-notebook scope; never persist the bearer value in SQLite, cookies, local storage, or session storage.
+- Enforce server-side idle and absolute expiration, revoke on sign-out, and provide an explicit workspace lock that also clears decrypted browser state.
+- Keep all account responses non-cacheable and never fetch them in the normal dashboard polling loop.
+- Treat client-side inactivity detection as presentation assistance only; the server deadlines remain authoritative.
+- A compromised browser process, malicious extension, or endpoint malware can still read content while the owner has the workspace unlocked. HAVEN is not a defense against a fully compromised endpoint.
 
 ### A compromised endpoint lies to HAVEN
 

@@ -402,7 +402,15 @@ export interface AccountProfileInput {
   recoveryStatus: RecoveryStatus;
   backupCodesStatus: BackupCodesStatus;
   lastReviewedAt?: string | null;
+  reviewDetails?: string[];
   notes?: string;
+}
+
+export interface AccountAccessGrant {
+  token: string;
+  expiresAt: string;
+  absoluteExpiresAt: string;
+  idleTimeoutSeconds: number;
 }
 
 export interface AccountSuggestion {

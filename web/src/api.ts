@@ -1,13 +1,23 @@
-import type { AccountProfile, AccountProfileInput, AuditEvent, AuthStatus, DeviceDetail, DeviceRecord, ExpectedService, ExpectedServiceInput, FindingReview, FindingReviewState, HavenAlert, ManagedApplianceStatus, ObservedListener, PasskeyInfo, PushDestination, PushNotificationStatus, RuntimeStatus, SecurityAction, SecurityActionKind, SecurityEvent, SecuritySnapshot } from "./types";
+import type { AccountAccessGrant, AccountProfile, AccountProfileInput, AuditEvent, AuthStatus, DeviceDetail, DeviceRecord, ExpectedService, ExpectedServiceInput, FindingReview, FindingReviewState, HavenAlert, ManagedApplianceStatus, ObservedListener, PasskeyInfo, PushDestination, PushNotificationStatus, RuntimeStatus, SecurityAction, SecurityActionKind, SecurityEvent, SecuritySnapshot } from "./types";
 import type { SerializedPushSubscription } from "./push";
 
-async function getJSON<T>(path: string, signal?: AbortSignal): Promise<T> {
+export class HavenAPIError extends Error {
+  constructor(message: string, readonly status: number) {
+    super(message);
+    this.name = "HavenAPIError";
+  }
+}
+
+async function getJSON<T>(path: string, signal?: AbortSignal, headers: Record<string, string> = {}): Promise<T> {
   const response = await fetch(path, {
     cache: "no-store",
-    headers: { Accept: "application/json" },
+    headers: { Accept: "application/json", ...headers },
     signal,
   });
-  if (!response.ok) throw new Error(`The HAVEN hub returned HTTP ${response.status}.`);
+  if (!response.ok) {
+    const payload = await response.json().catch(() => null) as { error?: string } | null;
+    throw new HavenAPIError(payload?.error || `The HAVEN hub returned HTTP ${response.status}.`, response.status);
+  }
   return (await response.json()) as T;
 }
 
@@ -32,7 +42,7 @@ async function postJSON<T>(path: string, body?: unknown, headers: Record<string,
   });
   if (!response.ok) {
     const payload = await response.json().catch(() => null) as { error?: string } | null;
-    throw new Error(payload?.error || `The HAVEN hub returned HTTP ${response.status}.`);
+    throw new HavenAPIError(payload?.error || `The HAVEN hub returned HTTP ${response.status}.`, response.status);
   }
   if (response.status === 204) return undefined as T;
   return (await response.json()) as T;
@@ -51,11 +61,22 @@ export const listDevices = (signal?: AbortSignal) => getJSON<DeviceRecord[]>("/a
 
 export const listManagedAppliances = (signal?: AbortSignal) => getJSON<ManagedApplianceStatus[]>("/api/appliances", signal);
 
-export const listAccountProfiles = (signal?: AbortSignal) => getJSON<AccountProfile[]>("/api/account-profiles", signal);
+const accountGrantHeaders = (grant: string): Record<string, string> => grant ? { "X-HAVEN-Account-Access": grant } : {};
 
-export const saveAccountProfile = (profile: AccountProfileInput) => postJSON<AccountProfile>("/api/account-profiles", profile);
+export const listAccountProfiles = (grant: string, signal?: AbortSignal) => getJSON<AccountProfile[]>("/api/account-profiles", signal, accountGrantHeaders(grant));
 
-export const removeAccountProfile = (profileId: string) => postJSON<void>(`/api/account-profiles/${encodeURIComponent(profileId)}/remove`);
+export const saveAccountProfile = (profile: AccountProfileInput, grant: string) => postJSON<AccountProfile>("/api/account-profiles", profile, accountGrantHeaders(grant));
+
+export const removeAccountProfile = (profileId: string, grant: string) => postJSON<void>(`/api/account-profiles/${encodeURIComponent(profileId)}/remove`, undefined, accountGrantHeaders(grant));
+
+export async function unlockAccountNotebook() {
+  const grant = await reauthorize("account-notebook:unlock");
+  return postJSON<AccountAccessGrant>("/api/account-access/unlock", undefined, { "X-HAVEN-Reauthorization": grant });
+}
+
+export const touchAccountNotebook = (grant: string) => postJSON<AccountAccessGrant>("/api/account-access/touch", undefined, accountGrantHeaders(grant));
+
+export const lockAccountNotebook = (grant: string) => postJSON<void>("/api/account-access/lock", undefined, accountGrantHeaders(grant));
 
 export const getDevice = (deviceId: string, signal?: AbortSignal) =>
   getJSON<DeviceDetail>(`/api/devices/${encodeURIComponent(deviceId)}`, signal);
