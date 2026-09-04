@@ -7,7 +7,7 @@ export function DeviceInventory({ devices, selectedId, select, demoMode }: { dev
 	return (
 		<section className="device-inventory" aria-labelledby="devices-title">
 			<div className="inventory-heading">
-				<div className="heading-identity"><span className="section-icon cyan"><DevicesIcon /></span><div><p className="eyebrow">{demoMode ? "SYNTHETIC INVENTORY" : "TRUSTED INVENTORY"}</p><h2 id="devices-title">{demoMode ? "Demo devices" : "Devices"}</h2></div></div>
+				<div className="heading-identity"><span className="section-icon cyan"><DevicesIcon /></span><div><p className="eyebrow">{demoMode ? "SYNTHETIC INVENTORY" : "TRUSTED INVENTORY"}</p><h2 id="devices-title">{demoMode ? "Demo devices" : "Enrolled endpoints"}</h2></div></div>
 				<span>{devices.length} known</span>
 			</div>
 			<div className="device-list">

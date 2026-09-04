@@ -799,6 +799,12 @@ function Application({ snapshot, devices, networkDevices, appliances, events, ne
 	const unknownChecks = (snapshot.baselineChecks || []).filter((check) => check.status === "unknown").length;
 	const selectedDeviceId = selectedDevice?.id || snapshot.device.deviceId || "";
 	const deviceSection: DeviceSection = route.page === "device" ? route.section || "overview" : "overview";
+	const browserPageTitle = route.page === "device"
+		? selectedDevice?.displayName || snapshot.device.hostName
+		: route.page === "overview" ? "Overview" : `${route.page.charAt(0).toUpperCase()}${route.page.slice(1)}`;
+	useEffect(() => {
+		document.title = `${browserPageTitle} — HAVEN`;
+	}, [browserPageTitle]);
 	const openDevice = (deviceId: string) => {
 		navigate({ page: "device", deviceId, section: "overview" });
 		selectDevice(deviceId);

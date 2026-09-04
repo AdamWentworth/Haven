@@ -110,6 +110,7 @@ describe("HAVEN routed console", () => {
 
 		await user.click(screen.getByRole("link", { name: "Settings" }));
 		expect(await screen.findByRole("heading", { name: "Owner passkeys" })).toBeInTheDocument();
+		expect(document.title).toBe("Settings — HAVEN");
 		expect(screen.getByRole("heading", { name: "Background alerts" })).toBeInTheDocument();
 		expect(screen.getByText("0.13.0")).toBeInTheDocument();
 		expect(window.location.pathname).toBe("/settings");
