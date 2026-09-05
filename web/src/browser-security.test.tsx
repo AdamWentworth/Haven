@@ -75,6 +75,10 @@ describe("browser security panel", () => {
 		expect(screen.getByText("Personal")).toBeInTheDocument();
 		expect(screen.getByText("facebook.com")).toBeInTheDocument();
 		expect(screen.getByText("No access 90+ days")).toBeInTheDocument();
+		expect(screen.getByRole("heading", { name: "Likely sign-in related" })).toBeInTheDocument();
+		expect(screen.getByRole("heading", { name: "May include sign-in state" })).toBeInTheDocument();
+		expect(screen.getByRole("heading", { name: "Other site data" })).toBeInTheDocument();
+		expect(screen.getByLabelText("Search domains optional")).toHaveValue("");
 		expect(screen.getByText("Work")).toBeInTheDocument();
 		expect(screen.getByText("Unavailable this run")).toBeInTheDocument();
 		expect(screen.getByText(/collection limitation—not a security problem/i)).toBeInTheDocument();
@@ -92,15 +96,17 @@ describe("browser security panel", () => {
 		expect(screen.getByText(/could not verify supported browser metadata/i)).toBeInTheDocument();
 	});
 
-	it("filters a profile to conservative cleanup candidates without calling them authenticated sessions", async () => {
+	it("groups sites automatically and offers cleanup without requiring a search query", async () => {
 		vi.spyOn(Date, "now").mockReturnValue(new Date("2026-09-04T00:01:00Z").getTime());
 		const user = userEvent.setup();
 		render(<BrowserSecurityPanel status={observed} />);
 		expect(screen.getByText("recent.example.com")).toBeInTheDocument();
-		await user.selectOptions(screen.getByRole("combobox", { name: "Show" }), "cleanup");
+		expect(screen.getByRole("heading", { name: "Likely sign-in related" })).toBeInTheDocument();
+		expect(screen.getByRole("heading", { name: "May include sign-in state" })).toBeInTheDocument();
+		await user.click(screen.getAllByRole("button", { name: /Cleanup review/ })[0]);
 		expect(screen.getByText("facebook.com")).toBeInTheDocument();
 		expect(screen.queryByText("recent.example.com")).not.toBeInTheDocument();
-		expect(screen.getByRole("combobox", { name: "Sort by" })).toHaveValue("session-signals");
-		expect(screen.getByText(/neither proves that you are currently signed in/i)).toBeInTheDocument();
+		expect(screen.getByRole("heading", { name: "Old or undated site data" })).toBeInTheDocument();
+		expect(screen.getByLabelText("Search domains optional")).toHaveValue("");
 	});
 });

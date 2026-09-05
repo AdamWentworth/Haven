@@ -3,7 +3,7 @@ import { siBrave, siFirefoxbrowser, siGooglechrome, type SimpleIcon } from "simp
 import { AlertIcon, BrowserIcon, CheckIcon, HelpIcon } from "./icons";
 import type { BrowserCookieSite, BrowserExtension, BrowserExtensionChange, BrowserInstallation, BrowserProfile, BrowserProtectionStatus, BrowserSecurityStatus } from "./types";
 import { StatusChip, type Tone } from "./ui";
-import { cookieSessionSignal, cookieSiteReview, filterCookieSites, sortCookieSites, type CookieSiteFilter, type CookieSiteSort } from "./cookie-review";
+import { cookieSessionSignal, cookieSiteReview, filterCookieSites, groupCookieSites, sortCookieSites, type CookieSessionSignalLevel, type CookieSiteSort } from "./cookie-review";
 
 const browserIcons: Record<string, SimpleIcon> = {
 	brave: siBrave,
@@ -109,12 +109,12 @@ function readableCookieDate(value?: string) {
 	return new Intl.DateTimeFormat(undefined, { year: "numeric", month: "short", day: "numeric" }).format(parsed);
 }
 
-function CookieSiteRow({ site }: { site: BrowserCookieSite }) {
+function CookieSiteRow({ site, showSessionSignal = false }: { site: BrowserCookieSite; showSessionSignal?: boolean }) {
 	const review = cookieSiteReview(site);
 	const sessionSignal = cookieSessionSignal(site);
 	const reviewTone: Tone = review.state === "dormant" ? "attention" : review.state === "recent" ? "configured" : "unknown";
 	return <li className="browser-cookie-site">
-		<div className="browser-cookie-site-heading"><div><strong>{site.domain}</strong><small>Last cookie access {readableCookieDate(site.lastAccessedAt)}</small></div><div className="browser-cookie-signals"><StatusChip label={sessionSignal.label} tone={sessionSignal.level === "limited" ? "unknown" : "configured"} /><StatusChip label={review.label} tone={reviewTone} /></div></div>
+		<div className="browser-cookie-site-heading"><div><strong>{site.domain}</strong><small>Last cookie access {readableCookieDate(site.lastAccessedAt)}</small></div><div className="browser-cookie-signals">{showSessionSignal && <StatusChip label={sessionSignal.label} tone={sessionSignal.level === "limited" ? "unknown" : "configured"} />}<StatusChip label={review.label} tone={reviewTone} /></div></div>
 		<div className="browser-cookie-counts" aria-label={`${site.domain} cookie metadata`}>
 			<span><strong>{site.cookieCount}</strong> total</span>
 			<span><strong>{site.sessionCookieCount}</strong> session-scoped</span>
@@ -127,30 +127,37 @@ function CookieSiteRow({ site }: { site: BrowserCookieSite }) {
 	</li>;
 }
 
+const cookieGroupCopy: Record<CookieSessionSignalLevel, { title: string; description: string }> = {
+	stronger: { title: "Likely sign-in related", description: "Session-scoped, Secure, and HTTP-only cookies are all present. This is the strongest local hint HAVEN can derive, not confirmation that you are signed in." },
+	possible: { title: "May include sign-in state", description: "Secure and HTTP-only cookies are present, but no session-scoped cookie was observed. These may support a login or ordinary site operation." },
+	limited: { title: "Other site data", description: "No strong aggregate session pattern was observed. These may be preferences, analytics, ordinary site operation, or a login represented elsewhere." },
+};
+
 function CookieProfileReview({ profile }: { profile: BrowserProfile }) {
 	const [query, setQuery] = useState("");
-	const [filter, setFilter] = useState<CookieSiteFilter>("all");
-	const [sort, setSort] = useState<CookieSiteSort>("session-signals");
+	const [view, setView] = useState<"session-groups" | "cleanup">("session-groups");
+	const [sort, setSort] = useState<CookieSiteSort>("recent");
 	const [showAll, setShowAll] = useState(false);
 	const reviewCount = useMemo(() => profile.sites.filter((site) => cookieSiteReview(site).candidate).length, [profile.sites]);
-	const filtered = useMemo(() => {
-		const matching = filterCookieSites(profile.sites, filter).filter((site) => site.domain.includes(query.trim().toLowerCase()));
-		return sortCookieSites(matching, sort);
-	}, [profile.sites, query, filter, sort]);
-	const visible = showAll || query.trim() || filter !== "all" ? filtered : filtered.slice(0, 20);
+	const matching = useMemo(() => profile.sites.filter((site) => site.domain.includes(query.trim().toLowerCase())), [profile.sites, query]);
+	const groups = useMemo(() => groupCookieSites(matching).map((group) => ({ ...group, sites: sortCookieSites(group.sites, sort) })), [matching, sort]);
+	const cleanupSites = useMemo(() => sortCookieSites(filterCookieSites(matching, "cleanup"), "cleanup"), [matching]);
 	const unavailable = profile.cookieStatus === "unavailable";
 	return <details className="browser-cookie-profile" open>
 		<summary><div><strong>{profile.name}</strong><small>{unavailable ? "Cookie metadata unavailable this run" : `${profile.cookieCount} cookie${profile.cookieCount === 1 ? "" : "s"} across ${profile.sites.length} site${profile.sites.length === 1 ? "" : "s"}`}</small></div><StatusChip label={unavailable ? "Unavailable this run" : reviewCount > 0 ? `${reviewCount} to review` : "No old site data"} tone={unavailable ? "unknown" : reviewCount > 0 ? "attention" : "healthy"} /></summary>
 		{unavailable ? <p className="browser-empty">Chrome may be holding this active profile&apos;s cookie database exclusively. This is a collection limitation—not a security problem. HAVEN will retry on the next report; closing Chrome before a report lets the agent try while every profile is idle.</p> : <>
-			<p className="browser-session-legend"><strong>Session signal is a ranking hint.</strong> Stronger means this domain has session-scoped cookies plus both Secure and HTTP-only cookies; possible means both protections are present. Neither proves that you are currently signed in.</p>
+			<div className="browser-cookie-view-switch" role="group" aria-label={`${profile.name} site-data view`}><button type="button" aria-pressed={view === "session-groups"} onClick={() => { setView("session-groups"); setShowAll(false); }}>Session groups</button><button type="button" aria-pressed={view === "cleanup"} onClick={() => { setView("cleanup"); setShowAll(false); }}>Cleanup review <span>{reviewCount}</span></button></div>
 			<div className="browser-cookie-controls">
-				<label><span>Find a site</span><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="facebook.com" /></label>
-				<label><span>Show</span><select value={filter} onChange={(event) => { setFilter(event.target.value as CookieSiteFilter); setShowAll(false); }}><option value="all">All sites</option><option value="session-signals">Session signals</option><option value="cleanup">Cleanup candidates</option></select></label>
-				<label><span>Sort by</span><select value={sort} onChange={(event) => setSort(event.target.value as CookieSiteSort)}><option value="session-signals">Session relevance</option><option value="cleanup">Cleanup priority</option><option value="recent">Most recently accessed</option><option value="cookie-count">Most cookies</option><option value="domain">Domain A–Z</option></select></label>
+				<label><span>Search domains <small>optional</small></span><input value={query} onChange={(event) => { setQuery(event.target.value); setShowAll(false); }} placeholder="Leave blank to see every group" /></label>
+				{view === "session-groups" && <label><span>Sort within groups</span><select value={sort} onChange={(event) => setSort(event.target.value as CookieSiteSort)}><option value="recent">Most recently accessed</option><option value="cookie-count">Most cookies</option><option value="domain">Domain A–Z</option></select></label>}
 			</div>
 			{profile.cookieStatus === "partial" && <p className="browser-coverage-note"><HelpIcon size={17} /><span>This profile is a bounded partial view. HAVEN reports the verified rows and never copies the cookie database.</span></p>}
-			{visible.length === 0 ? <p className="browser-empty">No cookie sites match this view.</p> : <ul className="browser-cookie-site-list">{visible.map((site) => <CookieSiteRow site={site} key={site.domain} />)}</ul>}
-			{!showAll && !query.trim() && filter === "all" && filtered.length > visible.length && <button type="button" className="browser-cookie-show-all" onClick={() => setShowAll(true)}>Show all {filtered.length} sites</button>}
+			{view === "session-groups" ? <div className="browser-cookie-groups">{groups.map((group) => {
+				const copy = cookieGroupCopy[group.level];
+				const visible = showAll || query.trim() ? group.sites : group.sites.slice(0, 12);
+				return <section className={`browser-cookie-group ${group.level}`} key={group.level} aria-labelledby={`${profile.fingerprint}-${group.level}`}><div className="browser-cookie-group-heading"><div><h4 id={`${profile.fingerprint}-${group.level}`}>{copy.title}</h4><p>{copy.description}</p></div><StatusChip label={`${group.sites.length} site${group.sites.length === 1 ? "" : "s"}`} tone={group.level === "limited" ? "unknown" : "configured"} /></div>{visible.length === 0 ? <p className="browser-empty">No sites in this group.</p> : <ul className="browser-cookie-site-list">{visible.map((site) => <CookieSiteRow site={site} key={site.domain} />)}</ul>}</section>;
+			})}</div> : <section className="browser-cookie-group cleanup" aria-labelledby={`${profile.fingerprint}-cleanup`}><div className="browser-cookie-group-heading"><div><h4 id={`${profile.fingerprint}-cleanup`}>Old or undated site data</h4><p>Sites not accessed for at least 90 days, or whose access date could not be verified. Review before clearing anything you still recognize or use.</p></div><StatusChip label={`${cleanupSites.length} candidate${cleanupSites.length === 1 ? "" : "s"}`} tone={cleanupSites.length > 0 ? "attention" : "healthy"} /></div>{cleanupSites.length === 0 ? <p className="browser-empty">No cleanup candidates in this profile.</p> : <ul className="browser-cookie-site-list">{(showAll || query.trim() ? cleanupSites : cleanupSites.slice(0, 20)).map((site) => <CookieSiteRow site={site} showSessionSignal key={site.domain} />)}</ul>}</section>}
+			{!showAll && !query.trim() && ((view === "session-groups" && groups.some((group) => group.sites.length > 12)) || (view === "cleanup" && cleanupSites.length > 20)) && <button type="button" className="browser-cookie-show-all" onClick={() => setShowAll(true)}>Show every site in this view</button>}
 		</>}
 	</details>;
 }

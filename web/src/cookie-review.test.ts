@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { cookieSessionSignal, cookieSiteReview, filterCookieSites, sortCookieSites } from "./cookie-review";
+import { cookieSessionSignal, cookieSiteReview, filterCookieSites, groupCookieSites, sortCookieSites } from "./cookie-review";
 import type { BrowserCookieSite } from "./types";
 
 function site(domain: string, overrides: Partial<BrowserCookieSite> = {}): BrowserCookieSite {
@@ -40,6 +40,19 @@ describe("cookie review evidence", () => {
 		expect(filterCookieSites(original, "session-signals", now).map((entry) => entry.domain)).toEqual(["possible.example", "strong.example"]);
 		expect(sortCookieSites(original, "session-signals", now).map((entry) => entry.domain)).toEqual(["strong.example", "possible.example", "limited.example"]);
 		expect(original).toEqual(snapshot);
+	});
+
+	it("automatically groups every site without requiring a search query", () => {
+		const groups = groupCookieSites([
+			site("limited.example"),
+			site("strong.example", { sessionCookieCount: 1, secureCookieCount: 1, httpOnlyCookieCount: 1 }),
+			site("possible.example", { secureCookieCount: 1, httpOnlyCookieCount: 1 }),
+		]);
+		expect(groups.map((group) => [group.level, group.sites.map((entry) => entry.domain)])).toEqual([
+			["stronger", ["strong.example"]],
+			["possible", ["possible.example"]],
+			["limited", ["limited.example"]],
+		]);
 	});
 
 	it("puts unknown and oldest evidence first for cleanup review", () => {
