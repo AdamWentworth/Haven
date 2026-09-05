@@ -6,7 +6,7 @@ import userEvent from "@testing-library/user-event";
 import axe from "axe-core";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { BrowserSecurityPanel } from "./browser-security";
-import type { BrowserSecurityStatus } from "./types";
+import type { BrowserSecurityStatus, BrowserSiteReview } from "./types";
 
 afterEach(() => {
 	cleanup();
@@ -103,10 +103,32 @@ describe("browser security panel", () => {
 		expect(screen.getByText("recent.example.com")).toBeInTheDocument();
 		expect(screen.getByRole("heading", { name: "Likely sign-in related" })).toBeInTheDocument();
 		expect(screen.getByRole("heading", { name: "May include sign-in state" })).toBeInTheDocument();
-		await user.click(screen.getAllByRole("button", { name: /Cleanup review/ })[0]);
+		await user.click(screen.getAllByRole("button", { name: /Cleanup queue/ })[0]);
 		expect(screen.getByText("facebook.com")).toBeInTheDocument();
 		expect(screen.queryByText("recent.example.com")).not.toBeInTheDocument();
-		expect(screen.getByRole("heading", { name: "Old or undated site data" })).toBeInTheDocument();
+		expect(screen.getByRole("heading", { name: "Ready to clear" })).toBeInTheDocument();
+		expect(screen.getByRole("heading", { name: "Suggested review" })).toBeInTheDocument();
 		expect(screen.getByLabelText("Search domains optional")).toHaveValue("");
+	});
+
+	it("records an explicit owner classification and keeps protected sites out of cleanup", async () => {
+		vi.spyOn(Date, "now").mockReturnValue(new Date("2026-09-04T00:01:00Z").getTime());
+		const user = userEvent.setup();
+		const classify = vi.fn();
+		const reset = vi.fn();
+		const protectedReview: BrowserSiteReview = { deviceId: "device-one", browserId: "chrome", profileFingerprint: "abcdef0123456789abcdef01", domain: "facebook.com", state: "signed-in-keep", reviewedAt: "2026-09-04T00:00:00Z" };
+		const { rerender } = render(<BrowserSecurityPanel status={observed} deviceId="device-one" editable classifySite={classify} />);
+		await user.selectOptions(screen.getByRole("combobox", { name: "Classification for facebook.com" }), "signed-in-keep");
+		expect(classify).toHaveBeenCalledWith({ deviceId: "device-one", browserId: "chrome", profileFingerprint: "abcdef0123456789abcdef01", domain: "facebook.com", state: "signed-in-keep" });
+
+		rerender(<BrowserSecurityPanel status={observed} deviceId="device-one" reviews={[protectedReview]} editable resetSite={reset} />);
+		expect(screen.getAllByText("Signed in — keep").length).toBeGreaterThan(0);
+		await user.selectOptions(screen.getByRole("combobox", { name: "Classification for facebook.com" }), "");
+		expect(reset).toHaveBeenCalledWith({ deviceId: "device-one", browserId: "chrome", profileFingerprint: "abcdef0123456789abcdef01", domain: "facebook.com" });
+
+		rerender(<BrowserSecurityPanel status={observed} deviceId="device-one" reviews={[protectedReview]} editable />);
+		await user.click(screen.getByRole("button", { name: /Cleanup queue 0/ }));
+		expect(screen.queryByText("facebook.com")).not.toBeInTheDocument();
+		expect(screen.getByText(/1 excluded/)).toBeInTheDocument();
 	});
 });

@@ -1,4 +1,4 @@
-import type { BrowserCookieSite } from "./types";
+import type { BrowserCookieSite, BrowserSiteReviewState } from "./types";
 
 export type CookieSiteFilter = "all" | "session-signals" | "cleanup";
 export type CookieSiteSort = "session-signals" | "cleanup" | "recent" | "cookie-count" | "domain";
@@ -19,6 +19,11 @@ export interface CookieAgeReview {
 export interface CookieSiteGroup {
 	level: CookieSessionSignalLevel;
 	sites: BrowserCookieSite[];
+}
+
+export interface CookieCleanupQueue {
+	ready: BrowserCookieSite[];
+	suggested: BrowserCookieSite[];
 }
 
 const dormantCookieAge = 90 * 24 * 60 * 60 * 1000;
@@ -58,6 +63,18 @@ export function groupCookieSites(sites: BrowserCookieSite[]): CookieSiteGroup[] 
 		level,
 		sites: sites.filter((site) => cookieSessionSignal(site).level === level),
 	}));
+}
+
+export function buildCookieCleanupQueue(sites: BrowserCookieSite[], reviewStates: Readonly<Record<string, BrowserSiteReviewState | undefined>>, now = Date.now()): CookieCleanupQueue {
+	const ready: BrowserCookieSite[] = [];
+	const suggested: BrowserCookieSite[] = [];
+	for (const site of sites) {
+		const state = reviewStates[site.domain];
+		if (state === "signed-in-keep" || state === "review-later") continue;
+		if (state === "clear-candidate") ready.push(site);
+		else if (cookieSiteReview(site, now).candidate) suggested.push(site);
+	}
+	return { ready: sortCookieSites(ready, "cleanup", now), suggested: sortCookieSites(suggested, "cleanup", now) };
 }
 
 export function sortCookieSites(sites: BrowserCookieSite[], sort: CookieSiteSort, now = Date.now()) {

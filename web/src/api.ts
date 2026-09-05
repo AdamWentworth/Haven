@@ -1,4 +1,4 @@
-import type { AccountAccessGrant, AccountProfile, AccountProfileInput, AuditEvent, AuthStatus, DeviceDetail, DeviceRecord, ExpectedService, ExpectedServiceInput, FindingReview, FindingReviewState, HavenAlert, ManagedApplianceStatus, ObservedListener, PasskeyInfo, PushDestination, PushNotificationStatus, RuntimeStatus, SecurityAction, SecurityActionKind, SecurityEvent, SecuritySnapshot } from "./types";
+import type { AccountAccessGrant, AccountProfile, AccountProfileInput, AuditEvent, AuthStatus, BrowserSiteReview, BrowserSiteReviewInput, BrowserSiteReviewKey, DeviceDetail, DeviceRecord, ExpectedService, ExpectedServiceInput, FindingReview, FindingReviewState, HavenAlert, ManagedApplianceStatus, ObservedListener, PasskeyInfo, PushDestination, PushNotificationStatus, RuntimeStatus, SecurityAction, SecurityActionKind, SecurityEvent, SecuritySnapshot } from "./types";
 import type { SerializedPushSubscription } from "./push";
 
 export class HavenAPIError extends Error {
@@ -80,6 +80,15 @@ export const lockAccountNotebook = (grant: string) => postJSON<void>("/api/accou
 
 export const getDevice = (deviceId: string, signal?: AbortSignal) =>
   getJSON<DeviceDetail>(`/api/devices/${encodeURIComponent(deviceId)}`, signal);
+
+export const listBrowserSiteReviews = (deviceId: string, signal?: AbortSignal) => {
+	const query = new URLSearchParams({ deviceId });
+	return getJSON<BrowserSiteReview[]>(`/api/browser-site-reviews?${query.toString()}`, signal);
+};
+
+export const saveBrowserSiteReview = (review: BrowserSiteReviewInput) => postJSON<BrowserSiteReview>("/api/browser-site-reviews", review);
+
+export const removeBrowserSiteReview = (review: BrowserSiteReviewKey) => postJSON<void>("/api/browser-site-reviews/remove", review);
 
 export const getRuntimeStatus = (signal?: AbortSignal) => getJSON<RuntimeStatus>("/api/runtime", signal);
 

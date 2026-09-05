@@ -46,13 +46,14 @@ After the proxy generates its internal authority, install only its public root c
 
 ## Persistent data and recovery
 
-SQLite, the WebAuthn credential-encryption key, the account-notebook encryption key, the Web Push subscription-encryption key, the VAPID identity, and the agent PKI live together in the configured data directory. Caddy's private authority lives in its separate data directory. All are outside the repository.
+SQLite, the WebAuthn credential-encryption key, the account-notebook encryption key, the browser-site-review encryption key, the Web Push subscription-encryption key, the VAPID identity, and the agent PKI live together in the configured data directory. Caddy's private authority lives in its separate data directory. All are outside the repository.
 
 The daily backup service uses HAVEN's SQLite backup command and then archives:
 
 - the consistent SQLite backup;
 - the WebAuthn credential-encryption key;
 - the account-notebook encryption key;
+- the browser-site-review encryption key;
 - the Web Push subscription-encryption key and VAPID identity;
 - the hub/agent private authority;
 - the dashboard private authority required to preserve existing client trust.
@@ -68,6 +69,8 @@ Every current report carries the reporter's public release, immutable source rev
 GitHub-hosted CI attaches a checksummed agent bundle to each verified commit for 30 days. The public Windows installer builds and stamps the current checkout, repairs an existing task in place, and preserves enrollment. Its status companion is read-only; its high-confirmation uninstaller preserves identity unless identity removal is separately requested. The Linux lifecycle script provides the corresponding source-based user-systemd workflow. Private HomeOps may instead extract the revision-matched Linux binary from the approved hub image, but it must retain the same systemd sandbox and verify the embedded revision before activation.
 
 Deploy the 0.20 hub before updating an endpoint binary. The newer hub accepts older reports without Chrome profile metadata, while an older strict decoder rejects the new profile field. No database migration is required because Chrome profile metadata exists only in the latest in-memory observation and is removed before historical persistence. After the hub readiness check succeeds, update reporters one endpoint at a time and require a current report before proceeding to the next device.
+
+Milestone 0.21 does not change the agent observation schema. The hub applies one additive SQLite migration for encrypted browser-site classifications and creates a dedicated `browser-site-reviews.key` in its private state directory. Back up that key with the database: losing it makes the classifications unreadable. Existing agents remain protocol-compatible, although updating them keeps fleet release/revision evidence aligned.
 
 Each updated agent creates `browser-extension-baseline.json` inside its existing private state directory after the hub accepts its first 0.19 report. That first baseline is intentionally quiet. Preserve this file with the agent identity when repairing or moving an installation; deleting it safely causes another silent baseline rather than a flood of historical extension alerts. The file contains friendly extension names and coarse capability state, so protect and back it up with the same owner-only permissions as the rest of the endpoint identity directory.
 

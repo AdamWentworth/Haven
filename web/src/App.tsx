@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { HavenAPIError, addPasskey, collectSnapshot, getAuthStatus, getDevice, getLatestSnapshot, getNotificationStatus, getRuntimeStatus, listAccountProfiles, listAlerts, listAuditEvents, listDevices, listEvents, listExpectedServices, listFindingReviews, listManagedAppliances, listObservedListeners, listPasskeys, listSecurityActions, lockAccountNotebook, loginWithPasskey, logout, registerPasskey, registerPushDestination, removeAccountProfile, removeExpectedService, removePasskey, removePushDestination, requestSecurityAction, saveAccountProfile, saveExpectedService, saveExpectedServices, saveFindingReview, touchAccountNotebook, unlockAccountNotebook } from "./api";
+import { HavenAPIError, addPasskey, collectSnapshot, getAuthStatus, getDevice, getLatestSnapshot, getNotificationStatus, getRuntimeStatus, listAccountProfiles, listAlerts, listAuditEvents, listBrowserSiteReviews, listDevices, listEvents, listExpectedServices, listFindingReviews, listManagedAppliances, listObservedListeners, listPasskeys, listSecurityActions, lockAccountNotebook, loginWithPasskey, logout, registerPasskey, registerPushDestination, removeAccountProfile, removeBrowserSiteReview, removeExpectedService, removePasskey, removePushDestination, requestSecurityAction, saveAccountProfile, saveBrowserSiteReview, saveExpectedService, saveExpectedServices, saveFindingReview, touchAccountNotebook, unlockAccountNotebook } from "./api";
 import { AccountNotebook } from "./account-notebook";
 import { suggestedBaseline } from "./baseline";
 import { AuthenticationGate } from "./authentication-gate";
@@ -24,6 +24,9 @@ import type {
   ActionCapability,
   AuthStatus,
   BindScope,
+	BrowserSiteReview,
+	BrowserSiteReviewInput,
+	BrowserSiteReviewKey,
   ContainerWorkload,
   DefenderStatus,
   DeviceRecord,
@@ -791,6 +794,7 @@ interface ApplicationProps {
 	enableAlerts: (label?: string) => void;
 	disableAlerts: () => void;
 	reviews: FindingReview[];
+	browserSiteReviews: BrowserSiteReview[];
 	expectedServices: ExpectedService[];
 	listenerObservations: ObservedListener[];
 	audit: AuditEvent[];
@@ -801,6 +805,8 @@ interface ApplicationProps {
 	desktopInstallStatus: DesktopInstallStatus;
 	installDesktopApp: () => Promise<void>;
 	reviewFinding: (finding: SecurityFinding, state: FindingReviewState) => void;
+	classifyBrowserSite: (review: BrowserSiteReviewInput) => void;
+	resetBrowserSite: (review: BrowserSiteReviewKey) => void;
 	saveServiceExpectation: (service: ExpectedServiceInput) => void;
 	saveServiceExpectations: (services: ExpectedServiceInput[]) => void;
 	removeServiceExpectation: (service: ExpectedService) => void;
@@ -817,7 +823,7 @@ interface ApplicationProps {
 	navigate: (route: AppRoute) => void;
 }
 
-function Application({ snapshot, devices, networkDevices, appliances, events, networkEvents, alerts, runtime, notificationStatus, selectedDevice, selectDevice, refresh, refreshing, error, demoMode, alertsEnabled, alertsSupported, enableAlerts, disableAlerts, reviews, expectedServices, listenerObservations, audit, actions, passkeys, accountProfiles, accountUnlocked, desktopInstallStatus, installDesktopApp, reviewFinding, saveServiceExpectation, saveServiceExpectations, removeServiceExpectation, runAction, addOwnerPasskey, removeOwnerPasskey, saveAccount, removeAccount, unlockAccounts, lockAccounts, actionBusy, signOut, route, navigate }: ApplicationProps) {
+function Application({ snapshot, devices, networkDevices, appliances, events, networkEvents, alerts, runtime, notificationStatus, selectedDevice, selectDevice, refresh, refreshing, error, demoMode, alertsEnabled, alertsSupported, enableAlerts, disableAlerts, reviews, browserSiteReviews, expectedServices, listenerObservations, audit, actions, passkeys, accountProfiles, accountUnlocked, desktopInstallStatus, installDesktopApp, reviewFinding, classifyBrowserSite, resetBrowserSite, saveServiceExpectation, saveServiceExpectations, removeServiceExpectation, runAction, addOwnerPasskey, removeOwnerPasskey, saveAccount, removeAccount, unlockAccounts, lockAccounts, actionBusy, signOut, route, navigate }: ApplicationProps) {
   const isLinux = snapshot.linuxBaseline !== null || /linux|ubuntu/i.test(snapshot.device.operatingSystem);
   const defenderHealthy = snapshot.defender?.antivirusEnabled === true
     && snapshot.defender.realTimeProtectionEnabled === true
@@ -883,7 +889,7 @@ function Application({ snapshot, devices, networkDevices, appliances, events, ne
 			{deviceSummary}
 			{deviceSection === "overview" && <>{selectedDevice && <AgentEvidencePanel device={selectedDevice} runtime={runtime} />}<FindingsPanel findings={snapshot.findings || []} checks={snapshot.baselineChecks || []} reviews={reviews} review={reviewFinding} /></>}
 			{deviceSection === "posture" && <>{(snapshot.baselineChecks || []).length > 0 && <BaselinePanel checks={snapshot.baselineChecks || []} collectedAt={snapshot.collectedAt} platform={isLinux ? "Linux" : "Windows"} />}{snapshot.notices.length > 0 && <section className="panel notices-panel" aria-labelledby="notices-title"><PanelHeading eyebrow="COLLECTION NOTES" title="Some signals could not be verified" id="notices-title" icon={<AlertIcon />} accent="amber">A collection limitation is not automatically a security problem</PanelHeading><ul className="notices-list">{snapshot.notices.map((notice, index) => <li className="notice" key={`${notice.source}-${index}`}><strong>{notice.source}: </strong>{notice.message}</li>)}</ul></section>}{isLinux && snapshot.linuxBaseline ? <LinuxPanel baseline={snapshot.linuxBaseline} /> : <DefenderPanel defender={snapshot.defender} />}<FirewallPanel profiles={snapshot.firewallProfiles} isLinux={isLinux} /></>}
-			{deviceSection === "browsers" && <BrowserSecurityPanel status={snapshot.browserSecurity ?? null} />}
+			{deviceSection === "browsers" && <BrowserSecurityPanel status={snapshot.browserSecurity ?? null} deviceId={selectedDeviceId} reviews={browserSiteReviews} editable={!demoMode} busy={actionBusy} classifySite={classifyBrowserSite} resetSite={resetBrowserSite} />}
 			{deviceSection === "services" && <>{isLinux && <WorkloadsPanel inventory={snapshot.linuxBaseline?.workloads ?? null} />}<ConnectionsPanel deviceId={selectedDeviceId} operatingSystem={snapshot.device.operatingSystem} connections={snapshot.connections} workloads={workloadInventory} expectedServices={expectedServices} observations={listenerObservations} saveExpectation={saveServiceExpectation} saveExpectations={saveServiceExpectations} removeExpectation={removeServiceExpectation} busy={actionBusy} /></>}
 			{deviceSection === "history" && <ActivityPanel events={events} alerts={alerts} />}
 		</>;
@@ -922,6 +928,7 @@ export function App() {
   const [events, setEvents] = useState<SecurityEvent[]>([]);
   const [currentAlerts, setCurrentAlerts] = useState<HavenAlert[]>([]);
   const [reviews, setReviews] = useState<FindingReview[]>([]);
+	const [browserSiteReviews, setBrowserSiteReviews] = useState<BrowserSiteReview[]>([]);
 	const [expectedServices, setExpectedServices] = useState<ExpectedService[]>([]);
 	const [listenerObservations, setListenerObservations] = useState<ObservedListener[]>([]);
   const [audit, setAudit] = useState<AuditEvent[]>([]);
@@ -1016,8 +1023,9 @@ export function App() {
   }, []);
 
   const loadControls = useCallback(async (deviceId: string, signal?: AbortSignal) => {
-	const [findingReviews, serviceExpectations, observedListeners, recentAudit, recentActions, ownerPasskeys] = await Promise.all([
+	const [findingReviews, siteReviews, serviceExpectations, observedListeners, recentAudit, recentActions, ownerPasskeys] = await Promise.all([
       deviceId ? listFindingReviews(deviceId, signal) : Promise.resolve([]),
+	  deviceId ? listBrowserSiteReviews(deviceId, signal) : Promise.resolve([]),
 	  deviceId ? listExpectedServices(deviceId, signal) : Promise.resolve([]),
 	  deviceId ? listObservedListeners(deviceId, signal) : Promise.resolve([]),
       listAuditEvents(signal),
@@ -1025,6 +1033,7 @@ export function App() {
       listPasskeys(signal),
     ]);
     setReviews(findingReviews);
+	setBrowserSiteReviews(siteReviews);
 	setExpectedServices(serviceExpectations);
 	setListenerObservations(observedListeners);
     setAudit(recentAudit);
@@ -1094,6 +1103,34 @@ export function App() {
       setError(reason instanceof Error ? reason.message : "The finding review could not be saved.");
     }
   }, [loadControls, selectedId]);
+
+	const classifyBrowserSite = useCallback(async (review: BrowserSiteReviewInput) => {
+		setActionBusy(true);
+		try {
+			await saveBrowserSiteReview(review);
+			setBrowserSiteReviews(await listBrowserSiteReviews(review.deviceId));
+			setAudit(await listAuditEvents());
+			setError(null);
+		} catch (reason) {
+			setError(reason instanceof Error ? reason.message : "The browser site classification could not be saved.");
+		} finally {
+			setActionBusy(false);
+		}
+	}, []);
+
+	const resetBrowserSite = useCallback(async (review: BrowserSiteReviewKey) => {
+		setActionBusy(true);
+		try {
+			await removeBrowserSiteReview(review);
+			setBrowserSiteReviews(await listBrowserSiteReviews(review.deviceId));
+			setAudit(await listAuditEvents());
+			setError(null);
+		} catch (reason) {
+			setError(reason instanceof Error ? reason.message : "The browser site classification could not be reset.");
+		} finally {
+			setActionBusy(false);
+		}
+	}, []);
 
 	const saveServiceExpectation = useCallback(async (service: ExpectedServiceInput) => {
 		setActionBusy(true);
@@ -1240,6 +1277,7 @@ export function App() {
       setEvents([]);
       setCurrentAlerts([]);
       setReviews([]);
+	  setBrowserSiteReviews([]);
 	  setExpectedServices([]);
 	  setListenerObservations([]);
       setAudit([]);
@@ -1462,5 +1500,5 @@ export function App() {
 
   const selectedDevice = devices.find((device) => device.id === selectedId) || null;
   const selectedEvents = selectedId ? events.filter((event) => event.deviceId === selectedId) : events;
-	return <Application snapshot={snapshot} devices={devices} networkDevices={networkDevices} appliances={appliances} events={selectedEvents} networkEvents={events} alerts={currentAlerts} runtime={runtime} notificationStatus={notificationStatus} selectedDevice={selectedDevice} selectDevice={(id) => void selectDevice(id)} refresh={() => void refreshView()} refreshing={refreshing} error={error} demoMode={demoMode} alertsEnabled={alertsEnabled} alertsSupported={alertsSupported} enableAlerts={(label) => void enableAlerts(label)} disableAlerts={() => void disableAlerts()} reviews={reviews} expectedServices={expectedServices} listenerObservations={listenerObservations} audit={audit} actions={actions} passkeys={passkeys} accountProfiles={accountProfiles} accountUnlocked={demoMode || accountAccess !== null} desktopInstallStatus={desktopInstall.status} installDesktopApp={async () => { try { await desktopInstall.install(); setError(null); } catch (reason) { setError(reason instanceof Error ? reason.message : "HAVEN could not open the browser installation prompt."); } }} reviewFinding={(finding, state) => void reviewFinding(finding, state)} saveServiceExpectation={(service) => void saveServiceExpectation(service)} saveServiceExpectations={(services) => void saveServiceBaseline(services)} removeServiceExpectation={(service) => void removeServiceExpectation(service)} runAction={(kind) => void runAction(kind)} addOwnerPasskey={() => void addOwnerPasskey()} removeOwnerPasskey={(passkey) => void removeOwnerPasskey(passkey)} saveAccount={saveAccount} removeAccount={(profile) => void removeAccount(profile)} unlockAccounts={() => void unlockAccounts()} lockAccounts={() => void lockAccounts()} actionBusy={actionBusy} signOut={() => void signOut()} route={route} navigate={navigate} />;
+	return <Application snapshot={snapshot} devices={devices} networkDevices={networkDevices} appliances={appliances} events={selectedEvents} networkEvents={events} alerts={currentAlerts} runtime={runtime} notificationStatus={notificationStatus} selectedDevice={selectedDevice} selectDevice={(id) => void selectDevice(id)} refresh={() => void refreshView()} refreshing={refreshing} error={error} demoMode={demoMode} alertsEnabled={alertsEnabled} alertsSupported={alertsSupported} enableAlerts={(label) => void enableAlerts(label)} disableAlerts={() => void disableAlerts()} reviews={reviews} browserSiteReviews={browserSiteReviews} expectedServices={expectedServices} listenerObservations={listenerObservations} audit={audit} actions={actions} passkeys={passkeys} accountProfiles={accountProfiles} accountUnlocked={demoMode || accountAccess !== null} desktopInstallStatus={desktopInstall.status} installDesktopApp={async () => { try { await desktopInstall.install(); setError(null); } catch (reason) { setError(reason instanceof Error ? reason.message : "HAVEN could not open the browser installation prompt."); } }} reviewFinding={(finding, state) => void reviewFinding(finding, state)} classifyBrowserSite={(review) => void classifyBrowserSite(review)} resetBrowserSite={(review) => void resetBrowserSite(review)} saveServiceExpectation={(service) => void saveServiceExpectation(service)} saveServiceExpectations={(services) => void saveServiceBaseline(services)} removeServiceExpectation={(service) => void removeServiceExpectation(service)} runAction={(kind) => void runAction(kind)} addOwnerPasskey={() => void addOwnerPasskey()} removeOwnerPasskey={(passkey) => void removeOwnerPasskey(passkey)} saveAccount={saveAccount} removeAccount={(profile) => void removeAccount(profile)} unlockAccounts={() => void unlockAccounts()} lockAccounts={() => void lockAccounts()} actionBusy={actionBusy} signOut={() => void signOut()} route={route} navigate={navigate} />;
 }

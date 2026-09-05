@@ -19,6 +19,7 @@ import (
 	"github.com/AdamWentworth/haven/internal/alert"
 	"github.com/AdamWentworth/haven/internal/appliance"
 	"github.com/AdamWentworth/haven/internal/authn"
+	"github.com/AdamWentworth/haven/internal/browserreview"
 	"github.com/AdamWentworth/haven/internal/buildinfo"
 	"github.com/AdamWentworth/haven/internal/model"
 	"github.com/AdamWentworth/haven/internal/notification"
@@ -74,7 +75,12 @@ func testServer(t *testing.T) (*Server, *storage.Store) {
 		store.Close()
 		t.Fatal(err)
 	}
-	return NewServer(staticCollector{snapshot: snapshot}, store, logger, fs.FS(webFiles), WithAlertProjector(alert.NewProjector(store)), WithAccountNotebook(accounts)), store
+	browserReviews, err := browserreview.New(store, filepath.Join(directory, "browser-site-reviews.key"))
+	if err != nil {
+		store.Close()
+		t.Fatal(err)
+	}
+	return NewServer(staticCollector{snapshot: snapshot}, store, logger, fs.FS(webFiles), WithAlertProjector(alert.NewProjector(store)), WithAccountNotebook(accounts), WithBrowserSiteReviews(browserReviews)), store
 }
 
 func TestInstallableAssetsKeepExplicitSecurityBoundaries(t *testing.T) {

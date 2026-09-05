@@ -10,7 +10,7 @@ HAVEN is intended to be safe to publish and feature in a public portfolio. Sourc
 - Account-notebook exports, provider/profile identifiers, provider-session review results, private notes, or the account-notebook encryption key
 - Real hostnames, usernames, email addresses, device IDs, MAC addresses, or household IP addresses
 - Packet captures, event-log exports, crash dumps, databases, snapshots, or application logs
-- Real browser-profile labels or exports, cookie-domain inventories, cookie names or values, extension IDs, real extension inventories, endpoint extension-baseline files, extension-change activity exports, Windows event exports, browsing history, or raw site-permission patterns
+- Real browser-profile labels or exports, cookie-domain inventories, browser-site classification exports or keys, cookie names or values, extension IDs, real extension inventories, endpoint extension-baseline files, extension-change activity exports, Windows event exports, browsing history, or raw site-permission patterns
 - Screenshots made while HAVEN displays live device, network, or account information
 - Local deployment files containing DNS names, mount paths, proxy configuration, or credentials
 
