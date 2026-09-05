@@ -507,19 +507,18 @@ func bindScopeLabel(scope string) string {
 
 func networkServiceLabel(protocol string, port int) string {
 	return map[string]string{
-		"TCP:22":    "SSH",
-		"TCP:53":    "DNS",
-		"UDP:53":    "DNS",
-		"UDP:67":    "DHCP",
-		"TCP:80":    "HTTP",
-		"TCP:443":   "HTTPS",
-		"TCP:445":   "SMB",
-		"TCP:3389":  "Remote Desktop",
-		"TCP:4070":  "Spotify",
-		"TCP:5228":  "push messaging",
-		"TCP:8096":  "Jellyfin",
-		"TCP:8443":  "HAVEN",
-		"UDP:51822": "WireGuard",
+		"TCP:22":   "SSH",
+		"TCP:53":   "DNS",
+		"UDP:53":   "DNS",
+		"UDP:67":   "DHCP",
+		"TCP:80":   "HTTP",
+		"TCP:443":  "HTTPS",
+		"TCP:445":  "SMB",
+		"TCP:3389": "Remote Desktop",
+		"TCP:4070": "Spotify",
+		"TCP:5228": "push messaging",
+		"TCP:8096": "Jellyfin",
+		"TCP:8443": "HTTPS (alternate)",
 	}[fmt.Sprintf("%s:%d", strings.ToUpper(protocol), port)]
 }
 

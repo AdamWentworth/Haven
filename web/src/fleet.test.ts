@@ -14,17 +14,17 @@ describe("fleet lifecycle", () => {
 	it("keeps report freshness ahead of build maintenance", () => {
 		expect(fleetPresentation(device({ status: "stale" })).state).toBe("overdue");
 		expect(fleetPresentation(device({ agent: null })).state).toBe("legacy");
-		expect(fleetPresentation(device({ agent: { ...device().agent!, compatibility: "version-drift" } })).state).toBe("version-drift");
+		expect(fleetPresentation(device({ agent: { ...device().agent!, version: "0.21.0", compatibility: "compatible" } }))).toMatchObject({ state: "compatible", tone: "healthy" });
 	});
 
 	it("summarizes reporting and maintenance without calling either a threat", () => {
 		const summary = fleetSummary([device(), device({ id: "legacy", agent: null }), device({ id: "offline", status: "stale" }), device({ id: "revoked", status: "revoked", trustState: "revoked" })]);
-		expect(summary).toEqual({ total: 3, reporting: 2, verified: 1, maintenance: 1, limited: 0 });
+		expect(summary).toEqual({ total: 3, reporting: 2, compatible: 1, maintenance: 1, limited: 0 });
 	});
 
 	it("counts synthetic inventory without inventing build verification", () => {
 		const summary = fleetSummary([device({ trustState: "synthetic", agent: null })]);
-		expect(summary).toEqual({ total: 1, reporting: 1, verified: 0, maintenance: 0, limited: 0 });
+		expect(summary).toEqual({ total: 1, reporting: 1, compatible: 0, maintenance: 0, limited: 0 });
 	});
 
 	it("formats stable capability identifiers", () => {

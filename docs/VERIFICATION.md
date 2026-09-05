@@ -72,6 +72,9 @@ HAVEN treats security statements as testable claims. A green test does not prove
 | Historical storage does not become a household activity log | Persisted observation payload | Go storage tests require live connections, workload metadata, and browser inventory to remain memory-only |
 | Scheduled Windows reporting does not allocate a console | GUI-subsystem reporter plus Windows child-process creation flags | Windows CI tests require hidden startup state and `CREATE_NO_WINDOW`, then inspects the built reporter's PE subsystem before an image may publish |
 | Public source stays portfolio-safe | Staged repository content | The PowerShell public-repository scan runs before commits and in CI |
+| Reusable presentation does not inherit one household's device, workload, or custom VPN labels | Runtime UI and alert label maps | Frontend and Go portability tests reject personal runtime names and require deployment-specific ports to remain unlabeled until owner review |
+| An installed desktop client cannot be redirected by runtime environment changes | Build-generated exact HTTPS origin module | Desktop tests reject HTTP, credentials, paths, queries, and fragments; the frontend package contract requires the generated origin to be included in the ASAR boundary |
+| Release-number drift is not confused with protocol incompatibility | Server validation of the observation schema followed by fleet presentation | Go and frontend lifecycle tests require an accepted different-version reporter to remain healthy and protocol compatible without an update review |
 
 ## Required local gates
 

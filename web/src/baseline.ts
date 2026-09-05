@@ -9,24 +9,12 @@ export interface BaselineSuggestion {
 	services: ExpectedServiceInput[];
 }
 
-const workloadLabels: Record<string, string> = {
-	frontend_nginx: "PokeGoNexus public web ingress",
-	binderledger_api: "BinderLedger API",
-	binderledger_web: "BinderLedger web",
-	haven_dns: "HAVEN private DNS",
-	haven_hub: "HAVEN agent hub",
-	haven_proxy: "HAVEN HTTPS console",
-	winrift_api: "WinRift API",
-	winrift_web: "WinRift web",
-};
-
 function readableIdentifier(value: string) {
 	return value.replace(/[_-]+/g, " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
 }
 
 function knownSystemdLabel(unit: string) {
 	if (unit === "systemd-resolved.service") return "systemd-resolved local DNS";
-	if (unit === "binderledger-localhost-proxy@8081.service") return "BinderLedger localhost proxy";
 	return "";
 }
 
@@ -46,14 +34,13 @@ export function suggestedBaseline(deviceId: string, operatingSystem: string, lis
 		["TCP:22", "OpenSSH"],
 		["UDP:546", "DHCPv6 client"],
 		["UDP:5353", "mDNS discovery"],
-		["UDP:51822", "WireGuard VPN"],
 	]);
 
 	for (const listener of unreviewed) {
 		const attributions = workloadAttribution(listener, inventory);
 		if (attributions.length === 1) {
 			const workload = attributions[0].workload;
-			const title = workloadLabels[workload.name] || readableIdentifier(workload.name);
+			const title = readableIdentifier(workload.name);
 			suggestions.push({
 				id: `workload:${listener.key}:${workload.name}`,
 				title,

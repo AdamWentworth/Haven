@@ -107,7 +107,7 @@ describe("HAVEN routed console", () => {
 		await user.click(screen.getByRole("link", { name: "Devices" }));
 		expect(await screen.findByRole("heading", { name: "Devices", level: 1 })).toBeInTheDocument();
 		expect(screen.getByRole("heading", { name: "Agent lifecycle" })).toBeInTheDocument();
-		expect(screen.getByText("exact build verified")).toBeInTheDocument();
+		expect(screen.getByText("protocol compatible")).toBeInTheDocument();
 		expect(window.location.pathname).toBe("/devices");
 
 		await user.click(screen.getByRole("button", { name: /ADAM-TEST/ }));
@@ -136,6 +136,8 @@ describe("HAVEN routed console", () => {
 		expect(document.title).toBe("Settings — HAVEN");
 		expect(screen.getByRole("heading", { name: "Install HAVEN" })).toBeInTheDocument();
 		expect(screen.getByText(/no privileged local service/i)).toBeInTheDocument();
+		expect(screen.getByRole("heading", { name: "Recovery model" })).toBeInTheDocument();
+		expect(screen.getByText("Bootstrap and re-enroll")).toBeInTheDocument();
 		expect(screen.getByRole("heading", { name: "Background alerts" })).toBeInTheDocument();
 		expect(screen.getByText("0.15.0")).toBeInTheDocument();
 		expect(window.location.pathname).toBe("/settings");

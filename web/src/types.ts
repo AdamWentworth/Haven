@@ -321,7 +321,7 @@ export interface AgentMetadata {
   installation: string;
   capabilities: string[];
   collectionNotices: number;
-  compatibility: "current" | "development" | "version-drift" | "revision-drift";
+  compatibility: "current" | "compatible" | "development" | "version-drift" | "revision-drift";
 }
 
 export interface DeviceDetail {

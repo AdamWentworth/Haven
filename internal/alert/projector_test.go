@@ -13,6 +13,15 @@ import (
 
 var fixedTime = time.Date(2026, 9, 2, 20, 0, 0, 0, time.UTC)
 
+func TestNetworkServiceLabelsRemainPortable(t *testing.T) {
+	if got := networkServiceLabel("UDP", 51822); got != "" {
+		t.Fatalf("deployment-specific VPN port received a universal label: %q", got)
+	}
+	if got := networkServiceLabel("TCP", 8443); got != "HTTPS (alternate)" {
+		t.Fatalf("expected generic alternate HTTPS label, got %q", got)
+	}
+}
+
 func observedDevice(status string, connections ...model.NetworkConnection) DeviceObservation {
 	lastSeen := fixedTime.Add(-time.Minute)
 	return DeviceObservation{

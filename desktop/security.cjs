@@ -1,7 +1,10 @@
 "use strict";
 
-const HAVEN_URL = "https://haven.home.arpa:8443/";
-const DESKTOP_VERSION = "0.22.0";
+// Generated before development, tests, or packaging. The packaged client keeps
+// this exact origin pinned at build time; runtime environment variables cannot
+// redirect an installed security dashboard.
+const { HAVEN_URL } = require("./build/origin.cjs");
+const DESKTOP_VERSION = "0.23.0";
 const expected = new URL(HAVEN_URL);
 
 function isHavenUrl(rawUrl) {

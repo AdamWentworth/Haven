@@ -8,10 +8,10 @@ export function FleetPanel({ devices, runtime }: { devices: DeviceRecord[]; runt
 	const summary = fleetSummary(devices);
 	const synthetic = devices.some((device) => device.trustState === "synthetic");
 	return <section className="panel fleet-panel" aria-labelledby="fleet-title">
-		<div className="section-heading"><div className="heading-identity"><span className="section-icon cyan"><DevicesIcon /></span><div><p className="eyebrow">FLEET OPERATIONS</p><h2 id="fleet-title">Agent lifecycle</h2></div></div><p>Build drift is maintenance evidence—not a threat finding.</p></div>
+		<div className="section-heading"><div className="heading-identity"><span className="section-icon cyan"><DevicesIcon /></span><div><p className="eyebrow">FLEET OPERATIONS</p><h2 id="fleet-title">Agent lifecycle</h2></div></div><p>Compatibility, maintenance, and security posture are separate facts.</p></div>
 		<div className="fleet-metrics">
 			<div><span className="fleet-metric-icon green"><ActivityIcon /></span><strong>{summary.reporting}/{summary.total}</strong><small>reporting now</small></div>
-			<div><span className="fleet-metric-icon blue"><CheckIcon /></span><strong>{summary.verified}/{summary.total}</strong><small>exact build verified</small></div>
+			<div><span className="fleet-metric-icon blue"><CheckIcon /></span><strong>{summary.compatible}/{summary.total}</strong><small>protocol compatible</small></div>
 			<div><span className="fleet-metric-icon amber"><ChipIcon /></span><strong>{summary.maintenance}</strong><small>maintenance reviews</small></div>
 			<div><span className="fleet-metric-icon cyan"><DevicesIcon /></span><strong>{summary.limited}</strong><small>with collection notes</small></div>
 		</div>

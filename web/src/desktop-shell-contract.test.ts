@@ -8,12 +8,15 @@ const manifest = JSON.parse(readFileSync(new URL("../../desktop/package.json", i
 };
 const shell = readFileSync(new URL("../../desktop/main.cjs", import.meta.url), "utf8");
 const security = readFileSync(new URL("../../desktop/security.cjs", import.meta.url), "utf8");
+const originConfiguration = readFileSync(new URL("../../desktop/configure-origin.cjs", import.meta.url), "utf8");
 const application = readFileSync(new URL("./App.tsx", import.meta.url), "utf8");
 const styles = readFileSync(new URL("./styles.css", import.meta.url), "utf8");
 
 describe("native desktop shell contract", () => {
 	it("loads the private HTTPS hub without granting remote Node or IPC capabilities", () => {
-		expect(security).toContain('const HAVEN_URL = "https://haven.home.arpa:8443/"');
+		expect(security).toContain('require("./build/origin.cjs")');
+		expect(originConfiguration).toContain("HAVEN_DESKTOP_ORIGIN");
+		expect(originConfiguration).toContain('candidate.protocol !== "https:"');
 		expect(shell).toContain("nodeIntegration: false");
 		expect(shell).toContain("contextIsolation: true");
 		expect(shell).toContain("sandbox: true");
@@ -22,7 +25,8 @@ describe("native desktop shell contract", () => {
 	});
 
 	it("pins dependencies and hardens the packaged desktop boundary", () => {
-		expect(manifest.version).toBe("0.22.0");
+		expect(manifest.version).toBe("0.23.0");
+		expect(manifest.build.files).toContain("build/origin.cjs");
 		expect(manifest.devDependencies.electron).toMatch(/^\d+\.\d+\.\d+$/);
 		expect(manifest.devDependencies["@electron/fuses"]).toMatch(/^\d+\.\d+\.\d+$/);
 		expect(manifest.build.asar).toBe(true);

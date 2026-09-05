@@ -1118,19 +1118,19 @@ func (store *Store) SeedSyntheticDevices(ctx context.Context, count int, now tim
 					{Protocol: "TCP", LocalAddress: "0.0.0.0", LocalPort: 22, State: "Listen", ProcessID: 992, ProcessName: "sshd", SystemdUnit: "ssh.service"},
 					{Protocol: "TCP", LocalAddress: "127.0.0.53", LocalPort: 53, State: "Listen", SystemdUnit: "systemd-resolved.service"},
 					{Protocol: "TCP", LocalAddress: "0.0.0.0", LocalPort: 8081, State: "Listen", ProcessID: 0, ProcessName: ""},
-					{Protocol: "TCP", LocalAddress: "127.0.0.1", LocalPort: 8081, State: "Listen", SystemdUnit: "binderledger-localhost-proxy@8081.service"},
+					{Protocol: "TCP", LocalAddress: "127.0.0.1", LocalPort: 8081, State: "Listen", SystemdUnit: "sample-localhost-proxy@8081.service"},
 					{Protocol: "TCP", LocalAddress: "0.0.0.0", LocalPort: 8443, State: "Listen", ProcessID: 0, ProcessName: ""},
 					{Protocol: "TCP", LocalAddress: "127.0.0.1", LocalPort: 5432, State: "Listen", ProcessID: 1440, ProcessName: "postgres"},
 					{Protocol: "TCP", LocalAddress: "127.0.0.1", LocalPort: 33509, State: "Listen", SystemdUnit: "containerd.service"},
 					{Protocol: "UDP", LocalAddress: "127.0.0.53", LocalPort: 53, State: "Bound", SystemdUnit: "systemd-resolved.service"},
 					{Protocol: "UDP", LocalAddress: "0.0.0.0", LocalPort: 5353, State: "Bound", ProcessID: 847, ProcessName: "avahi-daemon", SystemdUnit: "avahi-daemon.service"},
-					{Protocol: "UDP", LocalAddress: "0.0.0.0", LocalPort: 51822, State: "Bound", ProcessID: 0, ProcessName: ""},
+					{Protocol: "UDP", LocalAddress: "0.0.0.0", LocalPort: 51820, State: "Bound", ProcessID: 0, ProcessName: "wireguard"},
 				}
 				snapshot.LinuxBaseline.Workloads = &model.WorkloadInventory{
 					Runtime:     "docker",
 					CollectedAt: collectedAt,
 					Workloads: []model.ContainerWorkload{
-						{Name: "binderledger_web", Image: "ghcr.io/example/binderledger-web:demo", Project: "binderledger", Service: "web", State: "running", Health: "healthy", Ports: []model.ContainerPortBinding{{Protocol: "TCP", ContainerPort: 8080, Published: true, HostAddress: "0.0.0.0", HostPort: 8081}}},
+						{Name: "sample_web", Image: "ghcr.io/example/sample-web:demo", Project: "sample", Service: "web", State: "running", Health: "healthy", Ports: []model.ContainerPortBinding{{Protocol: "TCP", ContainerPort: 8080, Published: true, HostAddress: "0.0.0.0", HostPort: 8081}}},
 						{Name: "haven_proxy", Image: "caddy:demo", Project: "haven", Service: "proxy", State: "running", Health: "healthy", Ports: []model.ContainerPortBinding{{Protocol: "TCP", ContainerPort: 8443, Published: true, HostAddress: "0.0.0.0", HostPort: 8443}}},
 						{Name: "demo_database", Image: "postgres:demo", Project: "demo", Service: "database", State: "running", Health: "healthy", Ports: []model.ContainerPortBinding{{Protocol: "TCP", ContainerPort: 5432, Published: false}}},
 					},

@@ -1,16 +1,21 @@
 {
   "name": "haven-desktop",
   "productName": "HAVEN",
-  "version": "0.22.0",
+  "version": "0.23.0",
   "private": true,
   "description": "Native, isolated desktop client for the HAVEN personal security observatory",
   "author": "Adam Wentworth",
   "license": "MIT",
   "main": "main.cjs",
   "scripts": {
+    "configure:origin": "node configure-origin.cjs",
+    "prestart": "npm run configure:origin",
     "start": "electron .",
+    "precheck": "npm run configure:origin",
     "check": "node --check main.cjs && node --check security.cjs",
+    "pretest": "npm run configure:origin",
     "test": "node --test",
+    "predist:windows": "npm run configure:origin",
     "dist:windows": "electron-builder --win nsis --x64",
     "verify:fuses": "node verify-fuses.cjs"
   },
@@ -28,6 +33,7 @@
     "files": [
       "main.cjs",
       "security.cjs",
+      "build/origin.cjs",
       "build/icon.png",
       "package.json"
     ],

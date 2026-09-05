@@ -37,7 +37,7 @@ PostgreSQL becomes appropriate if HAVEN needs multiple hub writers, multiple hub
 
 ## Current milestone boundary
 
-Milestone 0.22 adds a deterministic, finite browser-hardening review to the encrypted 0.21 browser-site curation workflow while retaining the live-only 0.20 evidence boundary, hardened Electron client, installable-web fallback, private account-security notebook, verifiable fleet lifecycle evidence, routed console, reliability guardrails, and bounded read-only NAS health evidence:
+Milestone 0.23 adds a documented product/deployment/state portability boundary, removes household-specific runtime guesses, makes the Electron origin a validated build-time input without weakening its exact-origin runtime pin, and distinguishes protocol compatibility from exact build provenance. It retains the deterministic browser-hardening review from 0.22, encrypted browser-site curation, live-only browser evidence boundary, installable-web fallback, private account-security notebook, routed console, reliability guardrails, and bounded read-only NAS health evidence:
 
 - Windows and Linux agents inspect only bounded browser metadata owned by their user session. Supported Chromium-family manifests and Firefox's extension state are projected into friendly names, versions, coarse enabled/installed state, profile counts, three site-access categories, and an explicit allowlist of sensitive capabilities.
 - Extension identities are replaced with truncated one-way fingerprints before reporting. Raw IDs, host-match patterns, browsing-history entries, cookie names, cookie values, encrypted cookie values, cookie paths, credentials, tokens, page contents, and form data have no field in the protocol.
