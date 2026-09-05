@@ -22,6 +22,7 @@ const (
 	maximumCookieSitesTotal       = 1024
 	maximumCookieCountPerProfile  = 100000
 	maximumProfilePreferences     = 8 << 20
+	maximumChromiumLocalState     = 8 << 20
 	cookieReadTimeout             = 2 * time.Second
 	chromeEpochOffsetMicroseconds = int64(11644473600000000)
 )
@@ -47,10 +48,35 @@ type chromiumProfilePreferences struct {
 	} `json:"profile"`
 }
 
-func collectChromiumProfile(browserID, profileKey, profilePath string) (model.BrowserProfile, bool) {
+type chromiumLocalState struct {
+	Profile struct {
+		InfoCache map[string]struct {
+			Name string `json:"name"`
+		} `json:"info_cache"`
+	} `json:"profile"`
+}
+
+func chromiumProfileNames(localStatePath string) map[string]string {
+	result := map[string]string{}
+	var state chromiumLocalState
+	if err := readBoundedJSON(localStatePath, maximumChromiumLocalState, &state); err != nil {
+		return result
+	}
+	for profileKey, details := range state.Profile.InfoCache {
+		if !isChromiumUserProfile(profileKey) {
+			continue
+		}
+		if name := boundedText(details.Name, 100); name != "" {
+			result[profileKey] = name
+		}
+	}
+	return result
+}
+
+func collectChromiumProfile(browserID, profileKey, profilePath, displayName string) (model.BrowserProfile, bool) {
 	profile := model.BrowserProfile{
 		Fingerprint:  browserProfileFingerprint(browserID, profileKey),
-		Name:         chromiumProfileName(profileKey, filepath.Join(profilePath, "Preferences")),
+		Name:         chromiumProfileName(profileKey, displayName, filepath.Join(profilePath, "Preferences")),
 		CookieStatus: "observed",
 		Sites:        []model.BrowserCookieSite{},
 	}
@@ -76,7 +102,10 @@ func collectChromiumProfile(browserID, profileKey, profilePath string) (model.Br
 	return profile, partial || truncated
 }
 
-func chromiumProfileName(profileKey, preferencesPath string) string {
+func chromiumProfileName(profileKey, displayName, preferencesPath string) string {
+	if name := boundedText(displayName, 100); name != "" {
+		return name
+	}
 	var preferences chromiumProfilePreferences
 	if err := readBoundedJSON(preferencesPath, maximumProfilePreferences, &preferences); err == nil {
 		if name := boundedText(preferences.Profile.Name, 100); name != "" {

@@ -30,7 +30,10 @@ func TestChromiumCookieInventoryGroupsMetadataWithoutReadingSecrets(t *testing.T
 	if err := os.MkdirAll(filepath.Join(profilePath, "Network"), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(profilePath, "Preferences"), []byte(`{"profile":{"name":"Personal"}}`), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(profilePath, "Preferences"), []byte(`{"profile":{"name":"Your Chrome"}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(root, "Local State"), []byte(`{"profile":{"info_cache":{"Default":{"name":"Personal","user_name":"private-address@example.com","gaia_name":"Private Account Name"}}}}`), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	database, err := sql.Open("sqlite", filepath.Join(profilePath, "Network", "Cookies"))
@@ -84,7 +87,7 @@ func TestChromiumCookieInventoryGroupsMetadataWithoutReadingSecrets(t *testing.T
 		t.Fatal(err)
 	}
 	serialized := string(payload)
-	for _, secret := range []string{"c_user", "private-account-value", "xs", "private-session-token", "SID", "another-private-token", "encrypted-secret"} {
+	for _, secret := range []string{"c_user", "private-account-value", "xs", "private-session-token", "SID", "another-private-token", "encrypted-secret", "private-address@example.com", "Private Account Name"} {
 		if strings.Contains(serialized, secret) {
 			t.Fatalf("cookie inventory leaked a cookie name or value %q: %s", secret, serialized)
 		}
