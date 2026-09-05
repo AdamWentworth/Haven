@@ -14,7 +14,10 @@ const observed: BrowserSecurityStatus = {
 	protections: [
 		{ id: "defender-pua", name: "Potentially unwanted app protection", state: "enabled", source: "Microsoft Defender preferences" },
 		{ id: "defender-network", name: "Defender Network Protection", state: "audit", source: "Microsoft Defender preferences" },
+		{ id: "chrome-app-bound-encryption", name: "Chrome App-Bound Encryption policy", state: "default", source: "Chrome policy" },
+		{ id: "chrome-cookie-verification-events", name: "Chrome cookie-protection verification", state: "attention", source: "Windows Application event log", eventCount: 2 },
 	],
+	changes: [{ id: "abcdef0123456789abcdef01", browserId: "chrome", fingerprint: "0123456789abcdef01234567", extensionName: "Password Helper", kind: "permissions-expanded", siteAccess: "all-sites", addedPermissions: ["cookies"] }],
 	browsers: [{
 		id: "chrome",
 		name: "Google Chrome",
@@ -44,6 +47,12 @@ describe("browser security panel", () => {
 		expect(screen.getByText("Cookies")).toBeInTheDocument();
 		expect(screen.getByText("Downloads · optional")).toBeInTheDocument();
 		expect(screen.getByText("Audit only")).toBeInTheDocument();
+		expect(screen.getByText("Browser default")).toBeInTheDocument();
+		expect(screen.getByText("Review evidence")).toBeInTheDocument();
+		expect(screen.getByText(/2 Chrome verification events observed/)).toBeInTheDocument();
+		expect(screen.getByText("Password Helper gained capabilities")).toBeInTheDocument();
+		expect(screen.getByText(/routine inventory stays live-only/i)).toBeInTheDocument();
+		expect(screen.getByText(/do not enumerate provider sessions or inspect cookie contents/i)).toBeInTheDocument();
 		expect(screen.getByText(/never reads or stores cookies, history, passwords/i)).toBeInTheDocument();
 		expect(document.body).not.toHaveTextContent("0123456789abcdef01234567");
 		const result = await axe.run(document.body, { rules: { "color-contrast": { enabled: false } } });

@@ -34,9 +34,10 @@ func completeInput(now time.Time) ProfileInput {
 		Category: "email", TwoStepStatus: "enabled",
 		Factors: []string{"passkey", "authenticator"}, PasswordStatus: "unique",
 		RecoveryStatus: "configured", BackupCodesStatus: "stored",
-		LastReviewedAt: &reviewed,
-		ReviewDetails:  []string{"Signed-in devices reviewed; nothing unfamiliar.", "Recovery methods are current."},
-		Notes:          "Enhanced protection remains an owner choice.",
+		LastReviewedAt: &reviewed, SessionStatus: "recognized", SessionReviewedAt: &reviewed,
+		SessionChecks: []string{"devices", "recent-activity", "third-party-access", "unused-sessions"},
+		ReviewDetails: []string{"Signed-in devices reviewed; nothing unfamiliar.", "Recovery methods are current."},
+		Notes:         "Enhanced protection remains an owner choice.",
 	}
 }
 
@@ -57,14 +58,14 @@ func TestProfilesAreEncryptedAndRoundTrip(t *testing.T) {
 	if err != nil || len(records) != 1 {
 		t.Fatalf("unexpected encrypted records: %#v, %v", records, err)
 	}
-	for _, forbidden := range [][]byte{[]byte("Google"), []byte("owner@example.com"), []byte("Signed-in devices"), []byte("Enhanced protection")} {
+	for _, forbidden := range [][]byte{[]byte("Google"), []byte("owner@example.com"), []byte("Signed-in devices"), []byte("Enhanced protection"), []byte("third-party-access"), []byte("recognized")} {
 		if bytes.Contains(records[0].Ciphertext, forbidden) {
 			t.Fatalf("ciphertext exposed account material %q", forbidden)
 		}
 	}
 
 	listed, err := service.List(ctx, now)
-	if err != nil || len(listed) != 1 || listed[0].Identifier != "owner@example.com" || len(listed[0].ReviewDetails) != 2 {
+	if err != nil || len(listed) != 1 || listed[0].Identifier != "owner@example.com" || len(listed[0].ReviewDetails) != 2 || listed[0].SessionStatus != "recognized" || len(listed[0].SessionChecks) != 4 {
 		t.Fatalf("unexpected decrypted profiles: %#v, %v", listed, err)
 	}
 	updatedInput := listed[0].ProfileInput
@@ -78,6 +79,29 @@ func TestProfilesAreEncryptedAndRoundTrip(t *testing.T) {
 	}
 	if err := service.Delete(ctx, created.ID); !errors.Is(err, sql.ErrNoRows) {
 		t.Fatalf("expected missing profile after deletion, got %v", err)
+	}
+}
+
+func TestLegacyEncryptedProfileDefaultsSessionReviewToUnknown(t *testing.T) {
+	service, store := testService(t)
+	defer store.Close()
+	ctx := context.Background()
+	now := time.Date(2026, time.September, 4, 18, 0, 0, 0, time.UTC)
+	id := "acct_AAAAAAAAAAAAAAAAAAAAAAAA"
+	plain := []byte(`{"provider":"Google","label":"Legacy","category":"email","twoStepStatus":"enabled","factors":["passkey"],"passwordStatus":"unique","recoveryStatus":"configured","backupCodesStatus":"stored"}`)
+	ciphertext, err := service.seal(id, plain)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SaveEncryptedAccountProfile(ctx, storage.EncryptedAccountProfile{ID: id, Ciphertext: ciphertext, CreatedAt: now, UpdatedAt: now}); err != nil {
+		t.Fatal(err)
+	}
+	profiles, err := service.List(ctx, now)
+	if err != nil || len(profiles) != 1 {
+		t.Fatalf("legacy profile did not load: %#v, %v", profiles, err)
+	}
+	if profiles[0].SessionStatus != "unknown" || profiles[0].SessionReviewedAt != nil || len(profiles[0].SessionChecks) != 0 {
+		t.Fatalf("legacy session fields did not default safely: %#v", profiles[0])
 	}
 }
 
@@ -130,6 +154,79 @@ func TestEnabledTwoStepWithoutRecordedFactorRemainsIncomplete(t *testing.T) {
 	profile := present(input, now, now, now)
 	if profile.Status != "incomplete" || len(profile.Suggestions) != 1 || profile.Suggestions[0].ID != "record-second-factor" || profile.Suggestions[0].Priority != "low" {
 		t.Fatalf("enabled two-step without a recorded factor must remain an informational checklist gap: %#v", profile)
+	}
+}
+
+func TestSessionReviewSuggestionsFollowRecordedEvidence(t *testing.T) {
+	now := time.Date(2026, time.September, 4, 18, 0, 0, 0, time.UTC)
+	tests := []struct {
+		name     string
+		mutate   func(*ProfileInput)
+		wantID   string
+		priority string
+	}{
+		{name: "not checked", mutate: func(input *ProfileInput) {
+			input.SessionStatus = "unknown"
+			input.SessionReviewedAt = nil
+			input.SessionChecks = nil
+		}, wantID: "review-provider-sessions", priority: "low"},
+		{name: "unfamiliar", mutate: func(input *ProfileInput) { input.SessionStatus = "attention" }, wantID: "secure-unfamiliar-session", priority: "high"},
+		{name: "stale", mutate: func(input *ProfileInput) {
+			reviewed := now.Add(-91 * 24 * time.Hour)
+			input.SessionReviewedAt = &reviewed
+		}, wantID: "refresh-session-review", priority: "low"},
+		{name: "incomplete", mutate: func(input *ProfileInput) { input.SessionChecks = []string{"devices"} }, wantID: "complete-session-review", priority: "low"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			input := completeInput(now)
+			test.mutate(&input)
+			profile := present(input, now, now, now)
+			found := false
+			for _, suggestion := range profile.Suggestions {
+				if suggestion.ID == test.wantID && suggestion.Priority == test.priority {
+					found = true
+				}
+			}
+			if !found {
+				t.Fatalf("missing %s/%s suggestion: %#v", test.wantID, test.priority, profile.Suggestions)
+			}
+		})
+	}
+}
+
+func TestValidationRejectsContradictorySessionReview(t *testing.T) {
+	now := time.Date(2026, time.September, 4, 18, 0, 0, 0, time.UTC)
+	reviewed := now.Add(-time.Hour)
+	tests := []ProfileInput{
+		func() ProfileInput {
+			input := completeInput(now)
+			input.SessionStatus = "unknown"
+			input.SessionReviewedAt = &reviewed
+			return input
+		}(),
+		func() ProfileInput {
+			input := completeInput(now)
+			input.SessionStatus = "not-supported"
+			input.SessionChecks = []string{"devices"}
+			input.SessionReviewedAt = nil
+			return input
+		}(),
+		func() ProfileInput {
+			input := completeInput(now)
+			input.SessionChecks = []string{"devices", "devices"}
+			return input
+		}(),
+		func() ProfileInput {
+			input := completeInput(now)
+			input.SessionChecks = []string{"cookie-values"}
+			return input
+		}(),
+	}
+	for index, input := range tests {
+		if _, err := normalize(input, now); !errors.Is(err, ErrInvalidProfile) {
+			t.Fatalf("case %d should be invalid, got %v", index, err)
+		}
 	}
 }
 

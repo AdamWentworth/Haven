@@ -1,4 +1,4 @@
-import type { AccountFactor, AccountProfile, AccountProfileInput } from "./types";
+import type { AccountFactor, AccountProfile, AccountProfileInput, SessionCheck } from "./types";
 
 export const accountProviders = ["Apple", "Discord", "Facebook", "GitHub", "Google", "Instagram", "LinkedIn", "Microsoft", "PlayStation", "Reddit", "Steam", "TikTok", "Twitch", "X", "YouTube"];
 
@@ -13,6 +13,9 @@ export const emptyAccountProfile = (): AccountProfileInput => ({
 	recoveryStatus: "unknown",
 	backupCodesStatus: "unknown",
 	lastReviewedAt: null,
+	sessionStatus: "unknown",
+	sessionReviewedAt: null,
+	sessionChecks: [],
 	reviewDetails: [],
 	notes: "",
 });
@@ -40,8 +43,39 @@ export function statusLabel(value: string) {
 		configured: "Configured",
 		missing: "Not configured",
 		stored: "Stored safely",
+		recognized: "All recognized",
+		attention: "Needs attention",
 	};
 	return labels[value] || value;
+}
+
+export function sessionCheckLabel(check: SessionCheck) {
+	const labels: Record<SessionCheck, string> = {
+		devices: "Signed-in devices and sessions reviewed",
+		"recent-activity": "Recent security activity reviewed",
+		"third-party-access": "Third-party account access reviewed",
+		"unused-sessions": "Unused or unfamiliar sessions absent or revoked",
+	};
+	return labels[check];
+}
+
+export function providerSessionURL(provider: string) {
+	const normalized = provider.trim().toLowerCase();
+	const urls: Record<string, string> = {
+		apple: "https://account.apple.com/account/manage",
+		discord: "https://discord.com/settings/devices",
+		facebook: "https://www.facebook.com/settings?tab=security",
+		github: "https://github.com/settings/sessions",
+		google: "https://myaccount.google.com/device-activity",
+		instagram: "https://accountscenter.instagram.com/password_and_security/login_activity/",
+		linkedin: "https://www.linkedin.com/mypreferences/d/manage-sessions",
+		microsoft: "https://account.microsoft.com/security",
+		reddit: "https://www.reddit.com/account-activity",
+		twitch: "https://www.twitch.tv/settings/security",
+		x: "https://x.com/settings/sessions",
+		youtube: "https://myaccount.google.com/device-activity",
+	};
+	return urls[normalized] || null;
 }
 
 export function factorLabel(factor: AccountFactor) {

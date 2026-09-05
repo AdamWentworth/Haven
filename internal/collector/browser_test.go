@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/AdamWentworth/haven/internal/model"
 )
 
 func TestChromiumInventoryRetainsCapabilitiesWithoutIdentifiersOrHostPatterns(t *testing.T) {
@@ -78,6 +80,19 @@ func TestBrowserInventoryReportsUnreadableRootsWithoutLeakingPaths(t *testing.T)
 	status, notices := collectBrowserSecurity("unsupported")
 	if status.Coverage != "unavailable" || len(notices) != 1 || notices[0].Message == "" {
 		t.Fatalf("unavailable platform was not represented safely: %#v %#v", status, notices)
+	}
+}
+
+func TestChromeProtectionsAppearOnlyWhenChromeIsObserved(t *testing.T) {
+	snapshot := model.SecuritySnapshot{BrowserSecurity: &model.BrowserSecurityStatus{Coverage: "observed", Protections: []model.BrowserProtectionStatus{
+		{ID: "defender-pua", Name: "Potentially unwanted app protection", State: "enabled", Source: "Microsoft Defender preferences"},
+		{ID: "chrome-app-bound-encryption", Name: "Chrome App-Bound Encryption policy", State: "default", Source: "Chrome policy"},
+	}}}
+	t.Setenv("LOCALAPPDATA", t.TempDir())
+	t.Setenv("APPDATA", t.TempDir())
+	attachBrowserSecurity(&snapshot, "windows")
+	if len(snapshot.BrowserSecurity.Protections) != 1 || snapshot.BrowserSecurity.Protections[0].ID != "defender-pua" {
+		t.Fatalf("Chrome-only evidence was retained without an observed Chrome installation: %#v", snapshot.BrowserSecurity.Protections)
 	}
 }
 

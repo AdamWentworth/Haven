@@ -79,9 +79,85 @@ func evaluateBrowserSecurity(snapshot *model.SecuritySnapshot) {
 			summary = protection.Name + " is in audit mode."
 		case "disabled":
 			checkStatus = "attention"
-			summary = protection.Name + " is disabled; review whether that matches your intended browser and download protection policy."
+			summary = protection.Name + " is disabled; review whether that matches your intended browser-protection policy."
+		case "default":
+			checkStatus = "configured"
+			if protection.ID == "chrome-app-bound-encryption" {
+				summary = protection.Name + " has no disabling override; Chrome enables it by default whenever the platform supports it."
+			} else {
+				summary = protection.Name + " follows Chrome's gradual default rollout; HAVEN cannot claim that every Google session is device-bound."
+			}
+		case "clear":
+			checkStatus = "pass"
+			summary = protection.Name + " reported no recent verification failures."
+		case "attention":
+			checkStatus = "attention"
+			if protection.EventCount != nil {
+				summary = fmt.Sprintf("%s recorded %d verification failure event(s) in the last seven days.", protection.Name, *protection.EventCount)
+			} else {
+				summary = protection.Name + " needs review."
+			}
 		}
 		addCheck(snapshot, "web-protection-"+protection.ID, "Browser protection", protection.Name, checkStatus, summary, protection.Source)
+		if protection.State == "disabled" && (protection.ID == "chrome-app-bound-encryption" || protection.ID == "chrome-device-bound-sessions") {
+			addFinding(snapshot, "browser-protection-"+protection.ID, "Browser", protection.Name+" is explicitly disabled", "medium", "A managed Chrome policy explicitly disables this session-theft mitigation.", "Confirm that the policy is intentional. If it is not, remove the disabling policy or enable the feature, restart Chrome, and verify the effective policy in chrome://policy.")
+		}
+		if protection.ID == "chrome-cookie-verification-events" && protection.State == "attention" && protection.EventCount != nil {
+			addFinding(snapshot, "browser-cookie-verification-events", "Browser", "Review Chrome cookie-protection failures", "medium", fmt.Sprintf("Chrome recorded %d App-Bound Encryption verification failure event(s) in the last seven days. A failure may indicate incompatible software or an attempted bypass; it is not proof of malware.", *protection.EventCount), "Review Windows Application log events from source Chrome with ID 257, confirm Chrome and security software are current, and investigate the named process before changing browser protection settings.")
+		}
+	}
+
+	for _, change := range status.Changes {
+		title := "Review browser extension change"
+		summary := change.ExtensionName + " changed on " + browserDisplayName(change.BrowserID) + "."
+		switch change.Kind {
+		case "installed":
+			title = "Review newly installed browser extension"
+			summary = change.ExtensionName + " was newly observed on " + browserDisplayName(change.BrowserID) + "."
+		case "enabled":
+			title = "Review re-enabled browser extension"
+			summary = change.ExtensionName + " changed from disabled to enabled on " + browserDisplayName(change.BrowserID) + "."
+		case "permissions-expanded":
+			title = "Review expanded browser extension access"
+			summary = change.ExtensionName + " gained broader declared access on " + browserDisplayName(change.BrowserID) + "."
+		}
+		if change.SiteAccess == "all-sites" {
+			summary += " Its declared or optional access now includes all sites."
+		}
+		if len(change.AddedPermissions) > 0 {
+			summary += " Added sensitive capabilities: " + strings.Join(change.AddedPermissions, ", ") + "."
+		}
+		addFinding(snapshot, "browser-change-"+change.ID, "Browser", title, browserChangeSeverity(change), summary, "Open the browser's extension manager, confirm the extension and its access are expected, and remove or restrict it if you do not recognize or need it. HAVEN never reads the extension's data or your cookies.")
+	}
+}
+
+func browserChangeSeverity(change model.BrowserExtensionChange) string {
+	if change.SiteAccess == "all-sites" {
+		return "medium"
+	}
+	for _, permission := range change.AddedPermissions {
+		switch permission {
+		case "cookies", "debugger", "nativemessaging", "proxy", "webauthenticationproxy", "browsingdata":
+			return "medium"
+		}
+	}
+	return "low"
+}
+
+func browserDisplayName(id string) string {
+	switch id {
+	case "chrome":
+		return "Google Chrome"
+	case "edge":
+		return "Microsoft Edge"
+	case "brave":
+		return "Brave"
+	case "chromium", "chromium-snap":
+		return "Chromium"
+	case "firefox", "firefox-snap":
+		return "Mozilla Firefox"
+	default:
+		return "a supported browser"
 	}
 }
 

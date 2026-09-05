@@ -8,7 +8,10 @@ import { AccountNotebook } from "./account-notebook";
 import { emptyAccountProfile } from "./account-security";
 import type { AccountProfile } from "./types";
 
-afterEach(cleanup);
+afterEach(() => {
+	cleanup();
+	vi.restoreAllMocks();
+});
 
 function profile(overrides: Partial<AccountProfile> = {}): AccountProfile {
 	return {
@@ -31,9 +34,12 @@ describe("account security notebook", () => {
 	});
 
 	it("keeps a healthy reviewed card concise", () => {
-		render(<AccountNotebook profiles={[profile({ status: "good", suggestions: [], lastReviewedAt: "2026-09-04T12:00:00Z" })]} demoMode={false} unlocked busy={false} unlock={vi.fn()} lock={vi.fn()} save={vi.fn()} remove={vi.fn()} />);
+		render(<AccountNotebook profiles={[profile({ status: "good", suggestions: [], lastReviewedAt: "2026-09-04T12:00:00Z", sessionStatus: "recognized", sessionReviewedAt: "2026-09-04T12:00:00Z", sessionChecks: ["devices", "recent-activity", "third-party-access", "unused-sessions"] })]} demoMode={false} unlocked busy={false} unlock={vi.fn()} lock={vi.fn()} save={vi.fn()} remove={vi.fn()} />);
 		expect(screen.getByText("Checklist looks good")).toBeInTheDocument();
-		expect(screen.getByText(/Reviewed Sep 4, 2026/)).toBeInTheDocument();
+		expect(screen.getByText("All recognized")).toBeInTheDocument();
+		expect(screen.getByText("Third-party account access reviewed")).toBeInTheDocument();
+		expect(screen.getByRole("link", { name: /Review at Google/ })).toHaveAttribute("href", "https://myaccount.google.com/device-activity");
+		expect(screen.getAllByText(/Reviewed Sep 4, 2026/)).toHaveLength(2);
 		expect(screen.queryByText(/No improvement suggestion follows/)).not.toBeInTheDocument();
 		expect(screen.queryByText(/5:00:00 AM/)).not.toBeInTheDocument();
 	});
@@ -59,8 +65,12 @@ describe("account security notebook", () => {
 		await user.type(screen.getByLabelText("Profile label"), "Personal");
 		await user.selectOptions(screen.getByLabelText("Two-step verification"), "enabled");
 		await user.click(screen.getByLabelText("Authenticator app"));
+		await user.selectOptions(screen.getByLabelText("Session status"), "recognized");
+		await user.click(screen.getByLabelText("Signed-in devices and sessions reviewed"));
+		expect(screen.getByRole("link", { name: /official session page/ })).toHaveAttribute("href", "https://myaccount.google.com/device-activity");
+		expect(screen.getByText(/never signs in, reads cookies, or stores session tokens/i)).toBeInTheDocument();
 		await user.click(screen.getByRole("button", { name: "Save profile" }));
-		expect(save).toHaveBeenCalledWith(expect.objectContaining({ provider: "Google", label: "Personal", twoStepStatus: "enabled", factors: ["authenticator"] }));
+		expect(save).toHaveBeenCalledWith(expect.objectContaining({ provider: "Google", label: "Personal", twoStepStatus: "enabled", factors: ["authenticator"], sessionStatus: "recognized", sessionChecks: ["devices"] }));
 	});
 
 	it("updates an account without resending derived presentation fields", async () => {
@@ -85,5 +95,13 @@ describe("account security notebook", () => {
 		expect(screen.getByText(/Synthetic account notebook/)).toBeInTheDocument();
 		expect(screen.queryByRole("button", { name: "Edit" })).not.toBeInTheDocument();
 		expect(screen.queryByRole("button", { name: "Add account" })).not.toBeInTheDocument();
+	});
+
+	it("keeps official provider navigation outside the isolated Electron client", () => {
+		vi.spyOn(navigator, "userAgent", "get").mockReturnValue("Mozilla/5.0 HAVEN-Desktop/0.19.0 Electron");
+		render(<AccountNotebook profiles={[profile({ sessionStatus: "recognized", sessionChecks: ["devices"] })]} demoMode={false} unlocked busy={false} unlock={vi.fn()} lock={vi.fn()} save={vi.fn()} remove={vi.fn()} />);
+		expect(screen.queryByRole("link", { name: /Review at Google/ })).not.toBeInTheDocument();
+		expect(screen.getByText(/Desktop isolation blocks external navigation/)).toBeInTheDocument();
+		expect(screen.getByText("https://myaccount.google.com/device-activity")).toBeInTheDocument();
 	});
 });

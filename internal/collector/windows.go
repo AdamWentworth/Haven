@@ -375,6 +375,36 @@ catch {
 }
 $browserProtections += [pscustomobject]@{ Id = 'windows-smartscreen'; Name = 'Microsoft Defender SmartScreen'; State = $smartScreenState; Source = $smartScreenSource }
 
+function Get-ChromeBooleanPolicyState {
+    param([Parameter(Mandatory = $true)][string]$Name)
+    foreach ($path in @('HKLM:\SOFTWARE\Policies\Google\Chrome', 'HKCU:\SOFTWARE\Policies\Google\Chrome')) {
+        try {
+            $value = Get-ItemPropertyValue -Path $path -Name $Name -ErrorAction Stop
+            if ([int]$value -eq 1) { return 'enabled' }
+            if ([int]$value -eq 0) { return 'disabled' }
+            return 'unknown'
+        }
+        catch {}
+    }
+    return 'default'
+}
+
+$appBoundEncryptionState = Get-ChromeBooleanPolicyState -Name 'ApplicationBoundEncryptionEnabled'
+$deviceBoundSessionsState = Get-ChromeBooleanPolicyState -Name 'BoundSessionCredentialsEnabled'
+$browserProtections += [pscustomobject]@{ Id = 'chrome-app-bound-encryption'; Name = 'Chrome App-Bound Encryption policy'; State = $appBoundEncryptionState; Source = 'Chrome policy' }
+$browserProtections += [pscustomobject]@{ Id = 'chrome-device-bound-sessions'; Name = 'Chrome device-bound Google sessions'; State = $deviceBoundSessionsState; Source = 'Chrome policy' }
+
+try {
+    $cookieVerificationEvents = @(Get-WinEvent -FilterHashtable @{ LogName = 'Application'; ProviderName = 'Chrome'; Id = 257; StartTime = (Get-Date).AddDays(-7) } -MaxEvents 50 -ErrorAction SilentlyContinue)
+    $cookieVerificationEventCount = [int]$cookieVerificationEvents.Count
+    $cookieVerificationState = if ($cookieVerificationEventCount -gt 0) { 'attention' } else { 'clear' }
+    $browserProtections += [pscustomobject]@{ Id = 'chrome-cookie-verification-events'; Name = 'Chrome cookie-protection verification'; State = $cookieVerificationState; Source = 'Windows Application event log'; EventCount = $cookieVerificationEventCount }
+}
+catch {
+    $browserProtections += [pscustomobject]@{ Id = 'chrome-cookie-verification-events'; Name = 'Chrome cookie-protection verification'; State = 'unknown'; Source = 'Windows Application event log' }
+    $notices.Add([pscustomobject]@{ Source = 'Browser session protection'; Severity = 'information'; Message = 'Chrome cookie-protection verification events could not be checked.' })
+}
+
 try {
     $processNames = @{}
     Get-Process -ErrorAction SilentlyContinue | ForEach-Object { $processNames[[int]$_.Id] = $_.ProcessName }

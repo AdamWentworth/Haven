@@ -118,8 +118,27 @@ func attachBrowserSecurity(snapshot *model.SecuritySnapshot, platform string) {
 	if snapshot.BrowserSecurity != nil {
 		inventory.Protections = append([]model.BrowserProtectionStatus(nil), snapshot.BrowserSecurity.Protections...)
 	}
+	if platform == "windows" && !containsBrowser(inventory.Browsers, "chrome") {
+		filtered := make([]model.BrowserProtectionStatus, 0, len(inventory.Protections))
+		for _, protection := range inventory.Protections {
+			if strings.HasPrefix(protection.ID, "chrome-") {
+				continue
+			}
+			filtered = append(filtered, protection)
+		}
+		inventory.Protections = filtered
+	}
 	snapshot.BrowserSecurity = inventory
 	snapshot.Notices = append(snapshot.Notices, notices...)
+}
+
+func containsBrowser(browsers []model.BrowserInstallation, id string) bool {
+	for _, browser := range browsers {
+		if browser.ID == id {
+			return true
+		}
+	}
+	return false
 }
 
 func defaultBrowserRoots(platform string) ([]browserRoot, bool) {

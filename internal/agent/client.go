@@ -19,6 +19,7 @@ import (
 
 	"github.com/AdamWentworth/haven/internal/fleet"
 	"github.com/AdamWentworth/haven/internal/model"
+	"github.com/AdamWentworth/haven/internal/sessionwatch"
 	"github.com/AdamWentworth/haven/internal/storage"
 	"github.com/AdamWentworth/haven/internal/trust"
 )
@@ -146,6 +147,13 @@ func (client *Client) Config() Config {
 }
 
 func (client *Client) Report(ctx context.Context, snapshot model.SecuritySnapshot, installation ...string) (model.ObservationReceipt, error) {
+	changes, baselineUpdate, baselineErr := sessionwatch.Prepare(client.directory, snapshot.BrowserSecurity)
+	if snapshot.BrowserSecurity != nil {
+		snapshot.BrowserSecurity.Changes = changes
+	}
+	if baselineErr != nil {
+		snapshot.Notices = append(snapshot.Notices, model.CollectorNotice{Source: "Browser change watch", Severity: "information", Message: "The local browser baseline could not be verified; HAVEN established a new baseline without inferring a change."})
+	}
 	caPEM, err := os.ReadFile(filepath.Join(client.directory, "ca.crt"))
 	if err != nil {
 		return model.ObservationReceipt{}, fmt.Errorf("read agent CA certificate: %w", err)
@@ -203,6 +211,9 @@ func (client *Client) Report(ctx context.Context, snapshot model.SecuritySnapsho
 			}
 			if receipt.ObservationID != envelope.ObservationID || receipt.AcceptedAt.IsZero() {
 				return model.ObservationReceipt{}, errors.New("hub returned an invalid observation receipt")
+			}
+			if err := baselineUpdate.Commit(); err != nil {
+				return model.ObservationReceipt{}, err
 			}
 			return receipt, nil
 		} else if retryableReportStatus(response.StatusCode) {

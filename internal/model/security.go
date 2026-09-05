@@ -28,6 +28,7 @@ type BrowserSecurityStatus struct {
 	Coverage    string                    `json:"coverage"`
 	Browsers    []BrowserInstallation     `json:"browsers"`
 	Protections []BrowserProtectionStatus `json:"protections"`
+	Changes     []BrowserExtensionChange  `json:"changes,omitempty"`
 }
 
 type BrowserInstallation struct {
@@ -51,10 +52,25 @@ type BrowserExtension struct {
 }
 
 type BrowserProtectionStatus struct {
-	ID     string `json:"id"`
-	Name   string `json:"name"`
-	State  string `json:"state"`
-	Source string `json:"source,omitempty"`
+	ID         string `json:"id"`
+	Name       string `json:"name"`
+	State      string `json:"state"`
+	Source     string `json:"source,omitempty"`
+	EventCount *int   `json:"eventCount,omitempty"`
+}
+
+// BrowserExtensionChange is emitted only after an endpoint has established a
+// local baseline and then observes a meaningful capability increase. It never
+// contains an extension ID, profile name, URL pattern, cookie, token, history
+// entry, or browser-storage value.
+type BrowserExtensionChange struct {
+	ID               string   `json:"id"`
+	BrowserID        string   `json:"browserId"`
+	Fingerprint      string   `json:"fingerprint"`
+	ExtensionName    string   `json:"extensionName"`
+	Kind             string   `json:"kind"`
+	SiteAccess       string   `json:"siteAccess"`
+	AddedPermissions []string `json:"addedPermissions"`
 }
 
 // LinuxBaseline contains host-level, privacy-bounded Linux posture. It keeps

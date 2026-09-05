@@ -80,3 +80,65 @@ func TestValidateBrowserSecurityBoundsTotalExtensionInventory(t *testing.T) {
 		t.Fatal("an inventory above the global extension bound was accepted")
 	}
 }
+
+func TestValidateBrowserSecurityAcceptsBoundedSessionDefenseEvidence(t *testing.T) {
+	eventCount := 2
+	change := BrowserExtensionChange{BrowserID: "chrome", Fingerprint: "0123456789abcdef01234567", ExtensionName: "Password Helper", Kind: "permissions-expanded", SiteAccess: "all-sites", AddedPermissions: []string{"cookies"}}
+	change.ID = expectedBrowserChangeID(change)
+	status := &BrowserSecurityStatus{
+		Coverage: "observed",
+		Browsers: []BrowserInstallation{{
+			ID: "chrome", Name: "Google Chrome", ProfileCount: 1,
+			Extensions: []BrowserExtension{{Fingerprint: "0123456789abcdef01234567", Name: "Password Helper", State: "active", ProfileCount: 1, SiteAccess: "specific-sites", OptionalSiteAccess: "all-sites", SensitivePermissions: []string{"cookies"}}},
+		}},
+		Protections: []BrowserProtectionStatus{
+			{ID: "chrome-app-bound-encryption", Name: "Chrome App-Bound Encryption policy", State: "default", Source: "Chrome policy"},
+			{ID: "chrome-device-bound-sessions", Name: "Chrome device-bound Google sessions", State: "enabled", Source: "Chrome policy"},
+			{ID: "chrome-cookie-verification-events", Name: "Chrome cookie-protection verification", State: "attention", Source: "Windows Application event log", EventCount: &eventCount},
+		},
+		Changes: []BrowserExtensionChange{change},
+	}
+	if !ValidateBrowserSecurity(status) {
+		t.Fatal("valid session-defense evidence was rejected")
+	}
+}
+
+func TestValidateBrowserSecurityRejectsInventedChangeEvidence(t *testing.T) {
+	change := BrowserExtensionChange{BrowserID: "chrome", Fingerprint: "0123456789abcdef01234567", ExtensionName: "Password Helper", Kind: "permissions-expanded", SiteAccess: "all-sites", AddedPermissions: []string{"cookies"}}
+	change.ID = expectedBrowserChangeID(change)
+	status := BrowserSecurityStatus{
+		Coverage: "observed",
+		Browsers: []BrowserInstallation{{
+			ID: "chrome", Name: "Google Chrome", ProfileCount: 1,
+			Extensions: []BrowserExtension{{Fingerprint: "0123456789abcdef01234567", Name: "Password Helper", State: "active", ProfileCount: 1, SiteAccess: "specific-sites", OptionalSiteAccess: "none-declared", SensitivePermissions: []string{"history"}}},
+		}},
+		Changes: []BrowserExtensionChange{change},
+	}
+	if ValidateBrowserSecurity(&status) {
+		t.Fatal("change evidence exceeding the matching current extension was accepted")
+	}
+}
+
+func TestValidateBrowserSecurityRejectsInvalidCookieVerificationCounts(t *testing.T) {
+	zero := 0
+	status := BrowserSecurityStatus{Coverage: "observed", Protections: []BrowserProtectionStatus{{ID: "chrome-cookie-verification-events", Name: "Chrome cookie-protection verification", State: "attention", Source: "Windows Application event log", EventCount: &zero}}}
+	if ValidateBrowserSecurity(&status) {
+		t.Fatal("an attention state with zero events was accepted")
+	}
+	status.Protections[0].State = "clear"
+	if !ValidateBrowserSecurity(&status) {
+		t.Fatal("a clear state with zero events was rejected")
+	}
+	status.Protections[0].EventCount = nil
+	if ValidateBrowserSecurity(&status) {
+		t.Fatal("a clear state without bounded evidence was accepted")
+	}
+	status.Protections = []BrowserProtectionStatus{{ID: "chrome-app-bound-encryption", Name: "Chrome App-Bound Encryption policy", State: "clear", Source: "Chrome policy"}}
+	if ValidateBrowserSecurity(&status) {
+		t.Fatal("an event-only state was accepted for a Chrome policy")
+	}
+	status.Protections = []BrowserProtectionStatus{{ID: "defender-pua", Name: "Potentially unwanted app protection", State: "default", Source: "Microsoft Defender preferences"}}
+	if ValidateBrowserSecurity(&status) {
+		t.Fatal("a Chrome-policy state was accepted for Defender evidence")
+	}
+}

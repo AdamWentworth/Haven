@@ -2,12 +2,14 @@ package agent_test
 
 import (
 	"context"
+	"errors"
 	"io"
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -98,6 +100,39 @@ func TestEnrollmentAndMutualTLSReporting(t *testing.T) {
 	}
 	if detail.Snapshot == nil || detail.Snapshot.BrowserSecurity != nil {
 		t.Fatal("rejected browser metadata replaced the last accepted observation")
+	}
+	baselinePath := filepath.Join(agentDirectory, "browser-extension-baseline.json")
+	if _, err := os.Stat(baselinePath); !errors.Is(err, os.ErrNotExist) {
+		t.Fatal("rejected browser evidence advanced the local extension baseline")
+	}
+	validBrowser := snapshot
+	validBrowser.BrowserSecurity = &model.BrowserSecurityStatus{Coverage: "observed", Browsers: []model.BrowserInstallation{{
+		ID: "chrome", Name: "Google Chrome", ProfileCount: 1,
+		Extensions: []model.BrowserExtension{{Fingerprint: "0123456789abcdef01234567", Name: "Example extension", State: "active", ProfileCount: 1, SiteAccess: "specific-sites", OptionalSiteAccess: "none-declared", SensitivePermissions: []string{"tabs"}}},
+	}}}
+	if _, err := client.Report(ctx, validBrowser, "systemd-user"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(baselinePath); err != nil {
+		t.Fatalf("accepted first browser observation did not establish its local baseline: %v", err)
+	}
+	validBrowser.BrowserSecurity.Browsers[0].Extensions[0].SiteAccess = "all-sites"
+	validBrowser.BrowserSecurity.Browsers[0].Extensions[0].SensitivePermissions = []string{"tabs", "cookies"}
+	if _, err := client.Report(ctx, validBrowser, "systemd-user"); err != nil {
+		t.Fatal(err)
+	}
+	detail, err = store.DeviceDetail(ctx, config.DeviceID, time.Now().UTC())
+	if err != nil {
+		t.Fatal(err)
+	}
+	foundChange := false
+	for _, finding := range detail.Snapshot.Findings {
+		if strings.HasPrefix(finding.ID, "browser-change-") {
+			foundChange = true
+		}
+	}
+	if !foundChange {
+		t.Fatal("accepted browser capability expansion did not create a bounded review finding")
 	}
 	if err := store.RevokeDevice(ctx, config.DeviceID, time.Now().UTC()); err != nil {
 		t.Fatal(err)
