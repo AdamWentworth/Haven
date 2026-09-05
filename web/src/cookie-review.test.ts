@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { cookieSessionSignal, cookieSiteReview, filterCookieSites, groupCookieSites, sortCookieSites } from "./cookie-review";
+import { buildCookieCleanupQueue, cookieSessionSignal, cookieSiteReview, filterCookieSites, groupCookieSites, sortCookieSites } from "./cookie-review";
 import type { BrowserCookieSite } from "./types";
 
 function site(domain: string, overrides: Partial<BrowserCookieSite> = {}): BrowserCookieSite {
@@ -62,5 +62,21 @@ describe("cookie review evidence", () => {
 			site("unknown.example", { lastAccessedAt: undefined }),
 		], "cleanup", now);
 		expect(sorted.map((entry) => entry.domain)).toEqual(["unknown.example", "old.example", "recent.example"]);
+	});
+
+	it("excludes protected and deferred sites while prioritizing deliberate cleanup choices", () => {
+		const queue = buildCookieCleanupQueue([
+			site("protected.example", { lastAccessedAt: "2025-01-01T00:00:00Z" }),
+			site("deferred.example", { lastAccessedAt: "2025-01-01T00:00:00Z" }),
+			site("ready.example"),
+			site("old.example", { lastAccessedAt: "2025-01-01T00:00:00Z" }),
+			site("recent.example"),
+		], {
+			"protected.example": "signed-in-keep",
+			"deferred.example": "review-later",
+			"ready.example": "clear-candidate",
+		}, now);
+		expect(queue.ready.map((entry) => entry.domain)).toEqual(["ready.example"]);
+		expect(queue.suggested.map((entry) => entry.domain)).toEqual(["old.example"]);
 	});
 });

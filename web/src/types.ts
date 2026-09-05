@@ -48,6 +48,23 @@ export interface BrowserCookieSite {
 	latestExpiryAt?: string;
 }
 
+export type BrowserSiteReviewState = "signed-in-keep" | "recognized-ordinary" | "clear-candidate" | "review-later";
+
+export interface BrowserSiteReviewKey {
+	deviceId: string;
+	browserId: string;
+	profileFingerprint: string;
+	domain: string;
+}
+
+export interface BrowserSiteReviewInput extends BrowserSiteReviewKey {
+	state: BrowserSiteReviewState;
+}
+
+export interface BrowserSiteReview extends BrowserSiteReviewInput {
+	reviewedAt: string;
+}
+
 export interface BrowserExtension {
 	fingerprint: string;
 	name: string;

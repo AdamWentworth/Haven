@@ -19,6 +19,7 @@ import (
 	"github.com/AdamWentworth/haven/internal/alert"
 	"github.com/AdamWentworth/haven/internal/appliance"
 	"github.com/AdamWentworth/haven/internal/authn"
+	"github.com/AdamWentworth/haven/internal/browserreview"
 	"github.com/AdamWentworth/haven/internal/buildinfo"
 	"github.com/AdamWentworth/haven/internal/collector"
 	"github.com/AdamWentworth/haven/internal/fleet"
@@ -42,6 +43,7 @@ type Server struct {
 	notifications   *notification.Service
 	appliances      *appliance.Monitor
 	accounts        *account.Service
+	browserReviews  *browserreview.Service
 
 	collectionMutex sync.Mutex
 	latestMutex     sync.RWMutex
@@ -82,6 +84,10 @@ func WithManagedAppliances(monitor *appliance.Monitor) ServerOption {
 
 func WithAccountNotebook(service *account.Service) ServerOption {
 	return func(server *Server) { server.accounts = service }
+}
+
+func WithBrowserSiteReviews(service *browserreview.Service) ServerOption {
+	return func(server *Server) { server.browserReviews = service }
 }
 
 func NewServer(
@@ -137,6 +143,9 @@ func (server *Server) Handler() http.Handler {
 	mux.Handle("GET /api/account-profiles", server.accountProtected(http.HandlerFunc(server.accountProfiles)))
 	mux.Handle("POST /api/account-profiles", server.accountMutating(http.HandlerFunc(server.saveAccountProfile)))
 	mux.Handle("POST /api/account-profiles/{profileID}/remove", server.accountMutating(http.HandlerFunc(server.removeAccountProfile)))
+	mux.Handle("GET /api/browser-site-reviews", server.protected(http.HandlerFunc(server.browserSiteReviews)))
+	mux.Handle("POST /api/browser-site-reviews", server.mutating(http.HandlerFunc(server.saveBrowserSiteReview)))
+	mux.Handle("POST /api/browser-site-reviews/remove", server.mutating(http.HandlerFunc(server.removeBrowserSiteReview)))
 	mux.HandleFunc("/", server.webApplication)
 	return server.securityHeaders(mux)
 }

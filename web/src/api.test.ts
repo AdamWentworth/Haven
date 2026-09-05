@@ -2,7 +2,7 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import * as api from "./api";
-import type { AccountProfileInput, ExpectedService, ExpectedServiceInput } from "./types";
+import type { AccountProfileInput, BrowserSiteReviewInput, ExpectedService, ExpectedServiceInput } from "./types";
 
 function response(body: unknown, status = 200) {
 	return {
@@ -27,6 +27,7 @@ describe("HAVEN API client", () => {
 			api.listDevices(signal),
 			api.listManagedAppliances(signal),
 			api.listAccountProfiles("account-access", signal),
+			api.listBrowserSiteReviews("device/one", signal),
 			api.getDevice("device/one", signal),
 			api.getRuntimeStatus(signal),
 			api.listEvents("device one", signal),
@@ -42,10 +43,11 @@ describe("HAVEN API client", () => {
 		]);
 
 		const requests = vi.mocked(fetch).mock.calls;
-		expect(requests).toHaveLength(16);
+		expect(requests).toHaveLength(17);
 		expect(requests.every(([, options]) => options?.cache === "no-store" && options.signal === signal)).toBe(true);
 		expect(requests.map(([url]) => url)).toContain("/api/devices/device%2Fone");
 		expect(requests.map(([url]) => url)).toContain("/api/events?limit=60&deviceId=device+one");
+		expect(requests.map(([url]) => url)).toContain("/api/browser-site-reviews?deviceId=device%2Fone");
 		const accountRequest = requests.find(([url]) => url === "/api/account-profiles");
 		expect(new Headers(accountRequest?.[1]?.headers).get("X-HAVEN-Account-Access")).toBe("account-access");
 	});
@@ -56,6 +58,9 @@ describe("HAVEN API client", () => {
 		await api.registerPushDestination({ endpoint: "https://push.example.test/id", expirationTime: null, keys: { auth: "auth", p256dh: "key" } }, "Browser");
 		await api.removePushDestination("https://push.example.test/id");
 		await api.saveFindingReview({ deviceId: "device", findingId: "finding", state: "acknowledged", note: "reviewed", snoozedUntil: null });
+		const browserReview = { deviceId: "device", browserId: "chrome", profileFingerprint: "abcdef0123456789abcdef01", domain: "example.test", state: "signed-in-keep" } as BrowserSiteReviewInput;
+		await api.saveBrowserSiteReview(browserReview);
+		await api.removeBrowserSiteReview(browserReview);
 		const service = { deviceId: "device", protocol: "TCP", port: 443, portEnd: 443, bindScope: "private", label: "HTTPS" } as ExpectedServiceInput;
 		await api.saveExpectedService(service);
 		await api.saveExpectedServices("device", [service]);
@@ -75,6 +80,7 @@ describe("HAVEN API client", () => {
 		expect(accountMutations.every(([, options]) => new Headers(options?.headers).get("X-HAVEN-Account-Access") === "account-access")).toBe(true);
 		expect(fetchMock.mock.calls.map(([url]) => url)).toContain("/api/expected-services/service%2Fone/remove");
 		expect(fetchMock.mock.calls.map(([url]) => url)).toContain("/api/account-profiles/account%2Fone/remove");
+		expect(fetchMock.mock.calls.map(([url]) => url)).toContain("/api/browser-site-reviews/remove");
 
 		fetchMock.mockResolvedValueOnce(response(null, 204));
 		await expect(api.logout()).resolves.toBeUndefined();

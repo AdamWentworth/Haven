@@ -427,6 +427,20 @@ var migrations = []migration{
 				ON account_profiles (updated_at DESC, id)`,
 		},
 	},
+	{
+		version: 16,
+		statements: []string{
+			`CREATE TABLE browser_site_reviews (
+				id TEXT PRIMARY KEY,
+				device_id TEXT NOT NULL REFERENCES devices(id) ON DELETE CASCADE,
+				encrypted_review BLOB NOT NULL,
+				created_at TEXT NOT NULL,
+				updated_at TEXT NOT NULL
+			)`,
+			`CREATE INDEX browser_site_reviews_device
+				ON browser_site_reviews (device_id, updated_at DESC, id)`,
+		},
+	},
 }
 
 func Open(ctx context.Context, path string) (*Store, error) {
