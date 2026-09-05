@@ -15,6 +15,9 @@ import (
 
 func TestHubReportIsRedactedAndFactBased(t *testing.T) {
 	directory := t.TempDir()
+	if err := os.Chmod(directory, 0o700); err != nil {
+		t.Fatal(err)
+	}
 	for _, name := range []string{"auth-credential.key", "account-notebook.key", "browser-site-reviews.key", "push-subscription.key", "vapid-keys.json"} {
 		if err := os.WriteFile(filepath.Join(directory, name), []byte("private-marker"), 0o600); err != nil {
 			t.Fatal(err)
