@@ -4,7 +4,7 @@
 // this exact origin pinned at build time; runtime environment variables cannot
 // redirect an installed security dashboard.
 const { HAVEN_URL } = require("./build/origin.cjs");
-const DESKTOP_VERSION = "0.25.1";
+const DESKTOP_VERSION = "0.25.2";
 const expected = new URL(HAVEN_URL);
 
 function isHavenUrl(rawUrl) {
