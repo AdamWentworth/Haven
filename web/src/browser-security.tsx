@@ -1,6 +1,7 @@
+import { useMemo, useState } from "react";
 import { siBrave, siFirefoxbrowser, siGooglechrome, type SimpleIcon } from "simple-icons";
 import { AlertIcon, BrowserIcon, CheckIcon, HelpIcon } from "./icons";
-import type { BrowserExtension, BrowserExtensionChange, BrowserInstallation, BrowserProtectionStatus, BrowserSecurityStatus } from "./types";
+import type { BrowserCookieSite, BrowserExtension, BrowserExtensionChange, BrowserInstallation, BrowserProfile, BrowserProtectionStatus, BrowserSecurityStatus } from "./types";
 import { StatusChip, type Tone } from "./ui";
 
 const browserIcons: Record<string, SimpleIcon> = {
@@ -100,6 +101,60 @@ function ExtensionRow({ extension }: { extension: BrowserExtension }) {
 	</li>;
 }
 
+const dormantCookieAge = 90 * 24 * 60 * 60 * 1000;
+
+function cookieSiteReview(site: BrowserCookieSite, now = Date.now()) {
+	if (!site.lastAccessedAt) return { candidate: true, label: "Review date unavailable", tone: "unknown" as Tone };
+	const timestamp = new Date(site.lastAccessedAt).getTime();
+	if (!Number.isFinite(timestamp)) return { candidate: true, label: "Review date unavailable", tone: "unknown" as Tone };
+	if (now - timestamp >= dormantCookieAge) return { candidate: true, label: "No access 90+ days", tone: "attention" as Tone };
+	return { candidate: false, label: "Recently accessed", tone: "configured" as Tone };
+}
+
+function readableCookieDate(value?: string) {
+	if (!value) return "Not available";
+	const parsed = new Date(value);
+	if (!Number.isFinite(parsed.getTime())) return "Not available";
+	return new Intl.DateTimeFormat(undefined, { year: "numeric", month: "short", day: "numeric" }).format(parsed);
+}
+
+function CookieSiteRow({ site }: { site: BrowserCookieSite }) {
+	const review = cookieSiteReview(site);
+	return <li className="browser-cookie-site">
+		<div className="browser-cookie-site-heading"><div><strong>{site.domain}</strong><small>Last cookie access {readableCookieDate(site.lastAccessedAt)}</small></div><StatusChip label={review.label} tone={review.tone} /></div>
+		<div className="browser-cookie-counts" aria-label={`${site.domain} cookie metadata`}>
+			<span><strong>{site.cookieCount}</strong> total</span>
+			<span><strong>{site.sessionCookieCount}</strong> session-scoped</span>
+			<span><strong>{site.persistentCookieCount}</strong> persistent</span>
+			<span><strong>{site.secureCookieCount}/{site.cookieCount}</strong> Secure</span>
+			<span><strong>{site.httpOnlyCookieCount}/{site.cookieCount}</strong> HTTP-only</span>
+		</div>
+		{review.candidate && <p>If you do not recognize or use this site in this profile, sign out at the site and clear its site data in Chrome.</p>}
+		{site.latestExpiryAt && <small className="browser-cookie-expiry">Latest persistent-cookie expiry: {readableCookieDate(site.latestExpiryAt)}</small>}
+	</li>;
+}
+
+function CookieProfileReview({ profile }: { profile: BrowserProfile }) {
+	const [query, setQuery] = useState("");
+	const [reviewOnly, setReviewOnly] = useState(false);
+	const [showAll, setShowAll] = useState(false);
+	const reviewCount = useMemo(() => profile.sites.filter((site) => cookieSiteReview(site).candidate).length, [profile.sites]);
+	const filtered = useMemo(() => profile.sites.filter((site) => {
+		if (reviewOnly && !cookieSiteReview(site).candidate) return false;
+		return site.domain.includes(query.trim().toLowerCase());
+	}), [profile.sites, query, reviewOnly]);
+	const visible = showAll || query.trim() || reviewOnly ? filtered : filtered.slice(0, 20);
+	return <details className="browser-cookie-profile" open>
+		<summary><div><strong>{profile.name}</strong><small>{profile.cookieCount} cookie{profile.cookieCount === 1 ? "" : "s"} across {profile.sites.length} site{profile.sites.length === 1 ? "" : "s"}</small></div><StatusChip label={reviewCount > 0 ? `${reviewCount} to review` : "No old site data"} tone={reviewCount > 0 ? "attention" : "healthy"} /></summary>
+		{profile.cookieStatus === "unavailable" ? <p className="browser-empty">Chrome cookie metadata could not be read for this profile. Chrome remains usable and no cookie values were requested.</p> : <>
+			<div className="browser-cookie-controls"><label><span>Filter sites</span><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="facebook.com" /></label><button type="button" className={reviewOnly ? "active" : ""} onClick={() => setReviewOnly((current) => !current)}>{reviewOnly ? "Showing review candidates" : "Review candidates only"}</button></div>
+			{profile.cookieStatus === "partial" && <p className="browser-coverage-note"><HelpIcon size={17} /><span>This profile is a bounded partial view. HAVEN reports the verified rows and never copies the cookie database.</span></p>}
+			{visible.length === 0 ? <p className="browser-empty">No cookie sites match this view.</p> : <ul className="browser-cookie-site-list">{visible.map((site) => <CookieSiteRow site={site} key={site.domain} />)}</ul>}
+			{!showAll && !query.trim() && !reviewOnly && filtered.length > visible.length && <button type="button" className="browser-cookie-show-all" onClick={() => setShowAll(true)}>Show all {filtered.length} sites</button>}
+		</>}
+	</details>;
+}
+
 export function BrowserSecurityPanel({ status }: { status: BrowserSecurityStatus | null }) {
 	if (!status || status.coverage === "unavailable") {
 		return <section className="panel browser-security-panel" aria-labelledby="browser-security-title">
@@ -110,19 +165,21 @@ export function BrowserSecurityPanel({ status }: { status: BrowserSecurityStatus
 	const profileCount = status.browsers.reduce((total, browser) => total + browser.profileCount, 0);
 	const extensionCount = status.browsers.reduce((total, browser) => total + browser.extensions.length, 0);
 	const broadAccessCount = status.browsers.reduce((total, browser) => total + browser.extensions.filter((extension) => extension.siteAccess === "all-sites" || extension.optionalSiteAccess === "all-sites").length, 0);
+	const cookieSiteCount = status.browsers.reduce((total, browser) => total + (browser.profiles || []).reduce((profileTotal, profile) => profileTotal + profile.sites.length, 0), 0);
 	return <section className="panel browser-security-panel" aria-labelledby="browser-security-title">
 		<div className="section-heading"><div className="heading-identity"><span className="section-icon cyan"><BrowserIcon /></span><div><p className="eyebrow">BROWSER &amp; SESSION EXPOSURE</p><h2 id="browser-security-title">Browser security</h2></div></div><p>Live, privacy-bounded evidence</p></div>
-		<p className="browser-privacy"><CheckIcon size={17} /><span><strong>Private by design.</strong> HAVEN never reads or stores cookies, history, passwords, page contents, form data, raw extension IDs, or site patterns. Routine inventory stays live-only; privacy-reduced summaries of meaningful extension changes can appear in Security Activity.</span></p>
-		<div className="browser-metrics" aria-label="Browser exposure summary"><div><small>Browsers</small><strong>{status.browsers.length}</strong></div><div><small>Profiles</small><strong>{profileCount}</strong></div><div><small>Extensions</small><strong>{extensionCount}</strong></div><div><small>Broad site access</small><strong>{broadAccessCount}</strong></div></div>
+		<p className="browser-privacy"><CheckIcon size={17} /><span><strong>Values stay private.</strong> HAVEN reads only aggregate Chrome cookie metadata for this requested review. It never selects or transmits cookie names, values, encrypted values, paths, passwords, page contents, form data, raw extension IDs, or extension site patterns. Browser inventory stays live-only and disappears from the hub after a restart until the next report.</span></p>
+		<div className="browser-metrics" aria-label="Browser exposure summary"><div><small>Browsers</small><strong>{status.browsers.length}</strong></div><div><small>Profiles</small><strong>{profileCount}</strong></div><div><small>Cookie sites</small><strong>{cookieSiteCount}</strong></div><div><small>Extensions</small><strong>{extensionCount}</strong></div><div><small>Broad site access</small><strong>{broadAccessCount}</strong></div></div>
 		{status.coverage === "partial" && <p className="browser-coverage-note"><HelpIcon size={17} /><span>Some browser metadata could not be read. Counts include only what the agent verified.</span></p>}
 		{status.protections.length > 0 && <div className="browser-protections"><h3>System web protections</h3><div>{status.protections.map((protection) => <article key={protection.id}><div><strong>{protection.name}</strong>{protection.source && <small>{protection.source}</small>}{protectionDetail(protection) && <p>{protectionDetail(protection)}</p>}</div><StatusChip label={protectionLabel(protection.state)} tone={protectionTone(protection.state)} /></article>)}</div></div>}
 		{status.changes && status.changes.length > 0 && <div className="browser-changes"><div><h3>Meaningful extension changes</h3><StatusChip label={`${status.changes.length} to review`} tone="attention" /></div><p>Compared with this endpoint&apos;s last accepted local baseline.</p><ul>{status.changes.map((change) => <li key={change.id}><AlertIcon size={17} /><span><strong>{changeTitle(change)}</strong><small>{changeDetail(change)}</small></span></li>)}</ul></div>}
 		<div className="browser-grid">
-			{status.browsers.length === 0 ? <p className="activity-empty"><strong>No supported browser profiles observed.</strong><span>This is an inventory result, not a security failure.</span></p> : status.browsers.map((browser) => <article className="browser-card" key={browser.id}>
+			{status.browsers.length === 0 ? <p className="activity-empty"><strong>No supported browser profiles observed.</strong><span>This is an inventory result, not a security failure.</span></p> : status.browsers.map((browser) => <article className={`browser-card${browser.profiles && browser.profiles.length > 0 ? " browser-card-wide" : ""}`} key={browser.id}>
 				<div className="browser-card-heading"><div><BrowserMark browser={browser} /><div><h3>{browser.name}</h3><p>{browser.version || "Version not exposed"} · {browser.profileCount} profile{browser.profileCount === 1 ? "" : "s"}</p></div></div><StatusChip label={`${browser.extensions.length} extension${browser.extensions.length === 1 ? "" : "s"}`} tone="configured" /></div>
+				{browser.id === "chrome" && browser.profiles && browser.profiles.length > 0 && <div className="browser-cookie-review"><div className="browser-cookie-review-heading"><div><h3>Chrome profile site data</h3><p>Domains and aggregate cookie attributes—not authentication credentials</p></div><StatusChip label={`${browser.profiles.length} profile${browser.profiles.length === 1 ? "" : "s"}`} tone="configured" /></div><p className="browser-cookie-guidance"><HelpIcon size={16} /><span>A cookie can support a login, preferences, analytics, or site operation. Chrome&apos;s last-access timestamp is only a review hint, so HAVEN marks old entries as candidates—not confirmed sessions—and never claims that clearing one is required.</span></p>{browser.profiles.map((profile) => <CookieProfileReview profile={profile} key={profile.fingerprint} />)}</div>}
 				{browser.extensions.length === 0 ? <p className="browser-empty">No user extensions were observed.</p> : <ul className="browser-extension-list">{browser.extensions.map((extension) => <ExtensionRow extension={extension} key={extension.fingerprint} />)}</ul>}
 			</article>)}
 		</div>
-		<p className="browser-boundary"><HelpIcon size={16} /><span>Declared access describes an extension&apos;s capability—not proof that it is malicious, that optional access was granted, or that a browser version is current. Session-defense signals do not enumerate provider sessions or inspect cookie contents. Review unfamiliar names directly in the browser before removing anything.</span></p>
+		<p className="browser-boundary"><HelpIcon size={16} /><span>Cookie presence cannot prove that a provider session is authenticated: login state may use several storage mechanisms and providers can revoke sessions without immediately removing every local cookie. Declared extension access is likewise a capability, not proof of malicious behavior. Confirm unfamiliar sites in Chrome or at the provider before signing out or clearing data.</span></p>
 	</section>;
 }

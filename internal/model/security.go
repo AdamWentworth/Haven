@@ -19,11 +19,12 @@ type SecuritySnapshot struct {
 }
 
 // BrowserSecurityStatus is a deliberately narrow inventory of supported
-// browser installations, manifest-declared extension capabilities, and
-// platform web protections. It never contains profile names, extension IDs,
-// host match patterns, browsing history, cookies, credentials, tokens, page
-// contents, or saved form data. Extension fingerprints are one-way hashes used
-// only to correlate the same installation between observations.
+// browser installations, manifest-declared extension capabilities, platform
+// web protections, and owner-requested cookie metadata. Cookie values, cookie
+// names, paths, credentials, tokens, page contents, history entries, saved form
+// data, raw profile paths, extension IDs, and host match patterns have no
+// representation in this schema. Extension and profile fingerprints are
+// one-way hashes used only to correlate the same local installation.
 type BrowserSecurityStatus struct {
 	Coverage    string                    `json:"coverage"`
 	Browsers    []BrowserInstallation     `json:"browsers"`
@@ -37,6 +38,30 @@ type BrowserInstallation struct {
 	Version      string             `json:"version,omitempty"`
 	ProfileCount int                `json:"profileCount"`
 	Extensions   []BrowserExtension `json:"extensions"`
+	Profiles     []BrowserProfile   `json:"profiles,omitempty"`
+}
+
+// BrowserProfile contains an aggregated, live-only view of Chrome cookie
+// metadata. A site row says that cookies exist for a domain; it does not prove
+// that the user is authenticated there.
+type BrowserProfile struct {
+	Fingerprint  string              `json:"fingerprint"`
+	Name         string              `json:"name"`
+	CookieStatus string              `json:"cookieStatus"`
+	CookieCount  int                 `json:"cookieCount"`
+	Sites        []BrowserCookieSite `json:"sites"`
+	Truncated    bool                `json:"truncated,omitempty"`
+}
+
+type BrowserCookieSite struct {
+	Domain                string     `json:"domain"`
+	CookieCount           int        `json:"cookieCount"`
+	SessionCookieCount    int        `json:"sessionCookieCount"`
+	PersistentCookieCount int        `json:"persistentCookieCount"`
+	SecureCookieCount     int        `json:"secureCookieCount"`
+	HTTPOnlyCookieCount   int        `json:"httpOnlyCookieCount"`
+	LastAccessedAt        *time.Time `json:"lastAccessedAt,omitempty"`
+	LatestExpiryAt        *time.Time `json:"latestExpiryAt,omitempty"`
 }
 
 type BrowserExtension struct {

@@ -1,7 +1,7 @@
 "use strict";
 
 const HAVEN_URL = "https://haven.home.arpa:8443/";
-const DESKTOP_VERSION = "0.19.0";
+const DESKTOP_VERSION = "0.20.0";
 const expected = new URL(HAVEN_URL);
 
 function isHavenUrl(rawUrl) {

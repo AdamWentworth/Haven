@@ -2,12 +2,16 @@
 
 import "@testing-library/jest-dom/vitest";
 import { cleanup, render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import axe from "axe-core";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { BrowserSecurityPanel } from "./browser-security";
 import type { BrowserSecurityStatus } from "./types";
 
-afterEach(cleanup);
+afterEach(() => {
+	cleanup();
+	vi.restoreAllMocks();
+});
 
 const observed: BrowserSecurityStatus = {
 	coverage: "observed",
@@ -23,6 +27,16 @@ const observed: BrowserSecurityStatus = {
 		name: "Google Chrome",
 		version: "140.0.1",
 		profileCount: 2,
+		profiles: [{
+			fingerprint: "abcdef0123456789abcdef01",
+			name: "Personal",
+			cookieStatus: "observed",
+			cookieCount: 3,
+			sites: [
+				{ domain: "facebook.com", cookieCount: 2, sessionCookieCount: 1, persistentCookieCount: 1, secureCookieCount: 2, httpOnlyCookieCount: 2, lastAccessedAt: "2020-01-01T00:00:00Z", latestExpiryAt: "2027-01-01T00:00:00Z" },
+				{ domain: "recent.example.com", cookieCount: 1, sessionCookieCount: 0, persistentCookieCount: 1, secureCookieCount: 1, httpOnlyCookieCount: 1, lastAccessedAt: "2026-09-04T00:00:00Z", latestExpiryAt: "2027-01-01T00:00:00Z" },
+			],
+		}],
 		extensions: [{
 			fingerprint: "0123456789abcdef01234567",
 			name: "Password Helper",
@@ -51,10 +65,14 @@ describe("browser security panel", () => {
 		expect(screen.getByText("Review evidence")).toBeInTheDocument();
 		expect(screen.getByText(/2 Chrome verification events observed/)).toBeInTheDocument();
 		expect(screen.getByText("Password Helper gained capabilities")).toBeInTheDocument();
-		expect(screen.getByText(/routine inventory stays live-only/i)).toBeInTheDocument();
-		expect(screen.getByText(/do not enumerate provider sessions or inspect cookie contents/i)).toBeInTheDocument();
-		expect(screen.getByText(/never reads or stores cookies, history, passwords/i)).toBeInTheDocument();
+		expect(screen.getByText("Chrome profile site data")).toBeInTheDocument();
+		expect(screen.getByText("Personal")).toBeInTheDocument();
+		expect(screen.getByText("facebook.com")).toBeInTheDocument();
+		expect(screen.getByText("No access 90+ days")).toBeInTheDocument();
+		expect(screen.getByText(/cookie presence cannot prove that a provider session is authenticated/i)).toBeInTheDocument();
+		expect(screen.getByText(/never selects or transmits cookie names, values, encrypted values, paths/i)).toBeInTheDocument();
 		expect(document.body).not.toHaveTextContent("0123456789abcdef01234567");
+		expect(document.body).not.toHaveTextContent("private-session-token");
 		const result = await axe.run(document.body, { rules: { "color-contrast": { enabled: false } } });
 		expect(result.violations.filter((violation) => violation.impact === "critical" || violation.impact === "serious")).toEqual([]);
 	});
@@ -63,5 +81,16 @@ describe("browser security panel", () => {
 		render(<BrowserSecurityPanel status={{ coverage: "unavailable", browsers: [], protections: [] }} />);
 		expect(screen.getByText("Browser inventory is unavailable.")).toBeInTheDocument();
 		expect(screen.getByText(/could not verify supported browser metadata/i)).toBeInTheDocument();
+	});
+
+	it("filters a profile to conservative review candidates without calling them sessions", async () => {
+		vi.spyOn(Date, "now").mockReturnValue(new Date("2026-09-04T00:01:00Z").getTime());
+		const user = userEvent.setup();
+		render(<BrowserSecurityPanel status={observed} />);
+		expect(screen.getByText("recent.example.com")).toBeInTheDocument();
+		await user.click(screen.getByRole("button", { name: "Review candidates only" }));
+		expect(screen.getByText("facebook.com")).toBeInTheDocument();
+		expect(screen.queryByText("recent.example.com")).not.toBeInTheDocument();
+		expect(screen.getByRole("button", { name: "Showing review candidates" })).toBeInTheDocument();
 	});
 });

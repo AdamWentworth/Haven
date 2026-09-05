@@ -25,6 +25,27 @@ export interface BrowserInstallation {
 	version?: string;
 	profileCount: number;
 	extensions: BrowserExtension[];
+	profiles?: BrowserProfile[];
+}
+
+export interface BrowserProfile {
+	fingerprint: string;
+	name: string;
+	cookieStatus: "observed" | "partial" | "unavailable";
+	cookieCount: number;
+	sites: BrowserCookieSite[];
+	truncated?: boolean;
+}
+
+export interface BrowserCookieSite {
+	domain: string;
+	cookieCount: number;
+	sessionCookieCount: number;
+	persistentCookieCount: number;
+	secureCookieCount: number;
+	httpOnlyCookieCount: number;
+	lastAccessedAt?: string;
+	latestExpiryAt?: string;
 }
 
 export interface BrowserExtension {
