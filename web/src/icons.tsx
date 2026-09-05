@@ -14,7 +14,8 @@ function SvgIcon({ children, className, size = 22 }: IconProps & { children: Rea
 }
 
 export function HavenIcon(props: IconProps) {
-  return <SvgIcon {...props}><path d="M12 2.7 20 6v5.8c0 4.9-3.1 8-8 9.5-4.9-1.5-8-4.6-8-9.5V6l8-3.3Z" /><path d="M8.5 8.1v7.8M15.5 8.1v7.8M8.5 12h7" /></SvgIcon>;
+  const { className, size = 22 } = props;
+  return <svg className={className} width={size} height={size} viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="M12 3 19.5 6.1v5.45c0 4.6-2.9 7.5-7.5 8.9-4.6-1.4-7.5-4.3-7.5-8.9V6.1L12 3Z" fill="#10251d" stroke="#73e2a7" strokeWidth="1.3" strokeLinejoin="round" /><path d="M8.8 8v8M15.2 8v8M8.8 12h6.4" fill="none" stroke="#dff5e8" strokeWidth="1.3" strokeLinecap="round" /></svg>;
 }
 
 export function DefenderIcon(props: IconProps) {

@@ -5,13 +5,14 @@
 package main
 
 import (
+	"bytes"
+	"flag"
 	"image"
 	"image/color"
 	"image/png"
 	"math"
 	"os"
 	"path/filepath"
-	"strconv"
 )
 
 type point struct{ x, y float64 }
@@ -23,38 +24,61 @@ var shield = []point{
 }
 
 func main() {
-	for _, size := range []int{192, 512} {
-		path := filepath.Join("web", "public", "haven-app-icon-"+strconv.Itoa(size)+".png")
-		file, err := os.Create(path)
-		if err != nil {
-			panic(err)
+	check := flag.Bool("check", false, "verify committed icons match the deterministic generator")
+	flag.Parse()
+	assets := []struct {
+		path  string
+		size  int
+		tiled bool
+	}{
+		{filepath.Join("web", "public", "haven-app-icon-192.png"), 192, false},
+		{filepath.Join("web", "public", "haven-app-icon-512.png"), 512, false},
+		{filepath.Join("web", "public", "haven-maskable-icon-512.png"), 512, true},
+		{filepath.Join("desktop", "build", "icon.png"), 512, false},
+	}
+	for _, asset := range assets {
+		generated := encode(render(asset.size, asset.tiled))
+		if *check {
+			committed, err := os.ReadFile(asset.path)
+			if err != nil || !bytes.Equal(committed, generated) {
+				panic("brand asset is missing or stale: " + asset.path)
+			}
+			continue
 		}
-		if err := png.Encode(file, render(size)); err != nil {
-			file.Close()
-			panic(err)
-		}
-		if err := file.Close(); err != nil {
+		if err := os.WriteFile(asset.path, generated, 0o644); err != nil {
 			panic(err)
 		}
 	}
 }
 
-func render(size int) *image.RGBA {
+func encode(value image.Image) []byte {
+	var output bytes.Buffer
+	if err := png.Encode(&output, value); err != nil {
+		panic(err)
+	}
+	return output.Bytes()
+}
+
+func render(size int, tiled bool) *image.NRGBA {
 	const samples = 4
 	large := size * samples
-	canvas := image.NewRGBA(image.Rect(0, 0, size, size))
+	canvas := image.NewNRGBA(image.Rect(0, 0, size, size))
 	background := color.RGBA{8, 16, 13, 255}
 	shieldFill := color.RGBA{16, 37, 29, 255}
 	green := color.RGBA{115, 226, 167, 255}
 	pale := color.RGBA{223, 245, 232, 255}
 	for y := 0; y < size; y++ {
 		for x := 0; x < size; x++ {
-			var totals [4]int
+			var premultiplied [3]int
+			alpha := 0
 			for sy := 0; sy < samples; sy++ {
 				for sx := 0; sx < samples; sx++ {
 					px := (float64(x*samples+sx) + .5) * 512 / float64(large)
 					py := (float64(y*samples+sy) + .5) * 512 / float64(large)
-					shade := background
+					shade := color.RGBA{}
+					if tiled {
+						shade = background
+					}
 					if insidePolygon(point{px, py}, shield) {
 						shade = shieldFill
 					}
@@ -66,15 +90,30 @@ func render(size int) *image.RGBA {
 						lineDistance(point{px, py}, point{188, 256}, point{324, 256}) <= 14 {
 						shade = pale
 					}
-					totals[0] += int(shade.R)
-					totals[1] += int(shade.G)
-					totals[2] += int(shade.B)
-					totals[3] += int(shade.A)
+					premultiplied[0] += int(shade.R) * int(shade.A)
+					premultiplied[1] += int(shade.G) * int(shade.A)
+					premultiplied[2] += int(shade.B) * int(shade.A)
+					alpha += int(shade.A)
 				}
 			}
 			count := samples * samples
-			canvas.SetRGBA(x, y, color.RGBA{uint8(totals[0] / count), uint8(totals[1] / count), uint8(totals[2] / count), uint8(totals[3] / count)})
+			if alpha == 0 {
+				canvas.SetNRGBA(x, y, color.NRGBA{})
+				continue
+			}
+			canvas.SetNRGBA(x, y, color.NRGBA{
+				uint8(premultiplied[0] / alpha),
+				uint8(premultiplied[1] / alpha),
+				uint8(premultiplied[2] / alpha),
+				uint8(alpha / count),
+			})
 		}
+	}
+	if tiled && canvas.NRGBAAt(0, 0).A != 255 {
+		panic("maskable icon must have an opaque background")
+	}
+	if !tiled && canvas.NRGBAAt(0, 0).A != 0 {
+		panic("standard icon must preserve a transparent background")
 	}
 	return canvas
 }
