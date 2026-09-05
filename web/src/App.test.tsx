@@ -59,7 +59,7 @@ const fixtures = vi.hoisted(() => {
 		schemaVersion: 1,
 		kind: "hub",
 		status: "ready",
-		version: "0.25.2",
+		version: "0.25.3",
 		revision: "test-revision",
 		generatedAt: "2026-09-05T08:00:00Z",
 		summary: { passing: 2, advisory: 0, failed: 0 },

@@ -134,22 +134,22 @@ func TestBrandAssetsPreservePurposeSpecificTransparency(t *testing.T) {
 			t.Fatalf("Windows icon entry %d occupies only %d of %d pixels", index, visibleWidth(value), size)
 		}
 		center := nrgbaAt(value, size/2, size/2)
-		if center.A < 0xf0 || center.G <= center.R || center.G <= center.B {
-			t.Fatalf("Windows icon entry %d lost its central beacon: %#v", index, center)
+		if center.A < 0xf0 || center.R < 0xa0 || center.G < 0xb0 || center.B < 0xa0 || center.G <= center.R || center.G <= center.B {
+			t.Fatalf("Windows icon entry %d lost its rounded monogram bridge: %#v", index, center)
 		}
 	}
 }
 
-func TestCanonicalBrandMarkRetainsWatchtowerAndBeaconPalette(t *testing.T) {
+func TestCanonicalBrandMarkRetainsSmoothShieldAndMonogramPalette(t *testing.T) {
 	standard, _ := readBrandPNG(t, "..", "..", "web", "public", "haven-app-icon-512.png")
 	want := map[string]struct {
-		x, y int
+		x, y  int
 		color color.NRGBA
 	}{
-		"shield border": {256, 48, color.NRGBA{R: 115, G: 226, B: 167, A: 255}},
-		"shield field":  {256, 104, color.NRGBA{R: 16, G: 37, B: 29, A: 255}},
-		"watchtower":    {180, 180, color.NRGBA{R: 223, G: 245, B: 232, A: 255}},
-		"beacon":         {256, 256, color.NRGBA{R: 115, G: 226, B: 167, A: 255}},
+		"shield border":   {256, 48, color.NRGBA{R: 115, G: 226, B: 167, A: 255}},
+		"shield field":    {256, 104, color.NRGBA{R: 16, G: 37, B: 29, A: 255}},
+		"rounded upright": {180, 180, color.NRGBA{R: 223, G: 245, B: 232, A: 255}},
+		"monogram bridge": {256, 256, color.NRGBA{R: 223, G: 245, B: 232, A: 255}},
 	}
 	for label, sample := range want {
 		if got := nrgbaAt(standard, sample.x, sample.y); got != sample.color {

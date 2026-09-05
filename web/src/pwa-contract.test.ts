@@ -23,15 +23,19 @@ describe("installable application contract", () => {
 	});
 
 	it("keeps the normal mark transparent and isolates the opaque maskable tile", () => {
-		expect(standardIcon).not.toContain("<rect");
+		expect(standardIcon).not.toContain('<rect width="24" height="24"');
 		expect(standardIcon).toContain('fill="#10251d"');
 		expect(maskableIcon).toContain('<rect width="24" height="24" fill="#08100d"/>');
 		const canonicalPaths = Array.from(standardIcon.matchAll(/<path d="([^"]+)"/g), (match) => match[1]);
 		const maskablePaths = Array.from(maskableIcon.matchAll(/<path d="([^"]+)"/g), (match) => match[1]);
-		expect(canonicalPaths).toHaveLength(4);
+		const canonicalRects = Array.from(standardIcon.matchAll(/<rect ([^>]+?)\/>/g), (match) => match[1]);
+		const maskableRects = Array.from(maskableIcon.matchAll(/<rect ([^>]+?)\/>/g), (match) => match[1]).slice(1);
+		expect(canonicalPaths).toHaveLength(2);
+		expect(canonicalRects).toHaveLength(3);
 		expect(maskablePaths).toEqual(canonicalPaths);
+		expect(maskableRects).toEqual(canonicalRects);
 		for (const path of canonicalPaths) expect(iconComponents).toContain(`d="${path}"`);
-		expect(standardIcon).toContain('d="m12 10.65 1.35 1.35L12 13.35 10.65 12 12 10.65Z" fill="#73e2a7"');
+		for (const rectangle of canonicalRects) expect(iconComponents).toContain(rectangle);
 	});
 
 	it("advertises the manifest without adding an authenticated-page cache", () => {
