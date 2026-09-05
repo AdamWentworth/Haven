@@ -62,7 +62,7 @@ describe("browser security panel", () => {
 		render(<BrowserSecurityPanel status={observed} />);
 		expect(screen.getByRole("heading", { name: "Browser security" })).toBeInTheDocument();
 		expect(screen.getByText("Google Chrome")).toBeInTheDocument();
-		expect(screen.getByText("Password Helper")).toBeInTheDocument();
+		expect(screen.getAllByText("Password Helper").length).toBeGreaterThan(0);
 		expect(screen.getAllByText("All sites").length).toBeGreaterThan(0);
 		expect(screen.getByText("Cookies")).toBeInTheDocument();
 		expect(screen.getByText("Downloads · optional")).toBeInTheDocument();
@@ -70,6 +70,11 @@ describe("browser security panel", () => {
 		expect(screen.getByText("Browser default")).toBeInTheDocument();
 		expect(screen.getByText("Review evidence")).toBeInTheDocument();
 		expect(screen.getByText(/2 Chrome verification events observed/)).toBeInTheDocument();
+		expect(screen.getByRole("heading", { name: "Browser hardening" })).toBeInTheDocument();
+		expect(screen.getByText(/Logged-in sites and cookie counts do not affect this result/)).toBeInTheDocument();
+		expect(screen.getByRole("heading", { name: "Extension exposure" })).toBeInTheDocument();
+		expect(screen.getByRole("heading", { name: "If a real incident signal appears" })).toBeInTheDocument();
+		expect(screen.getByText(/A normal logged-in session is not/)).toBeInTheDocument();
 		expect(screen.getByText("Password Helper gained capabilities")).toBeInTheDocument();
 		expect(screen.getByText("Chrome profile site data")).toBeInTheDocument();
 		expect(screen.getByText("Personal")).toBeInTheDocument();

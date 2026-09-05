@@ -16,6 +16,8 @@ export default defineConfig({
         "src/push.ts": { statements: 85, branches: 75, functions: 90, lines: 85 },
 		"src/account-security.ts": { statements: 95, branches: 80, functions: 95, lines: 95 },
 		"src/account-notebook.tsx": { statements: 65, branches: 60, functions: 60, lines: 65 },
+		"src/browser-hardening.ts": { statements: 90, branches: 85, functions: 100, lines: 90 },
+		"src/browser-hardening-review.tsx": { statements: 90, branches: 65, functions: 100, lines: 95 },
       },
     },
   },

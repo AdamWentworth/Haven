@@ -1,7 +1,8 @@
 import { useMemo, useState } from "react";
 import { siBrave, siFirefoxbrowser, siGooglechrome, type SimpleIcon } from "simple-icons";
 import { AlertIcon, BrowserIcon, CheckIcon, HelpIcon } from "./icons";
-import type { BrowserCookieSite, BrowserExtension, BrowserExtensionChange, BrowserInstallation, BrowserProfile, BrowserProtectionStatus, BrowserSecurityStatus, BrowserSiteReview, BrowserSiteReviewInput, BrowserSiteReviewKey, BrowserSiteReviewState } from "./types";
+import { BrowserHardeningReviewPanel } from "./browser-hardening-review";
+import type { BrowserCookieSite, BrowserExtension, BrowserExtensionChange, BrowserInstallation, BrowserProfile, BrowserSecurityStatus, BrowserSiteReview, BrowserSiteReviewInput, BrowserSiteReviewKey, BrowserSiteReviewState } from "./types";
 import { StatusChip, type Tone } from "./ui";
 import { buildCookieCleanupQueue, cookieSessionSignal, cookieSiteReview, groupCookieSites, sortCookieSites, type CookieSessionSignalLevel, type CookieSiteSort } from "./cookie-review";
 
@@ -39,29 +40,6 @@ function BrowserMark({ browser }: { browser: BrowserInstallation }) {
 	const icon = browserIcons[key];
 	if (!icon) return <span className="browser-mark generic"><BrowserIcon size={21} /></span>;
 	return <span className="browser-mark" style={{ color: `#${icon.hex}` }} aria-hidden="true"><svg viewBox="0 0 24 24" role="img"><path fill="currentColor" d={icon.path} /></svg></span>;
-}
-
-function protectionTone(state: BrowserProtectionStatus["state"]): Tone {
-	if (state === "enabled" || state === "clear") return "healthy";
-	if (state === "audit" || state === "default") return "configured";
-	if (state === "disabled" || state === "attention") return "attention";
-	return "unknown";
-}
-
-function protectionLabel(state: BrowserProtectionStatus["state"]) {
-	if (state === "audit") return "Audit only";
-	if (state === "default") return "Browser default";
-	if (state === "clear") return "No recent failures";
-	if (state === "attention") return "Review evidence";
-	return state.charAt(0).toUpperCase() + state.slice(1);
-}
-
-function protectionDetail(protection: BrowserProtectionStatus) {
-	if (protection.id === "chrome-cookie-verification-events" && protection.state === "attention") return `${protection.eventCount || 0} Chrome verification event${protection.eventCount === 1 ? "" : "s"} observed in the last 7 days. This can indicate incompatibility or an attempted bypass; it is not proof of malware.`;
-	if (protection.id === "chrome-cookie-verification-events" && protection.state === "clear") return "No Chrome cookie-protection verification failures were observed in the last 7 days.";
-	if (protection.id === "chrome-app-bound-encryption" && protection.state === "default") return "No overriding policy was found; Chrome controls this protection with its platform default.";
-	if (protection.id === "chrome-device-bound-sessions" && protection.state === "default") return "No overriding policy was found. Provider support and rollout still determine which eligible sessions are device-bound.";
-	return "";
 }
 
 function siteAccessLabel(access: BrowserExtension["siteAccess"]) {
@@ -235,9 +213,9 @@ export function BrowserSecurityPanel({ status, deviceId = "", reviews = [], edit
 		<p className="browser-privacy"><CheckIcon size={17} /><span><strong>Values stay private.</strong> HAVEN reads only aggregate Chrome cookie metadata for this requested review. It never selects or transmits cookie names, values, encrypted values, paths, passwords, page contents, form data, raw extension IDs, or extension site patterns. Live inventory disappears after a hub restart; only your encrypted domain-level classifications persist.</span></p>
 		<div className="browser-metrics" aria-label="Browser exposure summary"><div><small>Browsers</small><strong>{status.browsers.length}</strong></div><div><small>Profiles</small><strong>{profileCount}</strong></div><div><small>Cookie sites</small><strong>{cookieSiteCount}</strong></div><div><small>Extensions</small><strong>{extensionCount}</strong></div><div><small>Broad site access</small><strong>{broadAccessCount}</strong></div></div>
 		{status.coverage === "partial" && <p className="browser-coverage-note"><HelpIcon size={17} /><span>Some browser metadata could not be read. Counts include only what the agent verified; an active Chrome profile may temporarily lock its cookie database.</span></p>}
-		{status.protections.length > 0 && <div className="browser-protections"><h3>System web protections</h3><div>{status.protections.map((protection) => <article key={protection.id}><div><strong>{protection.name}</strong>{protection.source && <small>{protection.source}</small>}{protectionDetail(protection) && <p>{protectionDetail(protection)}</p>}</div><StatusChip label={protectionLabel(protection.state)} tone={protectionTone(protection.state)} /></article>)}</div></div>}
+		<BrowserHardeningReviewPanel status={status} />
 		{status.changes && status.changes.length > 0 && <div className="browser-changes"><div><h3>Meaningful extension changes</h3><StatusChip label={`${status.changes.length} to review`} tone="attention" /></div><p>Compared with this endpoint&apos;s last accepted local baseline.</p><ul>{status.changes.map((change) => <li key={change.id}><AlertIcon size={17} /><span><strong>{changeTitle(change)}</strong><small>{changeDetail(change)}</small></span></li>)}</ul></div>}
-		<div className="browser-grid">
+		<div className="browser-grid" id="browser-inventory">
 			{status.browsers.length === 0 ? <p className="activity-empty"><strong>No supported browser profiles observed.</strong><span>This is an inventory result, not a security failure.</span></p> : status.browsers.map((browser) => <article className={`browser-card${browser.profiles && browser.profiles.length > 0 ? " browser-card-wide" : ""}`} key={browser.id}>
 				<div className="browser-card-heading"><div><BrowserMark browser={browser} /><div><h3>{browser.name}</h3><p>{browser.version || "Version not exposed"} · {browser.profileCount} profile{browser.profileCount === 1 ? "" : "s"}</p></div></div><StatusChip label={`${browser.extensions.length} extension${browser.extensions.length === 1 ? "" : "s"}`} tone="configured" /></div>
 				{browser.id === "chrome" && browser.profiles && browser.profiles.length > 0 && <div className="browser-cookie-review"><div className="browser-cookie-review-heading"><div><h3>Chrome profile site data</h3><p>Domains and aggregate cookie attributes—not authentication credentials</p></div><StatusChip label={`${browser.profiles.length} profile${browser.profiles.length === 1 ? "" : "s"}`} tone="configured" /></div><p className="browser-cookie-guidance"><HelpIcon size={16} /><span>Classify the domain as a whole rather than guessing what individual cookies do. Signed in — keep only protects a site from HAVEN cleanup suggestions; it does not make its cookies immune to malware. Chrome&apos;s last-access timestamp remains a review hint—not proof of a login.</span></p>{browser.profiles.map((profile) => <CookieProfileReview deviceId={deviceId} browserId={browser.id} profile={profile} reviews={reviews} editable={editable} busy={busy} classify={classifySite} reset={resetSite} key={profile.fingerprint} />)}</div>}
