@@ -4,13 +4,16 @@
 
 HAVEN is a personal security observatory for home devices and networks. It presents native operating-system protections in one understandable console without trying to replace Microsoft Defender, host firewalls, or other trusted security controls.
 
-HAVEN is pre-release software. The current milestone strengthens its private, informal account-security notebook with passkey reauthentication, an inactivity lock, structured review facts, and recognizable local platform branding. It remains a checklist—not a provider integration or secret vault—and is not a replacement for native protection.
+HAVEN is pre-release software. The current milestone adds an installable desktop experience without introducing a privileged native shell or a second credential store. Its private account-security notebook remains a checklist—not a provider integration or secret vault—and HAVEN is not a replacement for native protection.
 
-## Milestone 0.15.3 — Private Account Workspace
+## Milestone 0.16 — Installable Desktop Experience
 
 The current implementation provides:
 
 - A Go hub with a responsive React and TypeScript dashboard embedded in its executable
+- An installable application manifest and dedicated-window experience for compatible desktop browsers, using the same private HTTPS origin, passkeys, Web Push subscription, and hub-delivered updates
+- A Settings installation panel that reports whether HAVEN is already installed, ready for the browser install prompt, or available through the browser's app menu
+- A deliberately unprivileged application boundary: no native command bridge, local database, duplicated credentials, authenticated-page cache, or silent notification permission request
 - A dedicated Accounts workspace for owner-reported email, social, developer, finance, gaming, shopping, work, and other profiles
 - Manual status tracking for two-step verification, factor types, password uniqueness/passwordless use, recovery methods, backup-code readiness, review dates, structured review facts, and exceptional context notes
 - Fresh passkey confirmation before account records are returned to a browser, followed by a session-bound grant held only in browser memory with a 15-minute inactivity timeout and an eight-hour absolute limit
@@ -140,6 +143,10 @@ go run .\cmd\haven-hub
 ```
 
 Open <http://localhost:5080>. The hub binds to loopback by default and writes its development database to the operating system's per-user application-data directory, outside the repository. The `localhost` name is required because browsers grant WebAuthn's local-development secure-context exception to localhost, not arbitrary loopback IP literals.
+
+## Install the desktop experience
+
+Open the production HTTPS address in a compatible desktop browser, sign in, and visit **Settings → Install HAVEN**. When the browser reports that installation is ready, HAVEN presents an **Install HAVEN** button; the browser's app or site menu remains the fallback. The installed application launches in its own window from the operating system's app launcher while continuing to use the same hub origin and security controls. It is a client shortcut, not another hub or endpoint agent. Hub monitoring continues regardless of whether the installed window starts at boot; background alert delivery remains subject to browser and operating-system policy.
 
 On first use, keep the hub running and create a one-time bootstrap code in another terminal:
 
@@ -282,7 +289,7 @@ Haven/
 
 ## Current and next security milestone
 
-Milestone 0.15.3 keeps reviewed account cards compact by removing redundant healthy-state copy, date time-of-day noise, and equal-height stretching between neighboring profiles.
+Milestone 0.16 adds a same-origin installable desktop window, local application icons, browser-owned install flow, and explicit tests that prevent a privileged native bridge or authenticated offline cache from slipping into that convenience layer. Milestone 0.15.3 keeps reviewed account cards compact by removing redundant healthy-state copy, date time-of-day noise, and equal-height stretching between neighboring profiles.
 
 Milestone 0.7 adds native Linux monitoring and boot-persistent endpoint-agent scheduling. Milestone 0.7.1 makes its network results explainable, 0.7.2 makes report freshness and finding lifecycles explicit, and 0.7.3 correlates host listeners with sanitized Docker port mappings. Milestone 0.7.4 adds deliberate suggested-baseline review; 0.7.5 adds live systemd ownership and service-constrained expectations for Linux listeners. Milestone 0.8 combines the latest authenticated reports into a network-wide coverage, change, and live-relationship view while keeping merely observed private endpoints separate from explicitly enrolled devices. Milestone 0.9 turns current findings, server-classified stale agents, incomplete enrollments, new non-local listeners, and changed service attribution into explainable active alerts. Milestone 0.10 moves that derivation to the hub and adds opt-in, encrypted, durable Web Push delivery with bounded retries and per-destination receipts; its expectation model also supports owner-constrained dynamic ranges and expiring development approvals. Milestone 0.11 adds reproducible console-free Windows scheduled-task packaging and credential-free monitoring of explicitly configured private network appliances. Milestone 0.12 adds optional read-only NAS health through bounded SNMP plus a host-key-pinned, forced-command SSH helper. Milestone 0.13 reorganizes the console around stable routes and strengthens report delivery, freshness semantics, readiness, version evidence, rendered UI tests, and the public release pipeline. Milestone 0.14 adds authenticated reporter provenance, capability evidence, fleet lifecycle presentation, checksummed cross-platform artifacts, and safe install/repair/status/uninstall workflows while preserving older enrolled reporters. Milestone 0.15 adds an encrypted owner-reported account-security notebook with calm, evidence-derived authentication and recovery suggestions while explicitly excluding provider access and secret storage; 0.15.2 adds a separately reauthenticated private workspace, structured review facts, and local platform branding. A later event-driven Windows sensor may move under Service Control Manager only when real-time Defender and Windows Event Log monitoring justify an always-running process; it must remain outbound-only and use the least privilege its collectors require. HAVEN does not scan the LAN, retain remote endpoints, or claim that an alert proves compromise. See [verification](docs/VERIFICATION.md) for the claim-to-test map. The Ubuntu hub does not execute Windows actions on another machine. GitHub Actions verifies the Go, frontend, dependency, concurrency, vulnerability, Windows process isolation, agent artifacts, image, static analysis, and public-repository safety checks on each proposed change.
 

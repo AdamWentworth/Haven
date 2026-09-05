@@ -115,7 +115,7 @@ main, footer { width: min(1180px, 92vw); margin-inline: auto; }
 .context-banner { margin: 1rem 0 0; padding: .9rem 1rem; border: 1px solid var(--line); border-radius: .75rem; color: var(--muted); background: rgba(132, 183, 255, .045); font-size: .82rem; line-height: 1.5; }
 .context-banner strong { color: #cfe1f7; }
 .network-overview-panel { border-color: rgba(111, 216, 229, .25); }
-.page-intro + .network-overview-panel, .page-intro + .device-inventory, .page-intro + .activity-panel, .page-intro + .notification-panel { margin-top: 1rem; }
+.page-intro + .network-overview-panel, .page-intro + .device-inventory, .page-intro + .activity-panel, .page-intro + .notification-panel, .page-intro + .desktop-install-panel { margin-top: 1rem; }
 .overview-changes { margin-top: .7rem; }
 .network-assurance { display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: .85rem; margin-top: 1rem; padding: .9rem 1rem; border: 1px solid var(--line); border-radius: .85rem; background: rgba(255, 255, 255, .018); }
 .network-assurance.healthy { border-color: rgba(115, 226, 167, .25); background: rgba(115, 226, 167, .035); }
@@ -289,6 +289,11 @@ main, footer { width: min(1180px, 92vw); margin-inline: auto; }
 .passkey-panel { border-color: rgba(115, 226, 167, .2); }
 .notification-panel { border-color: rgba(111, 216, 229, .24); }
 .notification-summary { display: flex; align-items: center; flex-wrap: wrap; gap: .65rem; padding-top: 1rem; color: var(--muted); font-size: .75rem; }
+.desktop-install-panel { border-color: rgba(115, 226, 167, .24); }
+.desktop-install-summary { display: flex; align-items: center; gap: .7rem; padding-top: 1rem; }
+.desktop-install-summary .status-chip { flex: 0 0 auto; }
+.desktop-install-summary p { margin: 0; color: var(--muted); font-size: .76rem; line-height: 1.5; }
+.desktop-install-panel .footnote strong { color: #cfe7d9; font-weight: 650; }
 .notification-destinations { display: grid; grid-template-columns: repeat(2, 1fr); gap: .6rem; padding-top: .8rem; }
 .notification-destinations article { display: grid; grid-template-columns: auto 1fr; align-items: center; gap: .8rem; padding: .85rem; border: 1px solid var(--line); border-radius: .8rem; background: rgba(111, 216, 229, .025); }
 .notification-destinations h3 { margin: 0 0 .25rem; font-size: .85rem; }

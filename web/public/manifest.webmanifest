@@ -1,0 +1,39 @@
+{
+  "id": "/",
+  "name": "HAVEN Personal Security Observatory",
+  "short_name": "HAVEN",
+  "description": "Private, explainable security visibility for your devices, network, appliances, and account checklist.",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#08100d",
+  "theme_color": "#08100d",
+  "categories": ["security", "utilities"],
+  "icons": [
+    {
+      "src": "/haven-app-icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "/haven-app-icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "/haven-app-icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ],
+  "shortcuts": [
+    { "name": "Overview", "url": "/", "description": "Open the home security overview" },
+    { "name": "Devices", "url": "/devices", "description": "Open enrolled endpoint posture" },
+    { "name": "Accounts", "url": "/accounts", "description": "Open the private account-security notebook" }
+  ],
+  "launch_handler": { "client_mode": "navigate-existing" },
+  "prefer_related_applications": false
+}

@@ -31,13 +31,19 @@ The hub must not provide a general-purpose remote shell. Future actions are fixe
 | Device authentication | Unique revocable certificates using mutual TLS | No shared household agent credential |
 | User access | Private HTTPS plus application authentication | Network location alone is not an identity |
 | Background alerts | Standards-based Web Push and a service worker | Cross-platform delivery without a privileged tray process or always-open page |
-| Desktop shell | Optional Tauri wrapper | Reuse the web interface only if tray or native notifications justify it |
+| Desktop experience | Installable web application; optional Tauri later | Use the secure hub origin for a dedicated window today; add a native wrapper only if tray or OS integration justifies a broader local boundary |
 
 PostgreSQL becomes appropriate if HAVEN needs multiple hub writers, multiple hub replicas, sustained high-volume flow telemetry, multi-tenant hosting, or concurrency that batching cannot handle. Storage-specific behavior remains inside `internal/storage`, but supporting two engines simultaneously is not a current goal.
 
 ## Current milestone boundary
 
-Milestone 0.15 extends the authenticated hub with a private owner-reported account-security notebook while retaining verifiable fleet lifecycle evidence, the routed console, reliability guardrails, and bounded read-only NAS health evidence:
+Milestone 0.16 makes the authenticated hub installable as a dedicated desktop application while retaining the private account-security notebook, verifiable fleet lifecycle evidence, routed console, reliability guardrails, and bounded read-only NAS health evidence:
+
+- The installed application remains the same private HTTPS origin and server-delivered web client. It introduces no native command bridge, privileged helper, local database, duplicated account data, or separate credential store.
+- A same-origin manifest provides standalone display, local icon assets, and bounded shortcuts. A browser-owned install prompt is exposed only when the browser declares the application eligible; HAVEN never fabricates installation state.
+- The existing service worker is registered at application startup for installability and Web Push, but it has no fetch handler or Cache API use. Authenticated pages, observations, and decrypted account notes therefore remain outside an offline cache.
+- Installation does not request notification permission. Web Push remains a separate, explicit owner action with its existing encrypted and metadata-bounded delivery contract.
+- Tauri remains an optional later wrapper only if native tray behavior or operating-system integrations provide concrete value that cannot be achieved through standards-based installation.
 
 - Account profiles are manual checklists, not provider observations. HAVEN stores provider and profile labels, an optional identifier, bounded notes, authentication/recovery status, factor categories, and an optional last-review date only after an authenticated owner submits them.
 - Every complete account profile is serialized and encrypted with AES-256-GCM before it reaches SQLite. A dedicated random key lives beside the database outside the repository, and authenticated additional data binds ciphertext to its opaque profile identity.

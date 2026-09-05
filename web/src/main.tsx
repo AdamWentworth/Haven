@@ -1,6 +1,7 @@
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { App } from "./App";
+import { registerApplicationServiceWorker } from "./desktop-install";
 import "./styles.css";
 
 const root = document.querySelector<HTMLDivElement>("#root");
@@ -13,3 +14,7 @@ createRoot(root).render(
     <App />
   </StrictMode>,
 );
+
+void registerApplicationServiceWorker().catch(() => {
+	// Installation is optional; notification enrollment reports its own errors.
+});

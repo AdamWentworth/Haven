@@ -1,5 +1,8 @@
 /* HAVEN's service worker handles encrypted Web Push only. It deliberately
    does not cache the authenticated application or security observations. */
+self.addEventListener("install", () => self.skipWaiting());
+self.addEventListener("activate", (event) => event.waitUntil(self.clients.claim()));
+
 self.addEventListener("push", (event) => {
   let payload = {};
   try {

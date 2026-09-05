@@ -436,6 +436,14 @@ func (server *Server) webApplication(writer http.ResponseWriter, request *http.R
 	if requestedPath == "index.html" {
 		writer.Header().Set("Cache-Control", "no-store")
 	}
+	if requestedPath == "manifest.webmanifest" {
+		writer.Header().Set("Cache-Control", "no-cache")
+		writer.Header().Set("Content-Type", "application/manifest+json")
+	}
+	if requestedPath == "sw.js" {
+		writer.Header().Set("Cache-Control", "no-cache")
+		writer.Header().Set("Service-Worker-Allowed", "/")
+	}
 
 	clone := request.Clone(request.Context())
 	if requestedPath == "index.html" {
