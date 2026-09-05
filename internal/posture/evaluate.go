@@ -16,6 +16,7 @@ const updateFreshnessWindow = 45 * 24 * time.Hour
 func Evaluate(snapshot model.SecuritySnapshot, now time.Time) model.SecuritySnapshot {
 	snapshot.BaselineChecks = []model.BaselineCheck{}
 	snapshot.Findings = []model.SecurityFinding{}
+	evaluateBrowserSecurity(&snapshot)
 	operatingSystem := strings.ToLower(snapshot.Device.OperatingSystem)
 	if snapshot.LinuxBaseline != nil || strings.Contains(operatingSystem, "linux") || strings.Contains(operatingSystem, "ubuntu") {
 		evaluateLinux(&snapshot)
@@ -34,6 +35,54 @@ func Evaluate(snapshot model.SecuritySnapshot, now time.Time) model.SecuritySnap
 	evaluateLocalAccounts(&snapshot)
 	evaluateThreats(&snapshot)
 	return snapshot
+}
+
+func evaluateBrowserSecurity(snapshot *model.SecuritySnapshot) {
+	status := snapshot.BrowserSecurity
+	if status == nil {
+		return
+	}
+	if status.Coverage == "unavailable" {
+		addCheck(snapshot, "browser-inventory", "Browser", "Browser exposure inventory", "unknown", "Supported browser metadata could not be verified for this user session.", "No cookies, history, passwords, page contents, or raw extension identifiers are collected")
+	} else {
+		profiles := 0
+		extensions := 0
+		broadAccess := 0
+		for _, browser := range status.Browsers {
+			profiles += browser.ProfileCount
+			extensions += len(browser.Extensions)
+			for _, extension := range browser.Extensions {
+				if extension.SiteAccess == "all-sites" || extension.OptionalSiteAccess == "all-sites" {
+					broadAccess++
+				}
+			}
+		}
+		checkStatus := "pass"
+		summary := fmt.Sprintf("Observed %d supported browser installation(s), %d profile(s), and %d extension(s).", len(status.Browsers), profiles, extensions)
+		if status.Coverage == "partial" {
+			checkStatus = "configured"
+			summary = "Browser inventory is partial; HAVEN retained only the bounded facts it could verify."
+		}
+		evidence := fmt.Sprintf("%d extension(s) declare or optionally request all-site access", broadAccess)
+		addCheck(snapshot, "browser-inventory", "Browser", "Browser exposure inventory", checkStatus, summary, evidence)
+	}
+
+	for _, protection := range status.Protections {
+		checkStatus := "unknown"
+		summary := protection.Name + " could not be verified."
+		switch protection.State {
+		case "enabled":
+			checkStatus = "pass"
+			summary = protection.Name + " is enabled."
+		case "audit":
+			checkStatus = "configured"
+			summary = protection.Name + " is in audit mode."
+		case "disabled":
+			checkStatus = "attention"
+			summary = protection.Name + " is disabled; review whether that matches your intended browser and download protection policy."
+		}
+		addCheck(snapshot, "web-protection-"+protection.ID, "Browser protection", protection.Name, checkStatus, summary, protection.Source)
+	}
 }
 
 func evaluateLinux(snapshot *model.SecuritySnapshot) {

@@ -13,6 +13,7 @@ func TestMetadataUsesObservedCapabilitiesAndBoundsInstallation(t *testing.T) {
 		Defender:         &model.DefenderStatus{},
 		WindowsBaseline:  &model.WindowsBaseline{},
 		FirewallProfiles: []model.FirewallProfileStatus{{Name: "Private", Enabled: &enabled}},
+		BrowserSecurity:  &model.BrowserSecurityStatus{Coverage: "observed", Protections: []model.BrowserProtectionStatus{{ID: "defender-pua", Name: "Potentially unwanted app protection", State: "enabled"}}},
 		Notices:          []model.CollectorNotice{{Source: "test", Message: "limited"}},
 	}
 	metadata := MetadataForSnapshot(snapshot, "windows-task")
@@ -22,10 +23,22 @@ func TestMetadataUsesObservedCapabilitiesAndBoundsInstallation(t *testing.T) {
 	if !ValidateMetadata(&metadata) {
 		t.Fatal("generated metadata must pass validation")
 	}
+	if !containsCapability(metadata.Capabilities, "browser-inventory") || !containsCapability(metadata.Capabilities, "web-protection") {
+		t.Fatalf("browser capabilities were not advertised: %#v", metadata.Capabilities)
+	}
 	metadata = MetadataForSnapshot(snapshot, "../../private/path")
 	if metadata.Installation != "interactive" {
 		t.Fatalf("unsafe installation label was retained: %#v", metadata)
 	}
+}
+
+func containsCapability(capabilities []string, target string) bool {
+	for _, capability := range capabilities {
+		if capability == target {
+			return true
+		}
+	}
+	return false
 }
 
 func TestCompatibilityIsMaintenanceEvidenceNotDeviceStatus(t *testing.T) {

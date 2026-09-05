@@ -37,7 +37,13 @@ PostgreSQL becomes appropriate if HAVEN needs multiple hub writers, multiple hub
 
 ## Current milestone boundary
 
-Milestone 0.17 adds a native Electron client while retaining the milestone 0.16 installable-web fallback, private account-security notebook, verifiable fleet lifecycle evidence, routed console, reliability guardrails, and bounded read-only NAS health evidence:
+Milestone 0.18 adds browser and session-exposure visibility while retaining the hardened Electron client, installable-web fallback, private account-security notebook, verifiable fleet lifecycle evidence, routed console, reliability guardrails, and bounded read-only NAS health evidence:
+
+- Windows and Linux agents inspect only bounded browser metadata owned by their user session. Supported Chromium-family manifests and Firefox's extension state are projected into friendly names, versions, coarse enabled/installed state, profile counts, three site-access categories, and an explicit allowlist of sensitive capabilities.
+- Extension identities are replaced with truncated one-way fingerprints before reporting. Raw IDs, profile names, host-match patterns, cookies, history, credentials, tokens, page contents, and form data have no field in the protocol.
+- Browser inventory exists only in the latest in-memory observation. Historical persistence strips the entire browser-security object so the hub does not become a record of software interests or browser changes.
+- Windows additionally reports three bounded operating-system protections: Defender potentially unwanted app protection, Defender Network Protection, and Microsoft Defender SmartScreen. HAVEN distinguishes enabled, audit, disabled, and unverifiable states without claiming that a disabled setting proves compromise.
+- Extension access is capability evidence, not reputation or behavior analysis. HAVEN does not decide that an extension is malicious, compare versions with an online catalogue, remove extensions, change browser settings, or inspect sessions.
 
 - The Electron renderer remains the same private HTTPS origin and server-delivered web client. It introduces no native command bridge, privileged helper, preload script, IPC API, local database, duplicated account data, or separate credential store.
 - The desktop process loads only the exact configured HTTPS origin. Cross-origin navigation, popups, webviews, downloads, insecure content, drag navigation, developer tools, and permissions other than an owner-confirmed HAVEN notification request are denied.
@@ -109,7 +115,7 @@ Platform-specific controls sit behind advertised capability providers. The local
 Agents will send high-level observations to the hub, never SQL. The SQLite file remains on local storage beside its WAL files in a persistent container volume.
 
 - Posture observations expire after 90 days by default; deployment configuration can shorten that period.
-- Live TCP connection and Docker workload details are returned to the dashboard but removed before a snapshot is stored.
+- Live TCP connection, Docker workload, and browser/extension inventory details are returned to the dashboard but removed before a snapshot is stored.
 - Finding-transition events retain the privacy-bounded category, title, severity, and summary already present in posture history; they never copy connection details or excluded identifiers.
 - Active-alert projection is recomputed hub state and is not another historical telemetry table. Finding lifecycles and bounded listener appearance records remain the durable evidence behind it. Push-delivery rows retain only alert and recurrence identities, destination identity, bounded result classifications, attempt times, and delivery state; they do not copy finding text or connection evidence.
 - Push capability endpoints and subscription encryption keys are stored only inside AES-GCM ciphertext. VAPID and subscription-encryption keys live in the private state directory and must be backed up with the database. Completed delivery receipts expire after 90 days during reconciliation.

@@ -1041,6 +1041,18 @@ func (store *Store) SeedSyntheticDevices(ctx context.Context, count int, now tim
 				SignatureVersion:          "1.0.demo.0",
 				SignatureUpdatedAt:        &signatureUpdate,
 			}
+			snapshot.BrowserSecurity = &model.BrowserSecurityStatus{
+				Coverage: "observed",
+				Browsers: []model.BrowserInstallation{{
+					ID: "chrome", Name: "Google Chrome", Version: "140.0.demo", ProfileCount: 1,
+					Extensions: []model.BrowserExtension{{Fingerprint: "0123456789abcdef01234567", Name: "Demo password manager", Version: "1.0", State: "installed", ProfileCount: 1, SiteAccess: "all-sites", OptionalSiteAccess: "none-declared", SensitivePermissions: []string{"cookies"}, OptionalSensitivePermissions: []string{}}},
+				}},
+				Protections: []model.BrowserProtectionStatus{
+					{ID: "defender-pua", Name: "Potentially unwanted app protection", State: "enabled", Source: "Synthetic Defender preferences"},
+					{ID: "defender-network", Name: "Defender Network Protection", State: "audit", Source: "Synthetic Defender preferences"},
+					{ID: "windows-smartscreen", Name: "Microsoft Defender SmartScreen", State: "enabled", Source: "Synthetic Windows configuration"},
+				},
+			}
 			snapshot.WindowsBaseline = &model.WindowsBaseline{
 				Update:           &model.WindowsUpdateStatus{LastInstalledAt: &lastUpdate, PendingReboot: &disabled, RebootReasons: []string{}},
 				SystemEncryption: &model.DiskEncryptionStatus{SystemDrive: "C:", VolumeStatus: "FullyEncrypted", ProtectionStatus: "On", EncryptionPercentage: &encryptionPercentage},
@@ -1074,6 +1086,11 @@ func (store *Store) SeedSyntheticDevices(ctx context.Context, count int, now tim
 				AppArmor:         &model.LinuxAppArmorStatus{Enabled: &active},
 				TimeSync:         &model.LinuxTimeSyncStatus{Synchronized: &active},
 				Storage:          &model.LinuxStorageStatus{MountPoint: "/", UsedPercentage: &storageUsed},
+			}
+			snapshot.BrowserSecurity = &model.BrowserSecurityStatus{
+				Coverage:    "observed",
+				Browsers:    []model.BrowserInstallation{{ID: "firefox", Name: "Mozilla Firefox", Version: "139.0.demo", ProfileCount: 1, Extensions: []model.BrowserExtension{}}},
+				Protections: []model.BrowserProtectionStatus{},
 			}
 			if strings.Contains(platform.operatingSystem, "Server") {
 				snapshot.Connections = []model.NetworkConnection{
@@ -1458,10 +1475,13 @@ func insertSecurityEvent(
 }
 
 func historicalPayload(snapshot model.SecuritySnapshot) ([]byte, error) {
-	// Connection and workload metadata are intentionally live-only. Persisting
-	// either would create an unnecessary household activity/deployment trail.
+	// Connection, workload, and browser-extension metadata are intentionally
+	// live-only. Persisting them would create an unnecessary household activity,
+	// deployment, or software-interest trail. The current authenticated report
+	// remains available in memory until the hub restarts or a newer report arrives.
 	persisted := snapshot
 	persisted.Connections = []model.NetworkConnection{}
+	persisted.BrowserSecurity = nil
 	if persisted.LinuxBaseline != nil {
 		linux := *persisted.LinuxBaseline
 		linux.Workloads = nil

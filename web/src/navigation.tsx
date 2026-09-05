@@ -31,6 +31,7 @@ export function AppNavigation({ current, navigate }: { current: PageKey; navigat
 const deviceSections: Array<{ section: DeviceSection; label: string }> = [
 	{ section: "overview", label: "Overview" },
 	{ section: "posture", label: "Posture" },
+	{ section: "browsers", label: "Browsers" },
 	{ section: "services", label: "Services & connections" },
 	{ section: "history", label: "History" },
 ];

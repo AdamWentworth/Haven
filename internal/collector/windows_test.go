@@ -60,6 +60,10 @@ func TestWindowsSnapshotScriptUsesReadOnlyTPMAndFirewallFallbacks(t *testing.T) 
 		"getdeviceinformation",
 		"FirewallPolicy\\FirewallRules",
 		"RdpFirewallScope",
+		"Get-MpPreference",
+		"PUAProtection",
+		"EnableNetworkProtection",
+		"SmartScreenEnabled",
 	} {
 		if !strings.Contains(windowsSnapshotScript, expected) {
 			t.Fatalf("Windows snapshot script is missing %q", expected)

@@ -164,6 +164,10 @@ func (server *AgentServer) observe(writer http.ResponseWriter, request *http.Req
 		server.writeError(writer, http.StatusUnprocessableEntity, "invalid_agent_metadata", "The agent build or capability metadata is invalid.")
 		return
 	}
+	if !model.ValidateBrowserSecurity(envelope.Snapshot.BrowserSecurity) {
+		server.writeError(writer, http.StatusUnprocessableEntity, "invalid_browser_inventory", "The browser inventory is invalid or exceeds HAVEN's privacy bounds.")
+		return
+	}
 
 	envelope.Snapshot = posture.Evaluate(envelope.Snapshot, now)
 	err = server.store.AcceptObservation(

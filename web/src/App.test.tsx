@@ -30,6 +30,11 @@ const fixtures = vi.hoisted(() => {
 		defender: { antivirusEnabled: true, realTimeProtectionEnabled: true, behaviorMonitorEnabled: true, downloadProtectionEnabled: true, tamperProtected: true, signatureUpdatedAt: "2026-09-04T07:00:00Z", lastQuickScanAt: null, lastFullScanAt: null },
 		windowsBaseline: null,
 		linuxBaseline: null,
+		browserSecurity: {
+			coverage: "observed",
+			protections: [{ id: "defender-pua", name: "Potentially unwanted app protection", state: "enabled", source: "Microsoft Defender preferences" }],
+			browsers: [{ id: "chrome", name: "Google Chrome", version: "140", profileCount: 1, extensions: [] }],
+		},
 		baselineChecks: [{ id: "defender", category: "Protection", title: "Microsoft Defender", status: "pass", summary: "Protection is active." }],
 		findings: [],
 		firewallProfiles: [{ name: "Private", enabled: true }],
@@ -114,6 +119,11 @@ describe("HAVEN routed console", () => {
 		await user.click(screen.getByRole("link", { name: "Posture" }));
 		expect(await screen.findByRole("heading", { name: "Posture checks" })).toBeInTheDocument();
 		expect(window.location.pathname).toBe("/devices/device-a/posture");
+
+		await user.click(screen.getByRole("link", { name: "Browsers" }));
+		expect(await screen.findByRole("heading", { name: "Browser security" })).toBeInTheDocument();
+		expect(screen.getByText("Google Chrome")).toBeInTheDocument();
+		expect(window.location.pathname).toBe("/devices/device-a/browsers");
 	});
 
 	it("keeps owner credentials on the dedicated settings page", async () => {

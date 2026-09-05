@@ -4,11 +4,45 @@ export interface SecuritySnapshot {
   defender: DefenderStatus | null;
   windowsBaseline: WindowsBaseline | null;
   linuxBaseline: LinuxBaseline | null;
+	browserSecurity?: BrowserSecurityStatus | null;
   baselineChecks: BaselineCheck[];
   findings: SecurityFinding[];
   firewallProfiles: FirewallProfileStatus[];
   connections: NetworkConnection[];
   notices: CollectorNotice[];
+}
+
+export interface BrowserSecurityStatus {
+	coverage: "observed" | "partial" | "unavailable";
+	browsers: BrowserInstallation[];
+	protections: BrowserProtectionStatus[];
+}
+
+export interface BrowserInstallation {
+	id: string;
+	name: string;
+	version?: string;
+	profileCount: number;
+	extensions: BrowserExtension[];
+}
+
+export interface BrowserExtension {
+	fingerprint: string;
+	name: string;
+	version?: string;
+	state: "installed" | "active" | "disabled";
+	profileCount: number;
+	siteAccess: "none-declared" | "specific-sites" | "all-sites";
+	optionalSiteAccess: "none-declared" | "specific-sites" | "all-sites";
+	sensitivePermissions: string[];
+	optionalSensitivePermissions: string[];
+}
+
+export interface BrowserProtectionStatus {
+	id: string;
+	name: string;
+	state: "enabled" | "audit" | "disabled" | "unknown";
+	source?: string;
 }
 
 export interface LinuxBaseline {

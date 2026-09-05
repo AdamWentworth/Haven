@@ -7,6 +7,7 @@ import "time"
 type SecuritySnapshot struct {
 	CollectedAt      time.Time               `json:"collectedAt"`
 	Device           DeviceSummary           `json:"device"`
+	BrowserSecurity  *BrowserSecurityStatus  `json:"browserSecurity"`
 	Defender         *DefenderStatus         `json:"defender"`
 	WindowsBaseline  *WindowsBaseline        `json:"windowsBaseline"`
 	LinuxBaseline    *LinuxBaseline          `json:"linuxBaseline"`
@@ -15,6 +16,45 @@ type SecuritySnapshot struct {
 	FirewallProfiles []FirewallProfileStatus `json:"firewallProfiles"`
 	Connections      []NetworkConnection     `json:"connections"`
 	Notices          []CollectorNotice       `json:"notices"`
+}
+
+// BrowserSecurityStatus is a deliberately narrow inventory of supported
+// browser installations, manifest-declared extension capabilities, and
+// platform web protections. It never contains profile names, extension IDs,
+// host match patterns, browsing history, cookies, credentials, tokens, page
+// contents, or saved form data. Extension fingerprints are one-way hashes used
+// only to correlate the same installation between observations.
+type BrowserSecurityStatus struct {
+	Coverage    string                    `json:"coverage"`
+	Browsers    []BrowserInstallation     `json:"browsers"`
+	Protections []BrowserProtectionStatus `json:"protections"`
+}
+
+type BrowserInstallation struct {
+	ID           string             `json:"id"`
+	Name         string             `json:"name"`
+	Version      string             `json:"version,omitempty"`
+	ProfileCount int                `json:"profileCount"`
+	Extensions   []BrowserExtension `json:"extensions"`
+}
+
+type BrowserExtension struct {
+	Fingerprint                  string   `json:"fingerprint"`
+	Name                         string   `json:"name"`
+	Version                      string   `json:"version,omitempty"`
+	State                        string   `json:"state"`
+	ProfileCount                 int      `json:"profileCount"`
+	SiteAccess                   string   `json:"siteAccess"`
+	OptionalSiteAccess           string   `json:"optionalSiteAccess"`
+	SensitivePermissions         []string `json:"sensitivePermissions"`
+	OptionalSensitivePermissions []string `json:"optionalSensitivePermissions"`
+}
+
+type BrowserProtectionStatus struct {
+	ID     string `json:"id"`
+	Name   string `json:"name"`
+	State  string `json:"state"`
+	Source string `json:"source,omitempty"`
 }
 
 // LinuxBaseline contains host-level, privacy-bounded Linux posture. It keeps
