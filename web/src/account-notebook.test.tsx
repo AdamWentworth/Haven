@@ -98,7 +98,7 @@ describe("account security notebook", () => {
 	});
 
 	it("keeps official provider navigation outside the isolated Electron client", () => {
-		vi.spyOn(navigator, "userAgent", "get").mockReturnValue("Mozilla/5.0 HAVEN-Desktop/0.24.0 Electron");
+		vi.spyOn(navigator, "userAgent", "get").mockReturnValue("Mozilla/5.0 HAVEN-Desktop/0.25.0 Electron");
 		render(<AccountNotebook profiles={[profile({ sessionStatus: "recognized", sessionChecks: ["devices"] })]} demoMode={false} unlocked busy={false} unlock={vi.fn()} lock={vi.fn()} save={vi.fn()} remove={vi.fn()} />);
 		expect(screen.queryByRole("link", { name: /Review at Google/ })).not.toBeInTheDocument();
 		expect(screen.getByText(/Desktop isolation blocks external navigation/)).toBeInTheDocument();

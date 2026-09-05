@@ -50,6 +50,9 @@ jobs:
       - name: Verify Go module checksums
         run: go mod verify
 
+      - name: Verify deterministic brand assets
+        run: go run ./scripts/generate-app-icons.go -check
+
       - name: Test Go packages with an internal coverage floor
         shell: bash
         run: |
