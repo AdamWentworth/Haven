@@ -206,6 +206,10 @@ func scanChromiumRoot(root browserRoot, browser model.BrowserInstallation) (mode
 	if version, err := readBoundedText(filepath.Join(root.path, "Last Version"), 128); err == nil {
 		browser.Version = boundedText(version, 40)
 	}
+	profileNames := map[string]string{}
+	if root.id == "chrome" {
+		profileNames = chromiumProfileNames(filepath.Join(root.path, "Local State"))
+	}
 	entries, truncated, err := readDirectoryBounded(root.path, maximumBrowserProfiles*4)
 	if err != nil {
 		return browser, true, true
@@ -223,7 +227,7 @@ func scanChromiumRoot(root browserRoot, browser model.BrowserInstallation) (mode
 		}
 		profiles++
 		if root.id == "chrome" {
-			profile, incomplete := collectChromiumProfile(root.id, entry.Name(), profilePath)
+			profile, incomplete := collectChromiumProfile(root.id, entry.Name(), profilePath, profileNames[entry.Name()])
 			browser.Profiles = append(browser.Profiles, profile)
 			if incomplete {
 				partial = true

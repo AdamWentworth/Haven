@@ -36,6 +36,12 @@ const observed: BrowserSecurityStatus = {
 				{ domain: "facebook.com", cookieCount: 2, sessionCookieCount: 1, persistentCookieCount: 1, secureCookieCount: 2, httpOnlyCookieCount: 2, lastAccessedAt: "2020-01-01T00:00:00Z", latestExpiryAt: "2027-01-01T00:00:00Z" },
 				{ domain: "recent.example.com", cookieCount: 1, sessionCookieCount: 0, persistentCookieCount: 1, secureCookieCount: 1, httpOnlyCookieCount: 1, lastAccessedAt: "2026-09-04T00:00:00Z", latestExpiryAt: "2027-01-01T00:00:00Z" },
 			],
+		}, {
+			fingerprint: "fedcba9876543210fedcba98",
+			name: "Work",
+			cookieStatus: "unavailable",
+			cookieCount: 0,
+			sites: [],
 		}],
 		extensions: [{
 			fingerprint: "0123456789abcdef01234567",
@@ -69,6 +75,9 @@ describe("browser security panel", () => {
 		expect(screen.getByText("Personal")).toBeInTheDocument();
 		expect(screen.getByText("facebook.com")).toBeInTheDocument();
 		expect(screen.getByText("No access 90+ days")).toBeInTheDocument();
+		expect(screen.getByText("Work")).toBeInTheDocument();
+		expect(screen.getByText("Unavailable this run")).toBeInTheDocument();
+		expect(screen.getByText(/collection limitation—not a security problem/i)).toBeInTheDocument();
 		expect(screen.getByText(/cookie presence cannot prove that a provider session is authenticated/i)).toBeInTheDocument();
 		expect(screen.getByText(/never selects or transmits cookie names, values, encrypted values, paths/i)).toBeInTheDocument();
 		expect(document.body).not.toHaveTextContent("0123456789abcdef01234567");
