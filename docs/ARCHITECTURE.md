@@ -31,19 +31,23 @@ The hub must not provide a general-purpose remote shell. Future actions are fixe
 | Device authentication | Unique revocable certificates using mutual TLS | No shared household agent credential |
 | User access | Private HTTPS plus application authentication | Network location alone is not an identity |
 | Background alerts | Standards-based Web Push and a service worker | Cross-platform delivery without a privileged tray process or always-open page |
-| Desktop experience | Installable web application; optional Tauri later | Use the secure hub origin for a dedicated window today; add a native wrapper only if tray or OS integration justifies a broader local boundary |
+| Desktop experience | Hardened Electron client plus installable-web fallback | Bundled Chromium gives HAVEN a consistent WebAuthn runtime; the remotely delivered dashboard remains sandboxed at one exact private HTTPS origin with no native bridge |
 
 PostgreSQL becomes appropriate if HAVEN needs multiple hub writers, multiple hub replicas, sustained high-volume flow telemetry, multi-tenant hosting, or concurrency that batching cannot handle. Storage-specific behavior remains inside `internal/storage`, but supporting two engines simultaneously is not a current goal.
 
 ## Current milestone boundary
 
-Milestone 0.16 makes the authenticated hub installable as a dedicated desktop application while retaining the private account-security notebook, verifiable fleet lifecycle evidence, routed console, reliability guardrails, and bounded read-only NAS health evidence:
+Milestone 0.17 adds a native Electron client while retaining the milestone 0.16 installable-web fallback, private account-security notebook, verifiable fleet lifecycle evidence, routed console, reliability guardrails, and bounded read-only NAS health evidence:
 
-- The installed application remains the same private HTTPS origin and server-delivered web client. It introduces no native command bridge, privileged helper, local database, duplicated account data, or separate credential store.
+- The Electron renderer remains the same private HTTPS origin and server-delivered web client. It introduces no native command bridge, privileged helper, preload script, IPC API, local database, duplicated account data, or separate credential store.
+- The desktop process loads only the exact configured HTTPS origin. Cross-origin navigation, popups, webviews, downloads, insecure content, drag navigation, developer tools, and permissions other than an owner-confirmed HAVEN notification request are denied.
+- Node integration is disabled in every renderer context, context isolation and Chromium sandboxing are enabled, and the packaged application enables cookie encryption, embedded-ASAR integrity, ASAR-only loading, and disables Electron-as-Node plus Node environment and inspection switches.
+- A dedicated persistent Chromium session retains ordinary HAVEN login state without sharing browser extensions or exposing its storage to dashboard JavaScript beyond normal secure cookies. The server remains the authority for sessions, passkey challenges, account-workspace grants, and anti-forgery checks.
+- Electron was chosen over the earlier Tauri prototype because HAVEN relies on WebAuthn and Electron provides a consistent bundled Chromium implementation across supported hosts. The first release artifact is a current-user Windows installer; Linux and macOS packages remain release-engineering work rather than separate application architectures.
 - A same-origin manifest provides standalone display, local icon assets, and bounded shortcuts. A browser-owned install prompt is exposed only when the browser declares the application eligible; HAVEN never fabricates installation state.
 - The existing service worker is registered at application startup for installability and Web Push, but it has no fetch handler or Cache API use. Authenticated pages, observations, and decrypted account notes therefore remain outside an offline cache.
 - Installation does not request notification permission. Web Push remains a separate, explicit owner action with its existing encrypted and metadata-bounded delivery contract.
-- Tauri remains an optional later wrapper only if native tray behavior or operating-system integrations provide concrete value that cannot be achieved through standards-based installation.
+- The desktop client has no tray process, autostart behavior, updater, or endpoint-collection role in this milestone. Those features require separate threat-model review rather than inheriting trust from the wrapper.
 
 - Account profiles are manual checklists, not provider observations. HAVEN stores provider and profile labels, an optional identifier, bounded notes, authentication/recovery status, factor categories, and an optional last-review date only after an authenticated owner submits them.
 - Every complete account profile is serialized and encrypted with AES-256-GCM before it reaches SQLite. A dedicated random key lives beside the database outside the repository, and authenticated additional data binds ciphertext to its opaque profile identity.

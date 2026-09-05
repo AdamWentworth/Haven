@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 
-export type DesktopInstallStatus = "available" | "installed" | "manual";
+export type DesktopInstallStatus = "available" | "installed" | "manual" | "native";
 export type DesktopInstallOutcome = "accepted" | "dismissed" | "unavailable";
 
 interface BrowserInstallPrompt extends Event {
@@ -16,7 +16,13 @@ function hasInstallPrompt(value: Event): value is BrowserInstallPrompt {
 export function isStandaloneApp() {
 	if (typeof window === "undefined" || typeof navigator === "undefined") return false;
 	const iosNavigator = navigator as Navigator & { standalone?: boolean };
-	return iosNavigator.standalone === true || window.matchMedia?.("(display-mode: standalone)").matches === true;
+	return nativeDesktopVersion() !== null || iosNavigator.standalone === true || window.matchMedia?.("(display-mode: standalone)").matches === true;
+}
+
+export function nativeDesktopVersion() {
+	if (typeof navigator === "undefined") return null;
+	const electronMarker = navigator.userAgent.match(/(?:^|\s)HAVEN-Desktop\/(\d+\.\d+\.\d+) Electron(?:\s|$)/);
+	return electronMarker?.[1] || null;
 }
 
 export async function registerApplicationServiceWorker() {
@@ -25,6 +31,7 @@ export async function registerApplicationServiceWorker() {
 }
 
 export function useDesktopInstall() {
+	const [nativeVersion] = useState(nativeDesktopVersion);
 	const [prompt, setPrompt] = useState<BrowserInstallPrompt | null>(null);
 	const [installed, setInstalled] = useState(isStandaloneApp);
 
@@ -56,7 +63,8 @@ export function useDesktopInstall() {
 	}, [installed, prompt]);
 
 	return {
-		status: installed ? "installed" as const : prompt ? "available" as const : "manual" as const,
+		status: nativeVersion ? "native" as const : installed ? "installed" as const : prompt ? "available" as const : "manual" as const,
+		nativeVersion,
 		install,
 	};
 }

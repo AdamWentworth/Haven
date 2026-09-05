@@ -649,6 +649,7 @@ function NotificationPanel({ status, supported, enabled, busy, enable, disable }
 }
 
 function DesktopInstallPanel({ status, install }: { status: DesktopInstallStatus; install: () => Promise<void> }) {
+  const native = status === "native";
   const installed = status === "installed";
   const available = status === "available";
   return (
@@ -657,11 +658,11 @@ function DesktopInstallPanel({ status, install }: { status: DesktopInstallStatus
         Open the same private hub in a dedicated application window from your desktop or Start menu
       </PanelHeading>
       <div className="desktop-install-summary">
-        <StatusChip label={installed ? "installed" : available ? "ready to install" : "browser install"} tone={installed ? "healthy" : available ? "configured" : "unknown"} />
-        <p>{installed ? "This window is already running as the installed HAVEN application." : available ? "This browser has verified that HAVEN can be installed as an application." : "Install availability is controlled by this browser. Its app or site menu may provide the install command."}</p>
+        <StatusChip label={native ? "native application" : installed ? "installed" : available ? "ready to install" : "browser install"} tone={native || installed ? "healthy" : available ? "configured" : "unknown"} />
+        <p>{native ? "This window is the native HAVEN desktop application." : installed ? "This window is already running as the installed HAVEN web application." : available ? "This browser has verified that HAVEN can be installed as an application." : "Install availability is controlled by this browser. Its app or site menu may provide the install command."}</p>
       </div>
       {available && <button className="secondary-action" type="button" onClick={() => void install()}>Install HAVEN</button>}
-      <p className="footnote">The installed experience remains a client of <strong>{window.location.host}</strong>. It adds no privileged local service, native command bridge, second database, or second credential store; passkeys and account-workspace locking remain unchanged.</p>
+      <p className="footnote">This client remains connected to <strong>{window.location.host}</strong>. {native ? "The sandboxed native shell grants this remotely delivered dashboard no Node.js, preload, IPC, filesystem, or shell capabilities." : "The browser-installed experience adds no privileged local service or native command bridge."} It adds no second database or credential store; passkeys and account-workspace locking remain unchanged.</p>
     </section>
   );
 }
@@ -690,7 +691,7 @@ function AwaitingAgents({ devices, runtime, passkeys, actions, audit, error, sel
   return <>
     <header className="topbar">
       <a className="brand" href="/" aria-label="HAVEN home"><span className="brand-mark"><HavenIcon /></span><span><strong>HAVEN</strong><small>Personal Security Observatory</small></span></a>
-      <div className="topbar-actions"><span className="local-pill"><span className="local-dot" />Hub ready</span><button className="signout-button" type="button" onClick={signOut}>Lock</button></div>
+      <div className="topbar-actions"><span className="local-pill" aria-label="Hub ready"><span className="local-dot" /><span className="local-label">Hub ready</span></span><button className="signout-button" type="button" onClick={signOut} aria-label="Lock HAVEN" title="Lock HAVEN"><LockIcon size={15} /><span className="topbar-action-label">Lock</span></button></div>
     </header>
     <main>
       <DeviceInventory devices={devices} selectedId="" select={selectDevice} demoMode={false} />
@@ -892,10 +893,10 @@ function Application({ snapshot, devices, networkDevices, appliances, events, ne
         <a className="brand" href="/" aria-label="HAVEN home" onClick={openOverview}><span className="brand-mark"><HavenIcon /></span><span><strong>HAVEN</strong><small>Personal Security Observatory</small></span></a>
         <AppNavigation current={route.page} navigate={navigate} />
         <div className="topbar-actions">
-          <span className={`local-pill ${demoMode ? "demo-pill" : ""}`}><span className="local-dot" />{demoMode ? "Synthetic demo" : runtime?.localCollection ? "Local monitor" : "Agent hub"}</span>
-          {!demoMode && alertsSupported && <button className={`desktop-alert-button ${alertsEnabled ? "enabled" : ""}`} type="button" onClick={alertsEnabled ? disableAlerts : () => enableAlerts()} disabled={actionBusy} aria-label={alertsEnabled ? "Disable background alerts on this browser" : "Enable background alerts on this browser"}><BellIcon size={15} /><span>{alertsEnabled ? "Push alerts on" : "Enable push"}</span></button>}
-          {!demoMode && <button className="refresh-button" type="button" onClick={refresh} disabled={refreshing}>{refreshing ? (runtime?.localCollection ? "Collecting…" : "Refreshing…") : <><RefreshIcon size={15} />{runtime?.localCollection ? "Collect now" : "Refresh view"}</>}</button>}
-          {!demoMode && <button className="signout-button" type="button" onClick={signOut}>Lock</button>}
+          <span className={`local-pill ${demoMode ? "demo-pill" : ""}`} aria-label={demoMode ? "Synthetic demo" : runtime?.localCollection ? "Local monitor" : "Agent hub"}><span className="local-dot" /><span className="local-label">{demoMode ? "Synthetic demo" : runtime?.localCollection ? "Local monitor" : "Agent hub"}</span></span>
+          {!demoMode && alertsSupported && <button className={`desktop-alert-button ${alertsEnabled ? "enabled" : ""}`} type="button" onClick={alertsEnabled ? disableAlerts : () => enableAlerts()} disabled={actionBusy} aria-label={alertsEnabled ? "Disable background alerts on this browser" : "Enable background alerts on this browser"} title={alertsEnabled ? "Disable background alerts" : "Enable background alerts"}><BellIcon size={15} /><span className="topbar-action-label">{alertsEnabled ? "Push alerts on" : "Enable push"}</span></button>}
+          {!demoMode && <button className="refresh-button" type="button" onClick={refresh} disabled={refreshing} aria-label={refreshing ? (runtime?.localCollection ? "Collecting security posture" : "Refreshing HAVEN view") : runtime?.localCollection ? "Collect security posture now" : "Refresh HAVEN view"} title={runtime?.localCollection ? "Collect security posture now" : "Refresh HAVEN view"}><RefreshIcon size={15} /><span className="topbar-action-label">{refreshing ? (runtime?.localCollection ? "Collecting…" : "Refreshing…") : runtime?.localCollection ? "Collect now" : "Refresh view"}</span></button>}
+          {!demoMode && <button className="signout-button" type="button" onClick={signOut} aria-label="Lock HAVEN" title="Lock HAVEN"><LockIcon size={15} /><span className="topbar-action-label">Lock</span></button>}
         </div>
       </header>
       <main>
