@@ -1,7 +1,7 @@
 {
   "name": "haven-desktop",
   "productName": "HAVEN",
-  "version": "0.25.1",
+  "version": "0.25.2",
   "private": true,
   "description": "Native, isolated desktop client for the HAVEN personal security observatory",
   "author": "Adam Wentworth",

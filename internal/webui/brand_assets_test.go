@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/binary"
 	"image"
+	"image/color"
 	"image/png"
 	"os"
 	"path/filepath"
@@ -27,6 +28,10 @@ func readBrandPNG(t *testing.T, parts ...string) (image.Image, []byte) {
 func alphaAt(value image.Image, x, y int) uint32 {
 	_, _, _, alpha := value.At(x, y).RGBA()
 	return alpha
+}
+
+func nrgbaAt(value image.Image, x, y int) color.NRGBA {
+	return color.NRGBAModel.Convert(value.At(x, y)).(color.NRGBA)
 }
 
 func visibleWidth(value image.Image) int {
@@ -127,6 +132,28 @@ func TestBrandAssetsPreservePurposeSpecificTransparency(t *testing.T) {
 		}
 		if visibleWidth(value)*100 < size*70 {
 			t.Fatalf("Windows icon entry %d occupies only %d of %d pixels", index, visibleWidth(value), size)
+		}
+		center := nrgbaAt(value, size/2, size/2)
+		if center.A < 0xf0 || center.G <= center.R || center.G <= center.B {
+			t.Fatalf("Windows icon entry %d lost its central beacon: %#v", index, center)
+		}
+	}
+}
+
+func TestCanonicalBrandMarkRetainsWatchtowerAndBeaconPalette(t *testing.T) {
+	standard, _ := readBrandPNG(t, "..", "..", "web", "public", "haven-app-icon-512.png")
+	want := map[string]struct {
+		x, y int
+		color color.NRGBA
+	}{
+		"shield border": {256, 48, color.NRGBA{R: 115, G: 226, B: 167, A: 255}},
+		"shield field":  {256, 104, color.NRGBA{R: 16, G: 37, B: 29, A: 255}},
+		"watchtower":    {180, 180, color.NRGBA{R: 223, G: 245, B: 232, A: 255}},
+		"beacon":         {256, 256, color.NRGBA{R: 115, G: 226, B: 167, A: 255}},
+	}
+	for label, sample := range want {
+		if got := nrgbaAt(standard, sample.x, sample.y); got != sample.color {
+			t.Fatalf("%s sample = %#v, want %#v", label, got, sample.color)
 		}
 	}
 }

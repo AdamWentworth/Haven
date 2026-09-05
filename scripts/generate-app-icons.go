@@ -11,7 +11,6 @@ import (
 	"image"
 	"image/color"
 	"image/png"
-	"math"
 	"os"
 	"path/filepath"
 )
@@ -19,15 +18,29 @@ import (
 type point struct{ x, y float64 }
 
 type renderOptions struct {
-	tiled       bool
-	scale       float64
-	strokeWidth float64
+	tiled bool
+	scale float64
 }
 
-var shield = []point{
-	{256, 64}, {416, 130}, {416, 246}, {409, 292}, {390, 337}, {357, 376},
-	{312, 413}, {256, 436}, {200, 413}, {155, 376}, {122, 337}, {103, 292},
-	{96, 246}, {96, 130},
+var outerShield = []point{
+	{256, 37}, {441, 111}, {441, 247}, {435, 297}, {416, 347}, {380, 391},
+	{327, 438}, {256, 466}, {185, 438}, {132, 391}, {96, 347}, {77, 297},
+	{71, 247}, {71, 111},
+}
+
+var innerShield = []point{
+	{256, 74}, {406, 133}, {406, 247}, {400, 286}, {383, 326}, {353, 361},
+	{311, 397}, {256, 428}, {201, 397}, {159, 361}, {129, 326}, {112, 286},
+	{106, 247}, {106, 133},
+}
+
+var watchtower = []point{
+	{164, 155}, {210, 155}, {210, 230}, {302, 230}, {302, 155}, {348, 155},
+	{348, 357}, {302, 357}, {302, 277}, {210, 277}, {210, 357}, {164, 357},
+}
+
+var beacon = []point{
+	{256, 227}, {285, 256}, {256, 285}, {227, 256},
 }
 
 func main() {
@@ -37,9 +50,9 @@ func main() {
 		path     string
 		generate func() []byte
 	}{
-		{filepath.Join("web", "public", "haven-app-icon-192.png"), func() []byte { return encodePNG(render(192, renderOptions{scale: 1, strokeWidth: 14})) }},
-		{filepath.Join("web", "public", "haven-app-icon-512.png"), func() []byte { return encodePNG(render(512, renderOptions{scale: 1, strokeWidth: 14})) }},
-		{filepath.Join("web", "public", "haven-maskable-icon-512.png"), func() []byte { return encodePNG(render(512, renderOptions{tiled: true, scale: 1, strokeWidth: 14})) }},
+		{filepath.Join("web", "public", "haven-app-icon-192.png"), func() []byte { return encodePNG(render(192, renderOptions{scale: 1})) }},
+		{filepath.Join("web", "public", "haven-app-icon-512.png"), func() []byte { return encodePNG(render(512, renderOptions{scale: 1})) }},
+		{filepath.Join("web", "public", "haven-maskable-icon-512.png"), func() []byte { return encodePNG(render(512, renderOptions{tiled: true, scale: 1})) }},
 		{filepath.Join("desktop", "build", "icon.png"), func() []byte { return encodePNG(render(512, desktopRenderOptions(512))) }},
 		{filepath.Join("desktop", "build", "icon.ico"), encodeWindowsIcon},
 	}
@@ -67,13 +80,11 @@ func encodePNG(value image.Image) []byte {
 }
 
 func desktopRenderOptions(size int) renderOptions {
-	strokeWidth := 16.0
+	scale := 1.14
 	if size <= 24 {
-		strokeWidth = 28
-	} else if size <= 48 {
-		strokeWidth = 22
+		scale = 1.18
 	}
-	return renderOptions{scale: 1.18, strokeWidth: strokeWidth}
+	return renderOptions{scale: scale}
 }
 
 func render(size int, options renderOptions) *image.NRGBA {
@@ -101,16 +112,17 @@ func render(size int, options renderOptions) *image.NRGBA {
 					if options.tiled {
 						shade = background
 					}
-					if insidePolygon(point{px, py}, shield) {
-						shade = shieldFill
-					}
-					if polygonDistance(point{px, py}, shield) <= options.strokeWidth {
+					if insidePolygon(point{px, py}, outerShield) {
 						shade = green
 					}
-					if lineDistance(point{px, py}, point{188, 170}, point{188, 342}) <= options.strokeWidth ||
-						lineDistance(point{px, py}, point{324, 170}, point{324, 342}) <= options.strokeWidth ||
-						lineDistance(point{px, py}, point{188, 256}, point{324, 256}) <= options.strokeWidth {
+					if insidePolygon(point{px, py}, innerShield) {
+						shade = shieldFill
+					}
+					if insidePolygon(point{px, py}, watchtower) {
 						shade = pale
+					}
+					if insidePolygon(point{px, py}, beacon) {
+						shade = green
 					}
 					premultiplied[0] += int(shade.R) * int(shade.A)
 					premultiplied[1] += int(shade.G) * int(shade.A)
@@ -189,19 +201,4 @@ func insidePolygon(value point, polygon []point) bool {
 		}
 	}
 	return inside
-}
-
-func polygonDistance(value point, polygon []point) float64 {
-	distance := math.MaxFloat64
-	for current, previous := 0, len(polygon)-1; current < len(polygon); previous, current = current, current+1 {
-		distance = math.Min(distance, lineDistance(value, polygon[previous], polygon[current]))
-	}
-	return distance
-}
-
-func lineDistance(value, start, end point) float64 {
-	dx, dy := end.x-start.x, end.y-start.y
-	t := ((value.x-start.x)*dx + (value.y-start.y)*dy) / (dx*dx + dy*dy)
-	t = math.Max(0, math.Min(1, t))
-	return math.Hypot(value.x-(start.x+t*dx), value.y-(start.y+t*dy))
 }
