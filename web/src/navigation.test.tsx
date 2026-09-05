@@ -15,7 +15,7 @@ describe("console navigation", () => {
 		expect(screen.getAllByRole("link")).toHaveLength(7);
 		expect(screen.getByRole("link", { name: "Accounts" })).toHaveAttribute("href", "/accounts");
 		expect(screen.getByRole("link", { name: "Network" })).toHaveAttribute("aria-current", "page");
-		await user.click(screen.getByRole("link", { name: "Settings" }));
+		await user.click(screen.getByRole("link", { name: "System" }));
 		expect(navigate).toHaveBeenCalledWith({ page: "settings" });
 	});
 

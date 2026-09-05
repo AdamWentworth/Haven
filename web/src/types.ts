@@ -453,6 +453,36 @@ export interface RuntimeStatus {
   timestamp: string;
 }
 
+export type DiagnosticState = "pass" | "configured" | "warning" | "fail";
+
+export interface DiagnosticCheck {
+  id: string;
+  area: string;
+  title: string;
+  state: DiagnosticState;
+  summary: string;
+  guidance?: string;
+}
+
+export interface RecoveryPlan {
+  principle: string;
+  preserved: string[];
+  reinitialize: string[];
+  checklist: string[];
+}
+
+export interface SystemDiagnostics {
+  schemaVersion: number;
+  kind: "hub" | "agent";
+  status: "ready" | "review" | "not-ready";
+  version: string;
+  revision: string;
+  generatedAt: string;
+  summary: { passing: number; advisory: number; failed: number };
+  checks: DiagnosticCheck[];
+  recovery: RecoveryPlan;
+}
+
 export interface AuthStatus {
   configured: boolean;
   authenticated: boolean;

@@ -21,6 +21,7 @@ import (
 	"github.com/AdamWentworth/haven/internal/authn"
 	"github.com/AdamWentworth/haven/internal/browserreview"
 	"github.com/AdamWentworth/haven/internal/buildinfo"
+	"github.com/AdamWentworth/haven/internal/diagnostic"
 	"github.com/AdamWentworth/haven/internal/model"
 	"github.com/AdamWentworth/haven/internal/notification"
 	"github.com/AdamWentworth/haven/internal/storage"
@@ -80,7 +81,8 @@ func testServer(t *testing.T) (*Server, *storage.Store) {
 		store.Close()
 		t.Fatal(err)
 	}
-	return NewServer(staticCollector{snapshot: snapshot}, store, logger, fs.FS(webFiles), WithAlertProjector(alert.NewProjector(store)), WithAccountNotebook(accounts), WithBrowserSiteReviews(browserReviews)), store
+	report := diagnostic.Report{SchemaVersion: 1, Kind: "hub", Status: "ready", Version: buildinfo.Version, Revision: buildinfo.Revision, GeneratedAt: time.Now().UTC(), Summary: diagnostic.Summary{Passing: 1}, Checks: []diagnostic.Check{{ID: "database", Area: "Durable state", Title: "SQLite store", State: diagnostic.StatePass, Summary: "Database ready."}}}
+	return NewServer(staticCollector{snapshot: snapshot}, store, logger, fs.FS(webFiles), WithAlertProjector(alert.NewProjector(store)), WithAccountNotebook(accounts), WithBrowserSiteReviews(browserReviews), WithDiagnostics(func(context.Context) diagnostic.Report { return report })), store
 }
 
 func TestInstallableAssetsKeepExplicitSecurityBoundaries(t *testing.T) {
@@ -166,6 +168,30 @@ func TestRuntimePublishesServerOwnedDeviceFreshnessAllowance(t *testing.T) {
 	}
 	if runtime.Version != buildinfo.Version || runtime.Revision == "" {
 		t.Fatalf("runtime build identity is incomplete: %#v", runtime)
+	}
+}
+
+func TestSystemDiagnosticsAreProtectedAndNeverCached(t *testing.T) {
+	server, store := testServer(t)
+	defer store.Close()
+	response := httptest.NewRecorder()
+	server.Handler().ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/api/diagnostics", nil))
+	if response.Code != http.StatusOK || response.Header().Get("Cache-Control") != "no-store" {
+		t.Fatalf("unexpected diagnostic response: HTTP %d cache=%q", response.Code, response.Header().Get("Cache-Control"))
+	}
+	if !strings.Contains(response.Body.String(), `"title":"SQLite store"`) {
+		t.Fatalf("diagnostic evidence missing: %s", response.Body.String())
+	}
+
+	service, err := authn.New(store, filepath.Join(t.TempDir(), "auth.key"), "http://localhost:5080")
+	if err != nil {
+		t.Fatal(err)
+	}
+	server.auth = service
+	unauthenticated := httptest.NewRecorder()
+	server.Handler().ServeHTTP(unauthenticated, httptest.NewRequest(http.MethodGet, "/api/diagnostics", nil))
+	if unauthenticated.Code != http.StatusUnauthorized {
+		t.Fatalf("diagnostics escaped authentication boundary: HTTP %d", unauthenticated.Code)
 	}
 }
 

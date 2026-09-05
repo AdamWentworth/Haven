@@ -6,7 +6,7 @@ import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { App } from "./App";
-import type { AuthStatus, DeviceRecord, RuntimeStatus, SecuritySnapshot } from "./types";
+import type { AuthStatus, DeviceRecord, RuntimeStatus, SecuritySnapshot, SystemDiagnostics } from "./types";
 
 const fixtures = vi.hoisted(() => {
 	const device: DeviceRecord = {
@@ -55,12 +55,31 @@ const fixtures = vi.hoisted(() => {
 		monitor: { enabled: false, intervalSeconds: 0, lastAttemptAt: null, lastSuccessfulAt: null },
 		timestamp: "2026-09-04T08:00:00Z",
 	};
-	return { auth, device, runtime, snapshot };
+	const diagnostics: SystemDiagnostics = {
+		schemaVersion: 1,
+		kind: "hub",
+		status: "ready",
+		version: "0.24.0",
+		revision: "test-revision",
+		generatedAt: "2026-09-05T08:00:00Z",
+		summary: { passing: 2, advisory: 0, failed: 0 },
+		checks: [
+			{ id: "database", area: "Durable state", title: "SQLite store", state: "pass", summary: "The running hub completed its database readiness check." },
+			{ id: "owner-origin", area: "Access boundary", title: "Owner origin", state: "pass", summary: "Owner access is anchored to one stable HTTPS origin." },
+		],
+		recovery: {
+			principle: "Source rebuilds the product; private state preserves continuity.",
+			preserved: ["Observation history and owner reviews"],
+			reinitialize: ["Private hostnames and firewall scope"],
+			checklist: ["Clone the public repository and verify tests.", "Start the hub and run haven-hub doctor."],
+		},
+	};
+	return { auth, device, diagnostics, runtime, snapshot };
 });
 
 const api = vi.hoisted(() => ({
 	HavenAPIError: class HavenAPIError extends Error { constructor(message: string, readonly status: number) { super(message); } },
-	addPasskey: vi.fn(), collectSnapshot: vi.fn(), getAuthStatus: vi.fn(), getDevice: vi.fn(), getLatestSnapshot: vi.fn(), getNotificationStatus: vi.fn(), getRuntimeStatus: vi.fn(), listAccountProfiles: vi.fn(), listAlerts: vi.fn(), listAuditEvents: vi.fn(), listDevices: vi.fn(), listEvents: vi.fn(), listExpectedServices: vi.fn(), listFindingReviews: vi.fn(), listManagedAppliances: vi.fn(), listObservedListeners: vi.fn(), listPasskeys: vi.fn(), listSecurityActions: vi.fn(), lockAccountNotebook: vi.fn(), loginWithPasskey: vi.fn(), logout: vi.fn(), registerPasskey: vi.fn(), registerPushDestination: vi.fn(), removeAccountProfile: vi.fn(), removeExpectedService: vi.fn(), removePasskey: vi.fn(), removePushDestination: vi.fn(), requestSecurityAction: vi.fn(), saveAccountProfile: vi.fn(), saveExpectedService: vi.fn(), saveExpectedServices: vi.fn(), saveFindingReview: vi.fn(), touchAccountNotebook: vi.fn(), unlockAccountNotebook: vi.fn(), revokeDevice: vi.fn(),
+	addPasskey: vi.fn(), collectSnapshot: vi.fn(), getAuthStatus: vi.fn(), getDevice: vi.fn(), getLatestSnapshot: vi.fn(), getNotificationStatus: vi.fn(), getRuntimeStatus: vi.fn(), getSystemDiagnostics: vi.fn(), listAccountProfiles: vi.fn(), listAlerts: vi.fn(), listAuditEvents: vi.fn(), listDevices: vi.fn(), listEvents: vi.fn(), listExpectedServices: vi.fn(), listFindingReviews: vi.fn(), listManagedAppliances: vi.fn(), listObservedListeners: vi.fn(), listPasskeys: vi.fn(), listSecurityActions: vi.fn(), lockAccountNotebook: vi.fn(), loginWithPasskey: vi.fn(), logout: vi.fn(), registerPasskey: vi.fn(), registerPushDestination: vi.fn(), removeAccountProfile: vi.fn(), removeExpectedService: vi.fn(), removePasskey: vi.fn(), removePushDestination: vi.fn(), requestSecurityAction: vi.fn(), saveAccountProfile: vi.fn(), saveExpectedService: vi.fn(), saveExpectedServices: vi.fn(), saveFindingReview: vi.fn(), touchAccountNotebook: vi.fn(), unlockAccountNotebook: vi.fn(), revokeDevice: vi.fn(),
 }));
 
 vi.mock("./api", () => api);
@@ -71,6 +90,7 @@ beforeEach(() => {
 	api.getAuthStatus.mockResolvedValue(fixtures.auth);
 	api.listDevices.mockResolvedValue([fixtures.device]);
 	api.getRuntimeStatus.mockResolvedValue(fixtures.runtime);
+	api.getSystemDiagnostics.mockResolvedValue(fixtures.diagnostics);
 	api.listEvents.mockResolvedValue([]);
 	api.listAlerts.mockResolvedValue([]);
 	api.getNotificationStatus.mockResolvedValue({ available: false, vapidPublicKey: "", destinations: [], pendingCount: 0, failedCount: 0, lastSuccessAt: null, lastFailureAt: null, evaluationPeriodSeconds: 60 });
@@ -131,16 +151,31 @@ describe("HAVEN routed console", () => {
 		render(<App />);
 		await screen.findByRole("heading", { name: "Home security overview" });
 
-		await user.click(screen.getByRole("link", { name: "Settings" }));
+		await user.click(screen.getByRole("link", { name: "System" }));
 		expect(await screen.findByRole("heading", { name: "Owner passkeys" })).toBeInTheDocument();
-		expect(document.title).toBe("Settings — HAVEN");
+		expect(document.title).toBe("System & Recovery — HAVEN");
+		expect(screen.getByRole("heading", { name: "System diagnostics" })).toBeInTheDocument();
+		expect(screen.getByText("2 verified · 0 advisory · 0 failed")).toBeInTheDocument();
 		expect(screen.getByRole("heading", { name: "Install HAVEN" })).toBeInTheDocument();
 		expect(screen.getByText(/no privileged local service/i)).toBeInTheDocument();
-		expect(screen.getByRole("heading", { name: "Recovery model" })).toBeInTheDocument();
-		expect(screen.getByText("Bootstrap and re-enroll")).toBeInTheDocument();
+		expect(screen.getByRole("heading", { name: "Recovery map" })).toBeInTheDocument();
+		expect(screen.getByText("Private hostnames and firewall scope")).toBeInTheDocument();
+		expect(screen.getByRole("heading", { name: "Lifecycle guide" })).toBeInTheDocument();
+		expect(screen.getAllByText("haven-agent doctor")).toHaveLength(2);
 		expect(screen.getByRole("heading", { name: "Background alerts" })).toBeInTheDocument();
 		expect(screen.getByText("0.15.0")).toBeInTheDocument();
 		expect(window.location.pathname).toBe("/settings");
+	});
+
+	it("keeps diagnostics and recovery reachable before the first agent report", async () => {
+		window.history.replaceState(null, "", "/settings");
+		api.listDevices.mockResolvedValueOnce([]);
+		render(<App />);
+		expect(await screen.findByRole("heading", { name: "System & Recovery" })).toBeInTheDocument();
+		expect(screen.getByRole("heading", { name: "System diagnostics" })).toBeInTheDocument();
+		expect(screen.getByRole("heading", { name: "Recovery map" })).toBeInTheDocument();
+		expect(screen.getByRole("link", { name: "System" })).toHaveAttribute("aria-current", "page");
+		expect(screen.getByText("0/0")).toBeInTheDocument();
 	});
 
 	it("opens the private account-security notebook as a dedicated workspace", async () => {

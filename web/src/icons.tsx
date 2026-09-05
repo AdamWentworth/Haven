@@ -96,3 +96,7 @@ export function ActivityIcon(props: IconProps) {
 export function BellIcon(props: IconProps) {
   return <SvgIcon {...props}><path d="M18 8a6 6 0 0 0-12 0c0 7-3 7-3 9h18c0-2-3-2-3-9M10 21h4" /></SvgIcon>;
 }
+
+export function SettingsIcon(props: IconProps) {
+  return <SvgIcon {...props}><path d="M4 6h10M18 6h2M4 12h2M10 12h10M4 18h7M15 18h5" /><circle cx="16" cy="6" r="2" /><circle cx="8" cy="12" r="2" /><circle cx="13" cy="18" r="2" /></SvgIcon>;
+}

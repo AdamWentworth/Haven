@@ -30,6 +30,7 @@ describe("HAVEN API client", () => {
 			api.listBrowserSiteReviews("device/one", signal),
 			api.getDevice("device/one", signal),
 			api.getRuntimeStatus(signal),
+			api.getSystemDiagnostics(signal),
 			api.listEvents("device one", signal),
 			api.listAlerts(signal),
 			api.getNotificationStatus(signal),
@@ -43,7 +44,8 @@ describe("HAVEN API client", () => {
 		]);
 
 		const requests = vi.mocked(fetch).mock.calls;
-		expect(requests).toHaveLength(17);
+		expect(requests).toHaveLength(18);
+		expect(requests.map(([url]) => url)).toContain("/api/diagnostics");
 		expect(requests.every(([, options]) => options?.cache === "no-store" && options.signal === signal)).toBe(true);
 		expect(requests.map(([url]) => url)).toContain("/api/devices/device%2Fone");
 		expect(requests.map(([url]) => url)).toContain("/api/events?limit=60&deviceId=device+one");
