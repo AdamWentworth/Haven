@@ -22,26 +22,8 @@ type renderOptions struct {
 	scale float64
 }
 
-var outerShield = []point{
-	{256, 37}, {441, 111}, {441, 247}, {435, 297}, {416, 347}, {380, 391},
-	{327, 438}, {256, 466}, {185, 438}, {132, 391}, {96, 347}, {77, 297},
-	{71, 247}, {71, 111},
-}
-
-var innerShield = []point{
-	{256, 74}, {406, 133}, {406, 247}, {400, 286}, {383, 326}, {353, 361},
-	{311, 397}, {256, 428}, {201, 397}, {159, 361}, {129, 326}, {112, 286},
-	{106, 247}, {106, 133},
-}
-
-var watchtower = []point{
-	{164, 155}, {210, 155}, {210, 230}, {302, 230}, {302, 155}, {348, 155},
-	{348, 357}, {302, 357}, {302, 277}, {210, 277}, {210, 357}, {164, 357},
-}
-
-var beacon = []point{
-	{256, 227}, {285, 256}, {256, 285}, {227, 256},
-}
+var outerShield = smoothOuterShield()
+var innerShield = smoothInnerShield()
 
 func main() {
 	check := flag.Bool("check", false, "verify committed icons match the deterministic generator")
@@ -118,11 +100,10 @@ func render(size int, options renderOptions) *image.NRGBA {
 					if insidePolygon(point{px, py}, innerShield) {
 						shade = shieldFill
 					}
-					if insidePolygon(point{px, py}, watchtower) {
+					if insideRoundedRect(point{px, py}, 7.6, 7.1, 2.35, 9.8, .7) ||
+						insideRoundedRect(point{px, py}, 14.05, 7.1, 2.35, 9.8, .7) ||
+						insideRoundedRect(point{px, py}, 9.25, 10.9, 5.5, 2.2, 1.1) {
 						shade = pale
-					}
-					if insidePolygon(point{px, py}, beacon) {
-						shade = green
 					}
 					premultiplied[0] += int(shade.R) * int(shade.A)
 					premultiplied[1] += int(shade.G) * int(shade.A)
@@ -201,4 +182,77 @@ func insidePolygon(value point, polygon []point) bool {
 		}
 	}
 	return inside
+}
+
+func iconPoint(x, y float64) point {
+	return point{x * 512 / 24, y * 512 / 24}
+}
+
+func appendQuadratic(values []point, control, end point) []point {
+	start := values[len(values)-1]
+	for step := 1; step <= 24; step++ {
+		t := float64(step) / 24
+		inverse := 1 - t
+		values = append(values, point{
+			x: inverse*inverse*start.x + 2*inverse*t*control.x + t*t*end.x,
+			y: inverse*inverse*start.y + 2*inverse*t*control.y + t*t*end.y,
+		})
+	}
+	return values
+}
+
+func appendCubic(values []point, firstControl, secondControl, end point) []point {
+	start := values[len(values)-1]
+	for step := 1; step <= 48; step++ {
+		t := float64(step) / 48
+		inverse := 1 - t
+		values = append(values, point{
+			x: inverse*inverse*inverse*start.x + 3*inverse*inverse*t*firstControl.x + 3*inverse*t*t*secondControl.x + t*t*t*end.x,
+			y: inverse*inverse*inverse*start.y + 3*inverse*inverse*t*firstControl.y + 3*inverse*t*t*secondControl.y + t*t*t*end.y,
+		})
+	}
+	return values
+}
+
+func smoothOuterShield() []point {
+	values := []point{iconPoint(11.35, 1.93)}
+	values = appendQuadratic(values, iconPoint(12, 1.67), iconPoint(12.65, 1.93))
+	values = append(values, iconPoint(20.03, 4.92))
+	values = appendQuadratic(values, iconPoint(20.55, 5.13), iconPoint(20.55, 5.69))
+	values = append(values, iconPoint(20.55, 11.41))
+	values = appendCubic(values, iconPoint(20.55, 16.24), iconPoint(17.47, 19.82), iconPoint(12.55, 21.59))
+	values = appendQuadratic(values, iconPoint(12, 21.79), iconPoint(11.45, 21.59))
+	values = appendCubic(values, iconPoint(6.53, 19.82), iconPoint(3.45, 16.24), iconPoint(3.45, 11.41))
+	values = append(values, iconPoint(3.45, 5.69))
+	values = appendQuadratic(values, iconPoint(3.45, 5.13), iconPoint(3.97, 4.92))
+	return append(values, iconPoint(11.35, 1.93))
+}
+
+func smoothInnerShield() []point {
+	values := []point{iconPoint(11.56, 3.63)}
+	values = appendQuadratic(values, iconPoint(12, 3.45), iconPoint(12.44, 3.63))
+	values = append(values, iconPoint(18.48, 6.08))
+	values = appendQuadratic(values, iconPoint(18.85, 6.23), iconPoint(18.85, 6.63))
+	values = append(values, iconPoint(18.85, 11.41))
+	values = appendCubic(values, iconPoint(18.85, 15.24), iconPoint(16.45, 18.15), iconPoint(12.37, 19.71))
+	values = appendQuadratic(values, iconPoint(12, 19.85), iconPoint(11.63, 19.71))
+	values = appendCubic(values, iconPoint(7.55, 18.15), iconPoint(5.15, 15.24), iconPoint(5.15, 11.41))
+	values = append(values, iconPoint(5.15, 6.63))
+	values = appendQuadratic(values, iconPoint(5.15, 6.23), iconPoint(5.52, 6.08))
+	return append(values, iconPoint(11.56, 3.63))
+}
+
+func insideRoundedRect(value point, x, y, width, height, radius float64) bool {
+	x *= 512 / 24
+	y *= 512 / 24
+	width *= 512 / 24
+	height *= 512 / 24
+	radius *= 512 / 24
+	if value.x < x || value.x > x+width || value.y < y || value.y > y+height {
+		return false
+	}
+	nearestX := max(x+radius, min(value.x, x+width-radius))
+	nearestY := max(y+radius, min(value.y, y+height-radius))
+	dx, dy := value.x-nearestX, value.y-nearestY
+	return dx*dx+dy*dy <= radius*radius
 }
