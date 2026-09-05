@@ -638,8 +638,6 @@ footer { display: flex; justify-content: space-between; padding: 2.5rem 0 3rem; 
 }
 
 @media (min-width: 781px) and (max-width: 1050px) {
-  .topbar { flex-wrap: wrap; padding-top: .65rem; padding-bottom: .65rem; }
-  .app-navigation { order: 3; width: 100%; justify-content: center; }
   .summary-grid, .network-metrics { grid-template-columns: repeat(2, 1fr); }
 	.network-overview-columns { grid-template-columns: 1fr; }
 }

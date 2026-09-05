@@ -40,6 +40,7 @@ describe("native desktop shell contract", () => {
 		expect(styles).toContain("white-space: nowrap");
 		expect(styles).toContain("@media (max-width: 1050px)");
 		expect(styles).toContain(".local-label, .topbar-action-label { display: none; }");
+		expect(styles).not.toContain(".topbar { flex-wrap: wrap");
 		expect(application).toContain('className="topbar-action-label"');
 		expect(application).toContain('aria-label="Lock HAVEN"');
 	});
