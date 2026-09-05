@@ -54,8 +54,8 @@ func TestCompatibilityIsMaintenanceEvidenceNotDeviceStatus(t *testing.T) {
 	}
 
 	device.Agent.Version = "0.13.0"
-	if got := Present(device).Agent.Compatibility; got != CompatibilityVersionDrift {
-		t.Fatalf("expected version drift, got %q", got)
+	if got := Present(device).Agent.Compatibility; got != CompatibilityCompatible {
+		t.Fatalf("expected protocol-compatible release drift, got %q", got)
 	}
 }
 

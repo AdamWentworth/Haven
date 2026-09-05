@@ -1,12 +1,54 @@
-# HAVEN
+<p align="center">
+  <img src="web/public/haven-app-icon.svg" alt="HAVEN shield mark" width="92">
+</p>
 
-**Home Asset Visibility, Events & Network Security**
+<h1 align="center">HAVEN</h1>
 
-HAVEN is a personal security observatory for home devices and networks. It presents native operating-system protections in one understandable console without trying to replace Microsoft Defender, host firewalls, or other trusted security controls.
+<p align="center"><strong>Home Asset Visibility, Events &amp; Network Security</strong></p>
 
-HAVEN is pre-release software. The current milestone adds a finite browser-hardening review built only from existing privacy-bounded protection and extension evidence. It deliberately excludes cookie credentials, does not treat logged-in sites or cookie counts as failures, and never clears browser data itself. Its native desktop client remains a hardened shell, its account-security notebook remains a checklist—not a provider integration or secret vault—and HAVEN is not a replacement for native protection.
+<p align="center">
+  A calm, self-hosted security observatory for understanding trusted computers,
+  private-network services, managed appliances, browsers, and account hygiene.
+</p>
 
-## Milestone 0.22 — Browser Hardening Review
+<p align="center">
+  <a href="https://go.dev/"><img alt="Go 1.26" src="https://img.shields.io/badge/Go-1.26-00ADD8?logo=go&amp;logoColor=white"></a>
+  <a href="https://react.dev/"><img alt="React 19" src="https://img.shields.io/badge/React-19-20232A?logo=react&amp;logoColor=61DAFB"></a>
+  <a href="https://www.typescriptlang.org/"><img alt="TypeScript" src="https://img.shields.io/badge/TypeScript-6-3178C6?logo=typescript&amp;logoColor=white"></a>
+  <a href="https://www.electronjs.org/"><img alt="Electron" src="https://img.shields.io/badge/Electron-44-191970?logo=electron&amp;logoColor=white"></a>
+  <a href="https://www.sqlite.org/"><img alt="SQLite" src="https://img.shields.io/badge/SQLite-3-003B57?logo=sqlite&amp;logoColor=white"></a>
+  <a href="https://www.docker.com/"><img alt="Docker" src="https://img.shields.io/badge/Docker-deployment-2496ED?logo=docker&amp;logoColor=white"></a>
+</p>
+
+<p align="center">
+  <a href="https://github.com/AdamWentworth/Haven/actions/workflows/ci.yml"><img alt="CI status" src="https://github.com/AdamWentworth/Haven/actions/workflows/ci.yml/badge.svg"></a>
+  <a href="LICENSE"><img alt="MIT license" src="https://img.shields.io/badge/license-MIT-6ee7ad"></a>
+</p>
+
+HAVEN turns native security evidence into one explainable household view without replacing Microsoft Defender, Linux firewalls, browser protections, or other trusted controls. A Go hub receives mutually authenticated reports from unprivileged Windows and Linux agents, while the React console and hardened Electron client keep observation, review, and deliberately narrow actions understandable.
+
+> [!IMPORTANT]
+> HAVEN is pre-release personal infrastructure, not an antivirus, password manager, SIEM, or provider-session authority. It never stores passwords, cookie values, recovery codes, authenticator seeds, packet payloads, or arbitrary remote commands. Public demos must use synthetic data.
+
+---
+
+## ✨ Highlights
+
+- **Cross-platform posture** — explainable Windows and Ubuntu security checks, host-firewall verification, updates, protection state, and authenticated report freshness.
+- **Service-aware networking** — logical listeners, live connections, systemd and Docker attribution, and owner-reviewed expected-service baselines without packet capture.
+- **Managed appliance health** — explicit, credential-bounded NAS reachability, capacity, disk, temperature, storage-set, and firmware evidence.
+- **Browser hardening** — privacy-bounded browser, extension, and cookie-domain metadata with finite cleanup and incident guidance—never cookie contents.
+- **Account hygiene notebook** — encrypted owner-reported MFA, recovery, backup-code, and session-review checklists without provider credentials.
+- **Calm alerting** — alerts derive only from current verified posture, authenticated freshness, and reviewed service expectations; they never claim an attack occurred.
+- **Constrained control plane** — fixed, capability-advertised actions require a fresh passkey and cannot become an arbitrary shell.
+- **Portable by design** — reusable public product code remains separate from private network configuration and recoverable local state.
+
+Read the [architecture](docs/ARCHITECTURE.md), [threat model](docs/THREAT_MODEL.md), [verification map](docs/VERIFICATION.md), and [portability guide](docs/PORTABILITY.md) for the evidence and boundaries behind those claims.
+
+<details>
+<summary><strong>Complete implemented capability inventory for milestone 0.23</strong></summary>
+
+### Milestone 0.23 — Portable Recovery and Product Polish
 
 The current implementation provides:
 
@@ -145,9 +187,37 @@ The helper emits a bounded JSON schema containing only current health facts. It 
 
 The hub records only current reachability, normalized health evidence, bounded error classes, check timestamps, and the public metadata of a presented TLS certificate. It never stores appliance credentials, raw responses, packet payloads, or newly discovered services. A required endpoint or complete health source must fail two consecutive checks before HAVEN creates an availability alert; visibility-only endpoints and incomplete-but-non-actionable health coverage remain quiet.
 
-Because HAVEN is pre-release and observation schema 2 is still evolving, hubs and agents should run the same repository revision.
+Because HAVEN is pre-release and observation schema 2 is still evolving, hubs and agents should use a schema accepted by the hub. Exact build alignment remains useful provenance, but a release-number difference alone is not an update requirement when the authenticated report is protocol compatible.
 
-## Run locally on Windows
+</details>
+
+---
+
+## 🧱 System design
+
+| Layer | Technology | Responsibility |
+| --- | --- | --- |
+| Hub | Go, SQLite | Authentication, encrypted owner state, history, alert projection, appliance observation, and embedded web assets |
+| Endpoint agent | Go, native OS collectors | Read-only collection and mutually authenticated outbound reporting |
+| Console | React, TypeScript, Vite | Routed household, device, network, browser, account, activity, and settings workspaces |
+| Desktop client | Electron | Sandboxed, exact-origin Windows client with no Node, preload, filesystem, shell, or IPC bridge |
+| Production | Docker image plus private operations configuration | Resource-bounded hub deployment; endpoint agents remain native |
+
+```mermaid
+flowchart LR
+    W[Windows agents] -->|TLS 1.3 mTLS| H[HAVEN hub]
+    L[Linux agents] -->|TLS 1.3 mTLS| H
+    N[Managed appliances] -->|bounded read-only probes| H
+    H --> D[(encrypted state + SQLite)]
+    H --> C[React console]
+    C --> E[Electron or browser client]
+```
+
+The hub is centralized; collection is not. Each enrolled machine observes itself with native APIs, then sends a bounded snapshot to the hub. Production network coordinates and authority remain in a separate private deployment layer.
+
+---
+
+## 🚀 Run locally on Windows
 
 Requirements:
 
@@ -167,7 +237,7 @@ go run .\cmd\haven-hub
 
 Open <http://localhost:5080>. The hub binds to loopback by default and writes its development database to the operating system's per-user application-data directory, outside the repository. The `localhost` name is required because browsers grant WebAuthn's local-development secure-context exception to localhost, not arbitrary loopback IP literals.
 
-## Install the desktop experience
+## 🖥️ Install the desktop experience
 
 The native desktop package lives in `desktop`. It opens the production private HTTPS origin in a dedicated sandboxed Electron window and uses the same hub authentication, account lock, and server-delivered updates. It is a client—not another hub or endpoint agent—and it exposes no Node.js, filesystem, shell, preload, or IPC bridge to the dashboard.
 
@@ -261,7 +331,7 @@ Demo mode neither runs the local collector nor exposes non-synthetic devices thr
 
 For frontend development, set `$env:HAVEN_PUBLIC_ORIGIN = "http://localhost:5173"` before starting the hub, then run `npm run dev` from `web`. Vite binds to localhost and proxies `/api` to the hub. Remove the environment variable when returning to the embedded UI on port 5080.
 
-## Checks
+## ✅ Quality gates
 
 ```powershell
 go test .\...
@@ -279,13 +349,19 @@ Set-Location ..
 pwsh -NoProfile -File .\scripts\Test-PublicRepository.ps1
 ```
 
-## Ubuntu deployment
+## ♻️ Portability and recovery
+
+HAVEN can be rebuilt from the public source without preserving a clone of one household. Private DNS, TLS, addresses, appliance definitions, firewall policy, and deployment authority stay outside this repository. Preserve the complete hub state directory only when history and owner decisions need continuity; otherwise a clean hub can be bootstrapped and every trusted endpoint deliberately re-enrolled.
+
+The [portability and reinitialization guide](docs/PORTABILITY.md) records each product default, private assumption, state boundary, and the exact clean-start sequence for an OS reinstall or changed home network. The Electron installer is needed only on workstations where a dedicated client is useful; endpoint agents do not require it.
+
+## 🐧 Ubuntu deployment
 
 GitHub-hosted CI builds and publishes an immutable `ghcr.io/adamwentworth/haven-hub:sha-<commit>` image only after all verification passes. A separate private HomeOps repository owns the production runner and fixed deployment controls. It validates the requested `main` revision and image label, recreates only HAVEN's constrained containers, health-checks private HTTPS, and rolls back on failure.
 
-The production profile uses `haven.home.arpa` as a private DNS name, a private certificate authority for the browser endpoint, a LAN/VPN resolver, and a distinct mutually authenticated agent endpoint. The production container sets `HAVEN_LOCAL_COLLECTION_ENABLED=false`; its ephemeral container hostname is never a trusted device. Real addresses, deployment authority, trust roots, private keys, databases, and server configuration do not belong in this public repository. See [the deployment guide](docs/DEPLOYMENT.md) for the trust boundary. Endpoint agents run natively, not as privileged containers.
+The reference profile uses the conventional `haven.home.arpa` private DNS name, a private certificate authority for the browser endpoint, a LAN/VPN resolver, and a distinct mutually authenticated agent endpoint. The exact hostname, port, address, and interface policy belong to the private deployment. The production container sets `HAVEN_LOCAL_COLLECTION_ENABLED=false`; its ephemeral container hostname is never a trusted device. Real addresses, deployment authority, trust roots, private keys, databases, and server configuration do not belong in this public repository. See [the deployment guide](docs/DEPLOYMENT.md) for the trust boundary. Endpoint agents run natively, not as privileged containers.
 
-## Repository layout
+## 🗂️ Repository layout
 
 ```text
 Haven/
@@ -313,7 +389,7 @@ Haven/
 └── compose.yaml
 ```
 
-## Design principles
+## 🧭 Design principles
 
 1. **Observe first.** Read-only visibility comes before controls.
 2. **Use native protections.** HAVEN coordinates trusted OS security controls instead of replacing them.
@@ -323,9 +399,9 @@ Haven/
 6. **Collect proportionately.** Connection, workload, and browser/extension inventory details are live-only by default; packet payloads and browsing content are outside HAVEN's scope.
 7. **Respect every household member.** Monitoring another person's device requires visible opt-in and transparent collection.
 
-## Current and next security milestone
+## 🛣️ Milestone history and direction
 
-Milestone 0.22 adds a deterministic browser-hardening review that treats only explicit disabled or non-enforcing defenses, cookie-verification evidence, and meaningful extension changes as concrete review items. Cookie volume and ordinary logged-in sites cannot alter its result. Higher-access extensions remain capability evidence for a one-time owner review, not a threat verdict, and the page includes a finite incident plan that activates only after a concrete signal. Milestone 0.21 adds encrypted, persistent owner classifications for each currently observed Chrome profile/domain pair and a guided cleanup queue that excludes signed-in and deferred sites. A classification changes only HAVEN's suggestions; it does not protect a cookie from malware or modify Chrome. Milestone 0.20.3 replaces the flat Chrome cookie-domain list with an automatic, no-input-required grouping of likely sign-in-related, possibly sign-in-related, and other site data, plus a separate cleanup review and optional search. Milestone 0.20.2 adds the deterministic evidence classifier and sorting foundation. Its stronger tier requires session-scoped, Secure, and HTTP-only cookie metadata but remains a review hint—not an authenticated-session claim. Milestone 0.20 adds the underlying domain-level cookie aggregates and conservative dormant-site guidance while excluding cookie credentials and provider-session claims. Milestone 0.19 adds endpoint-local browser-extension change detection, bounded Chrome session-protection evidence on Windows, and encrypted owner-reported provider-session reviews without reading cookie contents or provider accounts. Milestone 0.18 adds live-only, privacy-bounded browser and extension exposure inventory plus Windows web-protection evidence. Milestone 0.17 adds a constrained Electron client with a private-origin navigation boundary, Chromium WebAuthn, an application-specific encrypted session, hardened executable fuses, a Windows installer, and explicit tests that prevent a Node, preload, IPC, filesystem, or shell bridge from entering the remote dashboard. Milestone 0.16 remains the browser-installed fallback with local application icons, browser-owned installation, and no authenticated offline cache. Milestone 0.15.3 keeps reviewed account cards compact by removing redundant healthy-state copy, date time-of-day noise, and equal-height stretching between neighboring profiles.
+Milestone 0.23 removes household-specific runtime guesses, records the complete portability boundary, makes the Electron origin safely selectable at build time, treats schema-compatible agents as healthy across release-number changes, and refines the product's visual hierarchy and repository presentation. It favors a documented clean reinitialization over an unsafe destructive restore rehearsal against the live hub. Milestone 0.22 adds a deterministic browser-hardening review that treats only explicit disabled or non-enforcing defenses, cookie-verification evidence, and meaningful extension changes as concrete review items. Cookie volume and ordinary logged-in sites cannot alter its result. Milestone 0.21 adds encrypted, persistent owner classifications for each currently observed Chrome profile/domain pair and a guided cleanup queue. Milestones 0.18–0.20 add privacy-bounded browser, extension, cookie-domain, session-protection, and provider-review evidence. Milestone 0.17 adds the constrained Electron client, and milestone 0.16 remains the browser-installed fallback.
 
 Milestone 0.7 adds native Linux monitoring and boot-persistent endpoint-agent scheduling. Milestone 0.7.1 makes its network results explainable, 0.7.2 makes report freshness and finding lifecycles explicit, and 0.7.3 correlates host listeners with sanitized Docker port mappings. Milestone 0.7.4 adds deliberate suggested-baseline review; 0.7.5 adds live systemd ownership and service-constrained expectations for Linux listeners. Milestone 0.8 combines the latest authenticated reports into a network-wide coverage, change, and live-relationship view while keeping merely observed private endpoints separate from explicitly enrolled devices. Milestone 0.9 turns current findings, server-classified stale agents, incomplete enrollments, new non-local listeners, and changed service attribution into explainable active alerts. Milestone 0.10 moves that derivation to the hub and adds opt-in, encrypted, durable Web Push delivery with bounded retries and per-destination receipts; its expectation model also supports owner-constrained dynamic ranges and expiring development approvals. Milestone 0.11 adds reproducible console-free Windows scheduled-task packaging and credential-free monitoring of explicitly configured private network appliances. Milestone 0.12 adds optional read-only NAS health through bounded SNMP plus a host-key-pinned, forced-command SSH helper. Milestone 0.13 reorganizes the console around stable routes and strengthens report delivery, freshness semantics, readiness, version evidence, rendered UI tests, and the public release pipeline. Milestone 0.14 adds authenticated reporter provenance, capability evidence, fleet lifecycle presentation, checksummed cross-platform artifacts, and safe install/repair/status/uninstall workflows while preserving older enrolled reporters. Milestone 0.15 adds an encrypted owner-reported account-security notebook with calm, evidence-derived authentication and recovery suggestions while explicitly excluding provider access and secret storage; 0.15.2 adds a separately reauthenticated private workspace, structured review facts, and local platform branding. A later event-driven Windows sensor may move under Service Control Manager only when real-time Defender and Windows Event Log monitoring justify an always-running process; it must remain outbound-only and use the least privilege its collectors require. HAVEN does not scan the LAN, retain remote endpoints, or claim that an alert proves compromise. See [verification](docs/VERIFICATION.md) for the claim-to-test map. The Ubuntu hub does not execute Windows actions on another machine. GitHub Actions verifies the Go, frontend, desktop, dependency, concurrency, vulnerability, Windows process isolation, agent artifacts, image, static analysis, and public-repository safety checks on each proposed change.
 

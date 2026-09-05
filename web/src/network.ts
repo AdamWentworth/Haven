@@ -191,8 +191,7 @@ export function networkServiceLabel(protocol: string, port: number) {
     "TCP:4070": "Spotify",
     "TCP:5228": "push messaging",
     "TCP:8096": "Jellyfin",
-    "TCP:8443": "HAVEN",
-    "UDP:51822": "WireGuard",
+    "TCP:8443": "HTTPS (alternate)",
   };
   return labels[`${protocol.toUpperCase()}:${port}`] || "";
 }

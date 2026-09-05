@@ -14,6 +14,7 @@ import (
 
 const (
 	CompatibilityCurrent       = "current"
+	CompatibilityCompatible    = "compatible"
 	CompatibilityDevelopment   = "development"
 	CompatibilityVersionDrift  = "version-drift"
 	CompatibilityRevisionDrift = "revision-drift"
@@ -102,7 +103,10 @@ func Present(device model.DeviceRecord) model.DeviceRecord {
 
 func classify(agent model.AgentMetadata) string {
 	if agent.Version != buildinfo.Version {
-		return CompatibilityVersionDrift
+		// Validation already proved that this report uses the observation schema
+		// understood by the hub. A release-number difference is therefore useful
+		// provenance, not an update requirement by itself.
+		return CompatibilityCompatible
 	}
 	if agent.Revision == "development" || buildinfo.Revision == "development" {
 		return CompatibilityDevelopment

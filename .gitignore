@@ -15,6 +15,7 @@ coverage/
 /haven-agent
 /haven-hub.exe
 /haven-agent.exe
+desktop/build/origin.cjs
 
 # Generated web assets are embedded into release builds.
 internal/webui/dist/*

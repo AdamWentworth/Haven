@@ -671,6 +671,23 @@ function DesktopInstallPanel({ status, install }: { status: DesktopInstallStatus
   );
 }
 
+function RecoveryModelPanel() {
+  return (
+    <section className="panel recovery-model-panel" aria-labelledby="recovery-model-title">
+      <PanelHeading eyebrow="PORTABLE BY DESIGN" title="Recovery model" id="recovery-model-title" icon={<HavenIcon />} accent="cyan">
+        Rebuild the product from public source; reapply private network choices deliberately
+      </PanelHeading>
+      <dl className="details-grid">
+        <div><dt>Product</dt><dd>Clone and verify</dd></div>
+        <div><dt>Deployment</dt><dd>Private configuration</dd></div>
+        <div><dt>Continuity</dt><dd>Complete state directory</dd></div>
+        <div><dt>Clean start</dt><dd>Bootstrap and re-enroll</dd></div>
+      </dl>
+      <p className="footnote">A state backup preserves history, passkeys, and owner decisions, but it is optional for recovery. On a replaced network, HAVEN can start clean and re-enroll each trusted endpoint. The Electron client belongs only on workstations where a dedicated console is useful.</p>
+    </section>
+  );
+}
+
 function ActionCenter({ actions, audit, capabilities, run, busy }: { actions: SecurityAction[]; audit: AuditEvent[]; capabilities: ActionCapability[]; run: (kind: SecurityActionKind) => void; busy: boolean }) {
   const latest = actions.slice(0, 5);
   return (
@@ -702,7 +719,7 @@ function AwaitingAgents({ devices, runtime, passkeys, actions, audit, error, sel
       {error && <p className="inline-error" role="alert">{error}</p>}
       <section className="panel awaiting-panel">
         <PanelHeading eyebrow="NATIVE AGENTS" title={awaiting ? "Waiting for the first observation" : "No endpoints are enrolled yet"} id="awaiting-title" icon={<DevicesIcon />} accent="cyan">The production hub stores and explains observations; native agents collect them from each operating system</PanelHeading>
-        <div className="activity-empty"><strong>{awaiting ? "An enrolled agent has not reported yet." : "The hub is healthy and ready for its first trusted endpoint."}</strong><span>Once ADAM-PC reports, its real Windows Defender, firewall, baseline, and connection signals will appear here. Container identities are never treated as household devices.</span></div>
+        <div className="activity-empty"><strong>{awaiting ? "An enrolled agent has not reported yet." : "The hub is healthy and ready for its first trusted endpoint."}</strong><span>Once an enrolled endpoint reports, its verified protection, firewall, baseline, and connection signals will appear here. Container identities are never treated as household devices.</span></div>
       </section>
       <PasskeyPanel passkeys={passkeys} add={addOwnerPasskey} remove={removeOwnerPasskey} busy={actionBusy} />
       <ActionCenter actions={actions} audit={audit} capabilities={runtime?.actionCapabilities || []} run={() => undefined} busy={actionBusy} />
@@ -882,7 +899,7 @@ function Application({ snapshot, devices, networkDevices, appliances, events, ne
 	} else if (route.page === "activity") {
 		page = <><PageIntro eyebrow="EVENTS AND DECISIONS" title="Activity">Finding transitions, deliberate control requests, and privacy-bounded owner decisions.</PageIntro><ActivityPanel events={networkEvents} alerts={alerts} />{!demoMode && <ActionCenter actions={actions} audit={audit} capabilities={runtime?.actionCapabilities || []} run={runAction} busy={actionBusy} />}</>;
 	} else if (route.page === "settings") {
-		page = <><PageIntro eyebrow="OWNER ACCESS" title="Settings">Manage installation, this browser's alert destination, and the passkeys that protect HAVEN.</PageIntro><DesktopInstallPanel status={desktopInstallStatus} install={installDesktopApp} />{!demoMode ? <><NotificationPanel status={notificationStatus} supported={alertsSupported} enabled={alertsEnabled} busy={actionBusy} enable={enableAlerts} disable={disableAlerts} /><PasskeyPanel passkeys={passkeys} add={addOwnerPasskey} remove={removeOwnerPasskey} busy={actionBusy} /></> : <p className="demo-banner" role="status">Authentication and notification settings are unavailable in synthetic demo mode.</p>}<section className="panel about-panel" aria-labelledby="about-title"><PanelHeading eyebrow="APPLICATION" title="About HAVEN" id="about-title" icon={<HavenIcon />} accent="green">Private, explainable security visibility</PanelHeading><dl className="details-grid"><div><dt>Version</dt><dd>{runtime?.version || "development"}</dd></div><div><dt>Revision</dt><dd>{runtime?.revision && runtime.revision !== "development" ? runtime.revision.slice(0, 12) : "development"}</dd></div><div><dt>Collection</dt><dd>Read-only by default</dd></div><div><dt>Storage</dt><dd>Private SQLite hub</dd></div></dl></section></>;
+		page = <><PageIntro eyebrow="OWNER ACCESS" title="Settings">Manage installation, recovery boundaries, this browser's alert destination, and the passkeys that protect HAVEN.</PageIntro><DesktopInstallPanel status={desktopInstallStatus} install={installDesktopApp} /><RecoveryModelPanel />{!demoMode ? <><NotificationPanel status={notificationStatus} supported={alertsSupported} enabled={alertsEnabled} busy={actionBusy} enable={enableAlerts} disable={disableAlerts} /><PasskeyPanel passkeys={passkeys} add={addOwnerPasskey} remove={removeOwnerPasskey} busy={actionBusy} /></> : <p className="demo-banner" role="status">Authentication and notification settings are unavailable in synthetic demo mode.</p>}<section className="panel about-panel" aria-labelledby="about-title"><PanelHeading eyebrow="APPLICATION" title="About HAVEN" id="about-title" icon={<HavenIcon />} accent="green">Private, explainable security visibility</PanelHeading><dl className="details-grid"><div><dt>Version</dt><dd>{runtime?.version || "development"}</dd></div><div><dt>Revision</dt><dd>{runtime?.revision && runtime.revision !== "development" ? runtime.revision.slice(0, 12) : "development"}</dd></div><div><dt>Collection</dt><dd>Read-only by default</dd></div><div><dt>Storage</dt><dd>Private SQLite hub</dd></div></dl></section></>;
 	} else {
 		page = <>
 			<div className="device-page-heading"><a href="/devices" onClick={(event) => { if (event.button === 0 && !event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey) { event.preventDefault(); navigate({ page: "devices" }); } }}>← All devices</a><DeviceNavigation deviceId={selectedDeviceId} current={deviceSection} navigate={navigate} /></div>
