@@ -16,6 +16,11 @@ export interface CookieAgeReview {
 	state: "recent" | "dormant" | "unknown";
 }
 
+export interface CookieSiteGroup {
+	level: CookieSessionSignalLevel;
+	sites: BrowserCookieSite[];
+}
+
 const dormantCookieAge = 90 * 24 * 60 * 60 * 1000;
 
 function cookieTimestamp(value?: string) {
@@ -46,6 +51,13 @@ export function filterCookieSites(sites: BrowserCookieSite[], filter: CookieSite
 	if (filter === "session-signals") return sites.filter((site) => cookieSessionSignal(site).level !== "limited");
 	if (filter === "cleanup") return sites.filter((site) => cookieSiteReview(site, now).candidate);
 	return [...sites];
+}
+
+export function groupCookieSites(sites: BrowserCookieSite[]): CookieSiteGroup[] {
+	return (["stronger", "possible", "limited"] as const).map((level) => ({
+		level,
+		sites: sites.filter((site) => cookieSessionSignal(site).level === level),
+	}));
 }
 
 export function sortCookieSites(sites: BrowserCookieSite[], sort: CookieSiteSort, now = Date.now()) {

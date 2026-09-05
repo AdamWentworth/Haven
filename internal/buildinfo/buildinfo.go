@@ -2,7 +2,7 @@
 // command binaries. Revision is replaced by release builds with -ldflags.
 package buildinfo
 
-const Version = "0.20.2"
+const Version = "0.20.3"
 
 var Revision = "development"
 
