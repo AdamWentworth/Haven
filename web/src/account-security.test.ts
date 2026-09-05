@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { accountSummary, dateInputValue, emptyAccountProfile, factorLabel, reviewedAtFromInput, statusLabel } from "./account-security";
+import { accountSummary, dateInputValue, emptyAccountProfile, factorLabel, providerSessionURL, reviewedAtFromInput, sessionCheckLabel, statusLabel } from "./account-security";
 import type { AccountProfile } from "./types";
 
 function profile(overrides: Partial<AccountProfile> = {}): AccountProfile {
@@ -22,7 +22,11 @@ describe("account security presentation", () => {
 
 	it("uses plain-language labels and stable date conversion", () => {
 		expect(statusLabel("disabled")).toBe("Not enabled");
+		expect(statusLabel("recognized")).toBe("All recognized");
 		expect(factorLabel("security-key")).toBe("Security key");
+		expect(sessionCheckLabel("third-party-access")).toBe("Third-party account access reviewed");
+		expect(providerSessionURL(" Google ")).toBe("https://myaccount.google.com/device-activity");
+		expect(providerSessionURL("Unknown provider")).toBeNull();
 		expect(dateInputValue("2026-09-04T12:00:00Z")).toBe("2026-09-04");
 		expect(dateInputValue("not-a-date")).toBe("");
 		expect(reviewedAtFromInput("2026-09-04")).toBe("2026-09-04T12:00:00.000Z");

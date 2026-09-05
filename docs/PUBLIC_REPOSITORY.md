@@ -7,10 +7,10 @@ HAVEN is intended to be safe to publish and feature in a public portfolio. Sourc
 - Passwords, API keys, OAuth tokens, cookies, authenticator seeds, or recovery codes
 - Private keys, client certificates, VPN profiles, certificate-export bundles, or VAPID signing keys
 - Web Push subscription endpoints, subscription key material, or exported notification-delivery records
-- Account-notebook exports, provider/profile identifiers, private notes, or the account-notebook encryption key
+- Account-notebook exports, provider/profile identifiers, provider-session review results, private notes, or the account-notebook encryption key
 - Real hostnames, usernames, email addresses, device IDs, MAC addresses, or household IP addresses
 - Packet captures, event-log exports, crash dumps, databases, snapshots, or application logs
-- Browser-profile exports, extension IDs, extension inventories, browsing history, cookies, or raw site-permission patterns
+- Browser-profile exports, extension IDs, extension inventories, endpoint extension-baseline files, extension-change activity exports, Windows event exports, browsing history, cookies, or raw site-permission patterns
 - Screenshots made while HAVEN displays live device, network, or account information
 - Local deployment files containing DNS names, mount paths, proxy configuration, or credentials
 

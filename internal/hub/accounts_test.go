@@ -24,6 +24,9 @@ const accountProfileJSON = `{
 	"recoveryStatus":"configured",
 	"backupCodesStatus":"missing",
 	"lastReviewedAt":"2026-09-04T12:00:00Z",
+	"sessionStatus":"recognized",
+	"sessionReviewedAt":"2026-09-04T12:00:00Z",
+	"sessionChecks":["devices","recent-activity","third-party-access","unused-sessions"],
 	"notes":"Review this profile directly at Google."
 }`
 

@@ -87,6 +87,34 @@ func TestWindowsSnapshotScriptSeparatesAuthoritativeRebootSignalsFromFileCleanup
 	}
 }
 
+func TestWindowsSnapshotScriptCollectsOnlyBoundedSessionDefenseEvidence(t *testing.T) {
+	for _, expected := range []string{
+		"ApplicationBoundEncryptionEnabled",
+		"BoundSessionCredentialsEnabled",
+		"LogName = 'Application'; ProviderName = 'Chrome'; Id = 257",
+		"-MaxEvents 50",
+		"EventCount = $cookieVerificationEventCount",
+	} {
+		if !strings.Contains(windowsSnapshotScript, expected) {
+			t.Fatalf("Windows snapshot script is missing bounded session-defense evidence %q", expected)
+		}
+	}
+	start := strings.Index(windowsSnapshotScript, "$cookieVerificationEvents =")
+	if start < 0 {
+		t.Fatal("Chrome verification-event collection block was not found")
+	}
+	end := strings.Index(windowsSnapshotScript[start:], "catch {")
+	if end < 0 {
+		t.Fatal("Chrome verification-event collection block was not found")
+	}
+	block := windowsSnapshotScript[start : start+end]
+	for _, forbidden := range []string{".Message", ".Properties", "ToXml", "ConvertTo-Json"} {
+		if strings.Contains(block, forbidden) {
+			t.Fatalf("Chrome verification-event evidence retained raw event data via %q", forbidden)
+		}
+	}
+}
+
 func TestWindowsCollectorReportsRunnerFailure(t *testing.T) {
 	prepareWindowsBrowserEnvironment(t)
 	collector := NewWindowsCollector(stubRunner{err: errors.New("access denied")})

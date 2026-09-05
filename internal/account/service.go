@@ -26,6 +26,7 @@ const (
 	maximumReviewDetails = 16
 	maximumNotesBytes    = 4 * 1024
 	reviewAge            = 180 * 24 * time.Hour
+	sessionReviewAge     = 90 * 24 * time.Hour
 )
 
 var (
@@ -45,6 +46,9 @@ type ProfileInput struct {
 	RecoveryStatus    string     `json:"recoveryStatus"`
 	BackupCodesStatus string     `json:"backupCodesStatus"`
 	LastReviewedAt    *time.Time `json:"lastReviewedAt,omitempty"`
+	SessionStatus     string     `json:"sessionStatus"`
+	SessionReviewedAt *time.Time `json:"sessionReviewedAt,omitempty"`
+	SessionChecks     []string   `json:"sessionChecks"`
 	ReviewDetails     []string   `json:"reviewDetails,omitempty"`
 	Notes             string     `json:"notes,omitempty"`
 }
@@ -75,6 +79,9 @@ type storedProfile struct {
 	RecoveryStatus    string     `json:"recoveryStatus"`
 	BackupCodesStatus string     `json:"backupCodesStatus"`
 	LastReviewedAt    *time.Time `json:"lastReviewedAt,omitempty"`
+	SessionStatus     string     `json:"sessionStatus,omitempty"`
+	SessionReviewedAt *time.Time `json:"sessionReviewedAt,omitempty"`
+	SessionChecks     []string   `json:"sessionChecks,omitempty"`
 	ReviewDetails     []string   `json:"reviewDetails,omitempty"`
 	Notes             string     `json:"notes,omitempty"`
 }
@@ -151,7 +158,9 @@ func (service *Service) Save(ctx context.Context, input ProfileInput, now time.T
 		Category: input.Category, TwoStepStatus: input.TwoStepStatus,
 		Factors: input.Factors, PasswordStatus: input.PasswordStatus,
 		RecoveryStatus: input.RecoveryStatus, BackupCodesStatus: input.BackupCodesStatus,
-		LastReviewedAt: input.LastReviewedAt, ReviewDetails: input.ReviewDetails, Notes: input.Notes,
+		LastReviewedAt: input.LastReviewedAt, SessionStatus: input.SessionStatus,
+		SessionReviewedAt: input.SessionReviewedAt, SessionChecks: input.SessionChecks,
+		ReviewDetails: input.ReviewDetails, Notes: input.Notes,
 	}
 	plain, err := json.Marshal(payload)
 	if err != nil {
@@ -192,8 +201,8 @@ func (service *Service) decrypt(record storage.EncryptedAccountProfile, now time
 		TwoStepStatus: payload.TwoStepStatus, Factors: payload.Factors,
 		PasswordStatus: payload.PasswordStatus, RecoveryStatus: payload.RecoveryStatus,
 		BackupCodesStatus: payload.BackupCodesStatus, LastReviewedAt: payload.LastReviewedAt,
-		ReviewDetails: payload.ReviewDetails,
-		Notes:         payload.Notes,
+		SessionStatus: payload.SessionStatus, SessionReviewedAt: payload.SessionReviewedAt,
+		SessionChecks: payload.SessionChecks, ReviewDetails: payload.ReviewDetails, Notes: payload.Notes,
 	}, now)
 	if err != nil {
 		return Profile{}, errors.New("stored account profile is invalid")
@@ -246,7 +255,34 @@ func suggestions(input ProfileInput, now time.Time) []Suggestion {
 	} else if now.Sub(input.LastReviewedAt.UTC()) > reviewAge {
 		add("review-sessions", "low", "Review sessions and recovery details", "This profile has not been reviewed in more than six months. Check signed-in devices and recovery methods at the provider.")
 	}
+	if input.SessionStatus == "attention" {
+		add("secure-unfamiliar-session", "high", "Secure an unfamiliar session", "This profile is recorded with a device or session that needs attention. Use the provider's official security page to sign it out and follow the provider's account-recovery guidance.")
+	} else if input.SessionStatus == "unknown" {
+		add("review-provider-sessions", "low", "Review signed-in sessions", "Open the provider's official security page, confirm every current device and session, and record only the review result in HAVEN.")
+	} else if input.SessionStatus == "recognized" {
+		if input.SessionReviewedAt == nil {
+			add("record-session-review", "low", "Record the session review date", "The sessions are marked recognized, but the date of that provider-side review is not recorded.")
+		} else if now.Sub(input.SessionReviewedAt.UTC()) > sessionReviewAge {
+			add("refresh-session-review", "low", "Review signed-in sessions again", "The provider-side session review is more than 90 days old. Confirm that every current device and session is still expected.")
+		}
+		if !containsAll(input.SessionChecks, "devices", "recent-activity", "third-party-access", "unused-sessions") {
+			add("complete-session-review", "low", "Complete the session review", "Confirm signed-in devices, recent security activity, third-party access, and that unused or unfamiliar sessions are absent or revoked.")
+		}
+	}
 	return result
+}
+
+func containsAll(values []string, expected ...string) bool {
+	seen := make(map[string]struct{}, len(values))
+	for _, value := range values {
+		seen[value] = struct{}{}
+	}
+	for _, value := range expected {
+		if _, exists := seen[value]; !exists {
+			return false
+		}
+	}
+	return true
 }
 
 func weakFactorsOnly(factors []string) bool {
@@ -271,12 +307,19 @@ func normalize(input ProfileInput, now time.Time) (ProfileInput, error) {
 	input.PasswordStatus = strings.ToLower(strings.TrimSpace(input.PasswordStatus))
 	input.RecoveryStatus = strings.ToLower(strings.TrimSpace(input.RecoveryStatus))
 	input.BackupCodesStatus = strings.ToLower(strings.TrimSpace(input.BackupCodesStatus))
+	input.SessionStatus = strings.ToLower(strings.TrimSpace(input.SessionStatus))
+	if input.SessionStatus == "" {
+		input.SessionStatus = "unknown"
+	}
 	input.Notes = strings.TrimSpace(input.Notes)
 	if input.ReviewDetails == nil {
 		input.ReviewDetails = []string{}
 	}
 	if input.Factors == nil {
 		input.Factors = []string{}
+	}
+	if input.SessionChecks == nil {
+		input.SessionChecks = []string{}
 	}
 	if !boundedLine(input.Provider, 80) || !boundedLine(input.Label, 120) || len(input.Identifier) > 200 || strings.ContainsAny(input.Identifier, "\r\n\x00") || len(input.Notes) > maximumNotesBytes || strings.ContainsRune(input.Notes, '\x00') {
 		return input, ErrInvalidProfile
@@ -285,7 +328,8 @@ func normalize(input ProfileInput, now time.Time) (ProfileInput, error) {
 		!oneOf(input.TwoStepStatus, "unknown", "enabled", "disabled", "not-supported") ||
 		!oneOf(input.PasswordStatus, "unknown", "unique", "reused", "passwordless", "not-applicable") ||
 		!oneOf(input.RecoveryStatus, "unknown", "configured", "missing", "not-supported") ||
-		!oneOf(input.BackupCodesStatus, "unknown", "stored", "missing", "not-supported") {
+		!oneOf(input.BackupCodesStatus, "unknown", "stored", "missing", "not-supported") ||
+		!oneOf(input.SessionStatus, "unknown", "recognized", "attention", "not-supported") {
 		return input, ErrInvalidProfile
 	}
 	if len(input.Factors) > 8 {
@@ -301,6 +345,19 @@ func normalize(input ProfileInput, now time.Time) (ProfileInput, error) {
 		input.Factors[index] = factor
 	}
 	sort.Strings(input.Factors)
+	if len(input.SessionChecks) > 4 {
+		return input, ErrInvalidProfile
+	}
+	seenSessionChecks := map[string]bool{}
+	for index, check := range input.SessionChecks {
+		check = strings.ToLower(strings.TrimSpace(check))
+		if !oneOf(check, "devices", "recent-activity", "third-party-access", "unused-sessions") || seenSessionChecks[check] {
+			return input, ErrInvalidProfile
+		}
+		seenSessionChecks[check] = true
+		input.SessionChecks[index] = check
+	}
+	sort.Strings(input.SessionChecks)
 	cleanDetails := make([]string, 0, len(input.ReviewDetails))
 	seenDetails := map[string]bool{}
 	for _, detail := range input.ReviewDetails {
@@ -328,6 +385,18 @@ func normalize(input ProfileInput, now time.Time) (ProfileInput, error) {
 			return input, ErrInvalidProfile
 		}
 		input.LastReviewedAt = &reviewed
+	}
+	if input.SessionReviewedAt != nil {
+		reviewed := input.SessionReviewedAt.UTC()
+		if reviewed.Before(time.Date(2000, time.January, 1, 0, 0, 0, 0, time.UTC)) || reviewed.After(now.Add(24*time.Hour)) {
+			return input, ErrInvalidProfile
+		}
+		input.SessionReviewedAt = &reviewed
+	}
+	if input.SessionStatus == "unknown" || input.SessionStatus == "not-supported" {
+		if input.SessionReviewedAt != nil || len(input.SessionChecks) > 0 {
+			return input, ErrInvalidProfile
+		}
 	}
 	if containsSecretMaterial(input.Identifier) || containsSecretMaterial(input.Notes) {
 		return input, ErrInvalidProfile
@@ -459,8 +528,8 @@ func loadOrCreateKey(path string) ([]byte, error) {
 func DemoProfiles(now time.Time) []Profile {
 	reviewed := now.UTC().Add(-21 * 24 * time.Hour)
 	inputs := []ProfileInput{
-		{ID: "acct_demo_google_profile", Provider: "Google", Label: "Personal account", Category: "email", TwoStepStatus: "enabled", Factors: []string{"authenticator", "passkey"}, PasswordStatus: "unique", RecoveryStatus: "configured", BackupCodesStatus: "stored", LastReviewedAt: &reviewed, ReviewDetails: []string{"Signed-in devices were reviewed.", "Backup codes are stored outside HAVEN."}},
-		{ID: "acct_demo_social_profile", Provider: "Example Social", Label: "Portfolio profile", Category: "social", TwoStepStatus: "disabled", Factors: []string{}, PasswordStatus: "unique", RecoveryStatus: "configured", BackupCodesStatus: "not-supported", LastReviewedAt: &reviewed, Notes: "Enable two-step verification next."},
+		{ID: "acct_demo_google_profile", Provider: "Google", Label: "Personal account", Category: "email", TwoStepStatus: "enabled", Factors: []string{"authenticator", "passkey"}, PasswordStatus: "unique", RecoveryStatus: "configured", BackupCodesStatus: "stored", LastReviewedAt: &reviewed, SessionStatus: "recognized", SessionReviewedAt: &reviewed, SessionChecks: []string{"devices", "recent-activity", "third-party-access", "unused-sessions"}, ReviewDetails: []string{"Signed-in devices were reviewed.", "Backup codes are stored outside HAVEN."}},
+		{ID: "acct_demo_social_profile", Provider: "Example Social", Label: "Portfolio profile", Category: "social", TwoStepStatus: "disabled", Factors: []string{}, PasswordStatus: "unique", RecoveryStatus: "configured", BackupCodesStatus: "not-supported", LastReviewedAt: &reviewed, SessionStatus: "unknown", SessionChecks: []string{}, Notes: "Enable two-step verification next."},
 	}
 	profiles := make([]Profile, 0, len(inputs))
 	for index, input := range inputs {

@@ -1,6 +1,8 @@
 package model
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"regexp"
 	"strings"
 	"unicode"
@@ -28,6 +30,15 @@ var allowedBrowserProtections = map[string]struct {
 	"windows-smartscreen": {name: "Microsoft Defender SmartScreen", sources: map[string]struct{}{
 		"Windows policy": {}, "Windows shell configuration": {},
 	}},
+	"chrome-app-bound-encryption": {name: "Chrome App-Bound Encryption policy", sources: map[string]struct{}{
+		"Chrome policy": {},
+	}},
+	"chrome-device-bound-sessions": {name: "Chrome device-bound Google sessions", sources: map[string]struct{}{
+		"Chrome policy": {},
+	}},
+	"chrome-cookie-verification-events": {name: "Chrome cookie-protection verification", sources: map[string]struct{}{
+		"Windows Application event log": {},
+	}},
 }
 
 var allowedBrowserPermissions = map[string]struct{}{
@@ -50,7 +61,7 @@ func ValidateBrowserSecurity(status *BrowserSecurityStatus) bool {
 	if status.Coverage != "observed" && status.Coverage != "partial" && status.Coverage != "unavailable" {
 		return false
 	}
-	if len(status.Browsers) > 8 || len(status.Protections) > 8 {
+	if len(status.Browsers) > 8 || len(status.Protections) > 8 || len(status.Changes) > 32 {
 		return false
 	}
 	seenBrowsers := map[string]struct{}{}
@@ -85,7 +96,7 @@ func ValidateBrowserSecurity(status *BrowserSecurityStatus) bool {
 			seenExtensions[extension.Fingerprint] = struct{}{}
 		}
 	}
-	if status.Coverage == "unavailable" && len(status.Browsers) != 0 {
+	if status.Coverage == "unavailable" && (len(status.Browsers) != 0 || len(status.Changes) != 0) {
 		return false
 	}
 	seenProtections := map[string]struct{}{}
@@ -97,7 +108,7 @@ func ValidateBrowserSecurity(status *BrowserSecurityStatus) bool {
 		if _, allowed := definition.sources[protection.Source]; !allowed {
 			return false
 		}
-		if protection.State != "enabled" && protection.State != "audit" && protection.State != "disabled" && protection.State != "unknown" {
+		if !validProtectionEvidence(protection) {
 			return false
 		}
 		if _, exists := seenProtections[protection.ID]; exists {
@@ -105,7 +116,69 @@ func ValidateBrowserSecurity(status *BrowserSecurityStatus) bool {
 		}
 		seenProtections[protection.ID] = struct{}{}
 	}
+	seenChanges := map[string]struct{}{}
+	for _, change := range status.Changes {
+		if !browserFingerprintPattern.MatchString(change.ID) || !browserFingerprintPattern.MatchString(change.Fingerprint) || !safeBrowserText(change.ExtensionName, 100, false) || !validSiteAccess(change.SiteAccess) || !validPermissionList(change.AddedPermissions) || change.ID != expectedBrowserChangeID(change) {
+			return false
+		}
+		if change.Kind != "installed" && change.Kind != "enabled" && change.Kind != "permissions-expanded" {
+			return false
+		}
+		if (change.Kind == "enabled" && len(change.AddedPermissions) != 0) || (change.Kind == "permissions-expanded" && change.SiteAccess == "none-declared" && len(change.AddedPermissions) == 0) {
+			return false
+		}
+		if _, allowed := allowedBrowserIdentities[change.BrowserID]; !allowed {
+			return false
+		}
+		if _, duplicate := seenChanges[change.ID]; duplicate {
+			return false
+		}
+		seenChanges[change.ID] = struct{}{}
+		matched := false
+		for _, browser := range status.Browsers {
+			if browser.ID != change.BrowserID {
+				continue
+			}
+			for _, extension := range browser.Extensions {
+				if extension.Fingerprint == change.Fingerprint && extension.Name == change.ExtensionName {
+					if change.SiteAccess != broaderSiteAccess(extension.SiteAccess, extension.OptionalSiteAccess) || !permissionSubset(change.AddedPermissions, extension.SensitivePermissions, extension.OptionalSensitivePermissions) {
+						return false
+					}
+					matched = true
+					break
+				}
+			}
+		}
+		if !matched {
+			return false
+		}
+	}
 	return true
+}
+
+func validProtectionEvidence(protection BrowserProtectionStatus) bool {
+	if protection.ID == "chrome-cookie-verification-events" {
+		if protection.State == "unknown" {
+			return protection.EventCount == nil
+		}
+		if protection.EventCount == nil || *protection.EventCount < 0 || *protection.EventCount > 50 {
+			return false
+		}
+		return (protection.State == "clear" && *protection.EventCount == 0) || (protection.State == "attention" && *protection.EventCount > 0)
+	}
+	if protection.EventCount != nil {
+		return false
+	}
+	if protection.ID == "chrome-app-bound-encryption" || protection.ID == "chrome-device-bound-sessions" {
+		return protection.State == "enabled" || protection.State == "disabled" || protection.State == "unknown" || protection.State == "default"
+	}
+	return protection.State == "enabled" || protection.State == "audit" || protection.State == "disabled" || protection.State == "unknown"
+}
+
+func expectedBrowserChangeID(change BrowserExtensionChange) string {
+	parts := []string{change.BrowserID, change.Fingerprint, change.Kind, change.SiteAccess, strings.Join(change.AddedPermissions, ",")}
+	sum := sha256.Sum256([]byte(strings.Join(parts, "\x00")))
+	return hex.EncodeToString(sum[:12])
 }
 
 func safeBrowserText(value string, maximum int, allowEmpty bool) bool {
@@ -141,6 +214,36 @@ func validPermissionList(values []string) bool {
 			return false
 		}
 		seen[normalized] = struct{}{}
+	}
+	return true
+}
+
+func broaderSiteAccess(left, right string) string {
+	rank := func(value string) int {
+		switch value {
+		case "specific-sites":
+			return 1
+		case "all-sites":
+			return 2
+		default:
+			return 0
+		}
+	}
+	if rank(right) > rank(left) {
+		return right
+	}
+	return left
+}
+
+func permissionSubset(candidate []string, required []string, optional []string) bool {
+	available := map[string]struct{}{}
+	for _, value := range append(append([]string{}, required...), optional...) {
+		available[strings.ToLower(value)] = struct{}{}
+	}
+	for _, value := range candidate {
+		if _, exists := available[strings.ToLower(value)]; !exists {
+			return false
+		}
 	}
 	return true
 }

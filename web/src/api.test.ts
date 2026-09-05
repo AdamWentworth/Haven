@@ -60,7 +60,7 @@ describe("HAVEN API client", () => {
 		await api.saveExpectedService(service);
 		await api.saveExpectedServices("device", [service]);
 		await api.removeExpectedService({ id: "service/one", deviceId: "device" } as ExpectedService);
-		const account = { provider: "Google", label: "Personal", category: "email", twoStepStatus: "unknown", factors: [], passwordStatus: "unknown", recoveryStatus: "unknown", backupCodesStatus: "unknown" } as AccountProfileInput;
+		const account = { provider: "Google", label: "Personal", category: "email", twoStepStatus: "unknown", factors: [], passwordStatus: "unknown", recoveryStatus: "unknown", backupCodesStatus: "unknown", sessionStatus: "unknown", sessionChecks: [] } as AccountProfileInput;
 		await api.saveAccountProfile(account, "account-access");
 		await api.removeAccountProfile("account/one", "account-access");
 		await api.touchAccountNotebook("account-access");

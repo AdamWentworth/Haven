@@ -351,6 +351,32 @@ func TestEvaluateShowsDisabledWebProtectionWithoutInventingFinding(t *testing.T)
 	}
 }
 
+func TestEvaluateFlagsSessionDefenseFailuresAndMeaningfulExtensionChanges(t *testing.T) {
+	eventCount := 2
+	snapshot := windowsSnapshot()
+	snapshot.BrowserSecurity = &model.BrowserSecurityStatus{
+		Coverage: "observed",
+		Browsers: []model.BrowserInstallation{{
+			ID: "chrome", Name: "Google Chrome", ProfileCount: 1,
+			Extensions: []model.BrowserExtension{{Fingerprint: "0123456789abcdef01234567", Name: "Password Helper", State: "active", ProfileCount: 1, SiteAccess: "all-sites", OptionalSiteAccess: "none-declared", SensitivePermissions: []string{"cookies"}}},
+		}},
+		Protections: []model.BrowserProtectionStatus{
+			{ID: "chrome-app-bound-encryption", Name: "Chrome App-Bound Encryption policy", State: "disabled", Source: "Chrome policy"},
+			{ID: "chrome-cookie-verification-events", Name: "Chrome cookie-protection verification", State: "attention", Source: "Windows Application event log", EventCount: &eventCount},
+		},
+		Changes: []model.BrowserExtensionChange{{ID: "abcdef0123456789abcdef01", BrowserID: "chrome", Fingerprint: "0123456789abcdef01234567", ExtensionName: "Password Helper", Kind: "permissions-expanded", SiteAccess: "all-sites", AddedPermissions: []string{"cookies"}}},
+	}
+
+	evaluated := Evaluate(snapshot, time.Now())
+	assertFinding(t, evaluated.Findings, "browser-protection-chrome-app-bound-encryption", "medium")
+	assertFinding(t, evaluated.Findings, "browser-cookie-verification-events", "medium")
+	assertFinding(t, evaluated.Findings, "browser-change-abcdef0123456789abcdef01", "medium")
+	finding := findFinding(t, evaluated.Findings, "browser-cookie-verification-events")
+	if !strings.Contains(strings.ToLower(finding.Summary), "not proof of malware") {
+		t.Fatalf("cookie verification finding overstated its evidence: %#v", finding)
+	}
+}
+
 func healthyLinuxSnapshot() model.SecuritySnapshot {
 	return model.SecuritySnapshot{
 		Device: model.DeviceSummary{OperatingSystem: "Ubuntu 24.04 LTS"},
@@ -386,6 +412,17 @@ func assertFinding(t *testing.T, findings []model.SecurityFinding, id, severity 
 		}
 	}
 	t.Fatalf("finding %s was missing", id)
+}
+
+func findFinding(t *testing.T, findings []model.SecurityFinding, id string) model.SecurityFinding {
+	t.Helper()
+	for _, finding := range findings {
+		if finding.ID == id {
+			return finding
+		}
+	}
+	t.Fatalf("finding %s was missing", id)
+	return model.SecurityFinding{}
 }
 
 func findCheck(t *testing.T, checks []model.BaselineCheck, id string) model.BaselineCheck {

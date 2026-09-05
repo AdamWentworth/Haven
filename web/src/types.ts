@@ -16,6 +16,7 @@ export interface BrowserSecurityStatus {
 	coverage: "observed" | "partial" | "unavailable";
 	browsers: BrowserInstallation[];
 	protections: BrowserProtectionStatus[];
+	changes?: BrowserExtensionChange[];
 }
 
 export interface BrowserInstallation {
@@ -41,8 +42,19 @@ export interface BrowserExtension {
 export interface BrowserProtectionStatus {
 	id: string;
 	name: string;
-	state: "enabled" | "audit" | "disabled" | "unknown";
+	state: "enabled" | "audit" | "disabled" | "unknown" | "default" | "clear" | "attention";
 	source?: string;
+	eventCount?: number;
+}
+
+export interface BrowserExtensionChange {
+	id: string;
+	browserId: string;
+	fingerprint: string;
+	extensionName: string;
+	kind: "installed" | "enabled" | "permissions-expanded";
+	siteAccess: "none-declared" | "specific-sites" | "all-sites";
+	addedPermissions: string[];
 }
 
 export interface LinuxBaseline {
@@ -423,6 +435,8 @@ export type AccountFactor = "authenticator" | "passkey" | "security-key" | "prov
 export type PasswordStatus = "unknown" | "unique" | "reused" | "passwordless" | "not-applicable";
 export type RecoveryStatus = "unknown" | "configured" | "missing" | "not-supported";
 export type BackupCodesStatus = "unknown" | "stored" | "missing" | "not-supported";
+export type SessionStatus = "unknown" | "recognized" | "attention" | "not-supported";
+export type SessionCheck = "devices" | "recent-activity" | "third-party-access" | "unused-sessions";
 
 export interface AccountProfileInput {
   id?: string;
@@ -436,6 +450,9 @@ export interface AccountProfileInput {
   recoveryStatus: RecoveryStatus;
   backupCodesStatus: BackupCodesStatus;
   lastReviewedAt?: string | null;
+  sessionStatus: SessionStatus;
+  sessionReviewedAt?: string | null;
+  sessionChecks: SessionCheck[];
   reviewDetails?: string[];
   notes?: string;
 }
