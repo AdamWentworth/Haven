@@ -29,6 +29,10 @@ export function NetworkIcon(props: IconProps) {
   return <SvgIcon {...props}><circle cx="12" cy="5" r="2.3" /><circle cx="5" cy="18" r="2.3" /><circle cx="19" cy="18" r="2.3" /><path d="m10.9 7-4.7 8.9M13.1 7l4.7 8.9M7.3 18h9.4" /></SvgIcon>;
 }
 
+export function BrowserIcon(props: IconProps) {
+  return <SvgIcon {...props}><circle cx="12" cy="12" r="9" /><path d="M3 9h18M8 3.8C9.6 6 10.4 8.8 10.4 12S9.6 18 8 20.2M16 3.8c-1.6 2.2-2.4 5-2.4 8.2s.8 6 2.4 8.2M3.8 15h16.4" /></SvgIcon>;
+}
+
 export function DevicesIcon(props: IconProps) {
   return <SvgIcon {...props}><rect x="3" y="4" width="13" height="10" rx="1.5" /><path d="M7 19h12a2 2 0 0 0 2-2V9M9.5 14v3M6.5 17h6" /></SvgIcon>;
 }

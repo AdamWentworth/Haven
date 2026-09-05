@@ -304,6 +304,53 @@ func TestEvaluateLinuxFlagsKeyboardInteractiveAuthentication(t *testing.T) {
 	assertFinding(t, evaluated.Findings, "linux-ssh-passwords", "medium")
 }
 
+func TestEvaluateSummarizesPrivacyBoundedBrowserExposure(t *testing.T) {
+	snapshot := healthyLinuxSnapshot()
+	snapshot.BrowserSecurity = &model.BrowserSecurityStatus{
+		Coverage: "observed",
+		Browsers: []model.BrowserInstallation{{
+			ID: "firefox", Name: "Mozilla Firefox", ProfileCount: 2,
+			Extensions: []model.BrowserExtension{
+				{Fingerprint: "0123456789abcdef01234567", Name: "Scoped", State: "active", ProfileCount: 1, SiteAccess: "specific-sites", OptionalSiteAccess: "none-declared"},
+				{Fingerprint: "abcdef0123456789abcdef01", Name: "Broad", State: "active", ProfileCount: 1, SiteAccess: "all-sites", OptionalSiteAccess: "none-declared"},
+			},
+		}},
+	}
+
+	evaluated := Evaluate(snapshot, time.Now())
+	check := findCheck(t, evaluated.BaselineChecks, "browser-inventory")
+	if check.Status != "pass" || !strings.Contains(check.Summary, "2 profile(s)") || !strings.Contains(check.Evidence, "1 extension(s)") {
+		t.Fatalf("browser exposure was not summarized accurately: %#v", check)
+	}
+}
+
+func TestEvaluateShowsDisabledWebProtectionWithoutInventingFinding(t *testing.T) {
+	snapshot := windowsSnapshot()
+	snapshot.BrowserSecurity = &model.BrowserSecurityStatus{
+		Coverage: "partial",
+		Protections: []model.BrowserProtectionStatus{
+			{ID: "defender-pua", Name: "Potentially unwanted app protection", State: "disabled", Source: "Microsoft Defender preferences"},
+			{ID: "defender-network", Name: "Defender Network Protection", State: "audit", Source: "Microsoft Defender preferences"},
+		},
+	}
+
+	evaluated := Evaluate(snapshot, time.Now())
+	if findCheck(t, evaluated.BaselineChecks, "browser-inventory").Status != "configured" {
+		t.Fatal("partial browser coverage must be presented without a false failure")
+	}
+	if findCheck(t, evaluated.BaselineChecks, "web-protection-defender-pua").Status != "attention" {
+		t.Fatal("disabled protection must remain visible for owner review")
+	}
+	if findCheck(t, evaluated.BaselineChecks, "web-protection-defender-network").Status != "configured" {
+		t.Fatal("audit mode must be represented as configured")
+	}
+	for _, finding := range evaluated.Findings {
+		if strings.HasPrefix(finding.ID, "browser-") || strings.HasPrefix(finding.ID, "web-protection-") {
+			t.Fatalf("first-slice browser evidence must not create an unreviewed alert: %#v", finding)
+		}
+	}
+}
+
 func healthyLinuxSnapshot() model.SecuritySnapshot {
 	return model.SecuritySnapshot{
 		Device: model.DeviceSummary{OperatingSystem: "Ubuntu 24.04 LTS"},

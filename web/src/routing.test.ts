@@ -17,6 +17,12 @@ describe("application routes", () => {
 		expect(parseRoute(routePath(route))).toEqual(route);
 	});
 
+	it("keeps the browser security workspace directly addressable", () => {
+		const route = { page: "device", deviceId: "device-a", section: "browsers" } as const;
+		expect(routePath(route)).toBe("/devices/device-a/browsers");
+		expect(parseRoute(routePath(route))).toEqual(route);
+	});
+
 	it("falls back safely for unknown pages and device sections", () => {
 		expect(parseRoute("/not-a-page")).toEqual({ page: "overview" });
 		expect(parseRoute("/devices/%E0%A4%A")).toEqual({ page: "overview" });

@@ -84,6 +84,21 @@ func TestEnrollmentAndMutualTLSReporting(t *testing.T) {
 	if detail.Device.Agent == nil || detail.Device.Agent.Version != buildinfo.Version || detail.Device.Agent.Installation != "systemd-user" || detail.Device.Agent.SchemaVersion != model.ObservationSchemaVersion {
 		t.Fatalf("agent build evidence was not retained: %#v", detail.Device.Agent)
 	}
+	invalidBrowser := snapshot
+	invalidBrowser.BrowserSecurity = &model.BrowserSecurityStatus{Coverage: "observed", Browsers: []model.BrowserInstallation{{
+		ID: "chrome", Name: "Google Chrome", ProfileCount: 1,
+		Extensions: []model.BrowserExtension{{Fingerprint: "0123456789abcdef01234567", Name: "Unsafe extension", State: "installed", ProfileCount: 1, SiteAccess: "https://private.example/*", OptionalSiteAccess: "none-declared"}},
+	}}}
+	if _, err := client.Report(ctx, invalidBrowser, "systemd-user"); err == nil {
+		t.Fatal("hub accepted browser metadata outside the privacy-reduced schema")
+	}
+	detail, err = store.DeviceDetail(ctx, config.DeviceID, time.Now().UTC())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if detail.Snapshot == nil || detail.Snapshot.BrowserSecurity != nil {
+		t.Fatal("rejected browser metadata replaced the last accepted observation")
+	}
 	if err := store.RevokeDevice(ctx, config.DeviceID, time.Now().UTC()); err != nil {
 		t.Fatal(err)
 	}

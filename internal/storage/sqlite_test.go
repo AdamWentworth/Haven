@@ -30,6 +30,10 @@ func TestStoreSavesLoadsAndExpiresSnapshots(t *testing.T) {
 			Architecture:    "test-architecture",
 		},
 		FirewallProfiles: []model.FirewallProfileStatus{},
+		BrowserSecurity: &model.BrowserSecurityStatus{Coverage: "observed", Browsers: []model.BrowserInstallation{{
+			ID: "chrome", Name: "Google Chrome", ProfileCount: 1,
+			Extensions: []model.BrowserExtension{{Fingerprint: "0123456789abcdef01234567", Name: "Example extension", State: "installed", ProfileCount: 1, SiteAccess: "none-declared", OptionalSiteAccess: "none-declared"}},
+		}}},
 		LinuxBaseline: &model.LinuxBaseline{Workloads: &model.WorkloadInventory{
 			Runtime:     "docker",
 			CollectedAt: collectedAt,
@@ -61,6 +65,9 @@ func TestStoreSavesLoadsAndExpiresSnapshots(t *testing.T) {
 	if loaded.LinuxBaseline == nil || loaded.LinuxBaseline.Workloads == nil || len(loaded.LinuxBaseline.Workloads.Workloads) != 1 {
 		t.Fatal("the current in-memory observation should retain live workload metadata")
 	}
+	if loaded.BrowserSecurity == nil || len(loaded.BrowserSecurity.Browsers) != 1 {
+		t.Fatal("the current in-memory observation should retain live browser metadata")
+	}
 	var historicalPayloadJSON []byte
 	if err := store.database.QueryRowContext(ctx, `SELECT payload_json FROM device_observations WHERE device_id = ? ORDER BY collected_at DESC LIMIT 1`, "test-device-id").Scan(&historicalPayloadJSON); err != nil {
 		t.Fatal(err)
@@ -74,6 +81,9 @@ func TestStoreSavesLoadsAndExpiresSnapshots(t *testing.T) {
 	}
 	if historical.LinuxBaseline == nil || historical.LinuxBaseline.Workloads != nil {
 		t.Fatal("workload metadata must never be persisted")
+	}
+	if historical.BrowserSecurity != nil {
+		t.Fatal("browser and extension metadata must never be persisted as observation history")
 	}
 
 	deleted, err := store.DeleteBefore(ctx, collectedAt.Add(time.Second))

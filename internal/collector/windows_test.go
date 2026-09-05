@@ -17,6 +17,7 @@ func (runner stubRunner) Run(context.Context, string) ([]byte, error) {
 }
 
 func TestWindowsCollectorMapsSnapshot(t *testing.T) {
+	prepareWindowsBrowserEnvironment(t)
 	collector := NewWindowsCollector(stubRunner{output: []byte(`{
 		"device":{"hostName":"test-device","operatingSystem":"Windows","architecture":"X64","uptimeSeconds":3600},
 		"defender":{"antivirusEnabled":true,"realTimeProtectionEnabled":true,"tamperProtected":true,"signatureVersion":"1.2.3.4","signatureUpdatedAt":"2026-09-01T06:00:00Z","lastQuickScanAt":null,"lastFullScanAt":null},
@@ -60,6 +61,10 @@ func TestWindowsSnapshotScriptUsesReadOnlyTPMAndFirewallFallbacks(t *testing.T) 
 		"getdeviceinformation",
 		"FirewallPolicy\\FirewallRules",
 		"RdpFirewallScope",
+		"Get-MpPreference",
+		"PUAProtection",
+		"EnableNetworkProtection",
+		"SmartScreenEnabled",
 	} {
 		if !strings.Contains(windowsSnapshotScript, expected) {
 			t.Fatalf("Windows snapshot script is missing %q", expected)
@@ -83,6 +88,7 @@ func TestWindowsSnapshotScriptSeparatesAuthoritativeRebootSignalsFromFileCleanup
 }
 
 func TestWindowsCollectorReportsRunnerFailure(t *testing.T) {
+	prepareWindowsBrowserEnvironment(t)
 	collector := NewWindowsCollector(stubRunner{err: errors.New("access denied")})
 
 	snapshot := collector.Collect(context.Background())
@@ -96,6 +102,7 @@ func TestWindowsCollectorReportsRunnerFailure(t *testing.T) {
 }
 
 func TestWindowsCollectorReportsMalformedData(t *testing.T) {
+	prepareWindowsBrowserEnvironment(t)
 	collector := NewWindowsCollector(stubRunner{output: []byte("not-json")})
 
 	snapshot := collector.Collect(context.Background())
@@ -103,4 +110,10 @@ func TestWindowsCollectorReportsMalformedData(t *testing.T) {
 	if len(snapshot.Notices) != 1 {
 		t.Fatalf("expected one parse notice, got %d", len(snapshot.Notices))
 	}
+}
+
+func prepareWindowsBrowserEnvironment(t *testing.T) {
+	t.Helper()
+	t.Setenv("LOCALAPPDATA", t.TempDir())
+	t.Setenv("APPDATA", t.TempDir())
 }

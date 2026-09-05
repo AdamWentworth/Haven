@@ -23,5 +23,6 @@ describe("console navigation", () => {
 		render(<DeviceNavigation deviceId="device/a" current="services" navigate={vi.fn()} />);
 		expect(screen.getByRole("link", { name: "Services & connections" })).toHaveAttribute("href", "/devices/device%2Fa/services");
 		expect(screen.getByRole("link", { name: "Services & connections" })).toHaveAttribute("aria-current", "page");
+		expect(screen.getByRole("link", { name: "Browsers" })).toHaveAttribute("href", "/devices/device%2Fa/browsers");
 	});
 });

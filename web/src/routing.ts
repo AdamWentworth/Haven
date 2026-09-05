@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 
 export type PageKey = "overview" | "devices" | "device" | "network" | "appliances" | "accounts" | "activity" | "settings";
-export type DeviceSection = "overview" | "posture" | "services" | "history";
+export type DeviceSection = "overview" | "posture" | "browsers" | "services" | "history";
 
 export interface AppRoute {
 	page: PageKey;
@@ -9,7 +9,7 @@ export interface AppRoute {
 	section?: DeviceSection;
 }
 
-const deviceSections = new Set<DeviceSection>(["overview", "posture", "services", "history"]);
+const deviceSections = new Set<DeviceSection>(["overview", "posture", "browsers", "services", "history"]);
 
 export function parseRoute(pathname: string): AppRoute {
 	let parts: string[];

@@ -35,6 +35,12 @@ func MetadataForSnapshot(snapshot model.SecuritySnapshot, installation string) m
 	if snapshot.WindowsBaseline != nil {
 		capabilities = append(capabilities, "windows-posture")
 	}
+	if snapshot.BrowserSecurity != nil && snapshot.BrowserSecurity.Coverage != "unavailable" {
+		capabilities = append(capabilities, "browser-inventory")
+	}
+	if snapshot.BrowserSecurity != nil && len(snapshot.BrowserSecurity.Protections) > 0 {
+		capabilities = append(capabilities, "web-protection")
+	}
 	if snapshot.LinuxBaseline != nil {
 		capabilities = append(capabilities, "linux-posture", "systemd-attribution")
 		if snapshot.LinuxBaseline.Workloads != nil {

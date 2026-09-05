@@ -3,6 +3,7 @@ import { HavenAPIError, addPasskey, collectSnapshot, getAuthStatus, getDevice, g
 import { AccountNotebook } from "./account-notebook";
 import { suggestedBaseline } from "./baseline";
 import { AuthenticationGate } from "./authentication-gate";
+import { BrowserSecurityPanel } from "./browser-security";
 import { DeviceInventory } from "./device-inventory";
 import { type DesktopInstallStatus, isStandaloneApp, useDesktopInstall } from "./desktop-install";
 import { AgentEvidencePanel, FleetPanel } from "./fleet-panel";
@@ -882,6 +883,7 @@ function Application({ snapshot, devices, networkDevices, appliances, events, ne
 			{deviceSummary}
 			{deviceSection === "overview" && <>{selectedDevice && <AgentEvidencePanel device={selectedDevice} runtime={runtime} />}<FindingsPanel findings={snapshot.findings || []} checks={snapshot.baselineChecks || []} reviews={reviews} review={reviewFinding} /></>}
 			{deviceSection === "posture" && <>{(snapshot.baselineChecks || []).length > 0 && <BaselinePanel checks={snapshot.baselineChecks || []} collectedAt={snapshot.collectedAt} platform={isLinux ? "Linux" : "Windows"} />}{snapshot.notices.length > 0 && <section className="panel notices-panel" aria-labelledby="notices-title"><PanelHeading eyebrow="COLLECTION NOTES" title="Some signals could not be verified" id="notices-title" icon={<AlertIcon />} accent="amber">A collection limitation is not automatically a security problem</PanelHeading><ul className="notices-list">{snapshot.notices.map((notice, index) => <li className="notice" key={`${notice.source}-${index}`}><strong>{notice.source}: </strong>{notice.message}</li>)}</ul></section>}{isLinux && snapshot.linuxBaseline ? <LinuxPanel baseline={snapshot.linuxBaseline} /> : <DefenderPanel defender={snapshot.defender} />}<FirewallPanel profiles={snapshot.firewallProfiles} isLinux={isLinux} /></>}
+			{deviceSection === "browsers" && <BrowserSecurityPanel status={snapshot.browserSecurity ?? null} />}
 			{deviceSection === "services" && <>{isLinux && <WorkloadsPanel inventory={snapshot.linuxBaseline?.workloads ?? null} />}<ConnectionsPanel deviceId={selectedDeviceId} operatingSystem={snapshot.device.operatingSystem} connections={snapshot.connections} workloads={workloadInventory} expectedServices={expectedServices} observations={listenerObservations} saveExpectation={saveServiceExpectation} saveExpectations={saveServiceExpectations} removeExpectation={removeServiceExpectation} busy={actionBusy} /></>}
 			{deviceSection === "history" && <ActivityPanel events={events} alerts={alerts} />}
 		</>;

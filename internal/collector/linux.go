@@ -75,6 +75,7 @@ func (collector *LinuxCollector) Collect(ctx context.Context) model.SecuritySnap
 	}
 	snapshot.Connections = collector.connections(ctx, &notices)
 	snapshot.Notices = notices
+	attachBrowserSecurity(&snapshot, "linux")
 	return snapshot
 }
 

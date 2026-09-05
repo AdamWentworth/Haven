@@ -22,12 +22,16 @@ func NewWindowsCollector(runner ScriptRunner) *WindowsCollector {
 func (collector *WindowsCollector) Collect(ctx context.Context) model.SecuritySnapshot {
 	output, err := collector.runner.Run(ctx, windowsSnapshotScript)
 	if err != nil {
-		return unavailableSnapshot(err)
+		snapshot := unavailableSnapshot(err)
+		attachBrowserSecurity(&snapshot, "windows")
+		return snapshot
 	}
 
 	var snapshot model.SecuritySnapshot
 	if err := json.Unmarshal(output, &snapshot); err != nil {
-		return unavailableSnapshot(fmt.Errorf("HAVEN could not understand the Windows collector response: %w", err))
+		unavailable := unavailableSnapshot(fmt.Errorf("HAVEN could not understand the Windows collector response: %w", err))
+		attachBrowserSecurity(&unavailable, "windows")
+		return unavailable
 	}
 
 	snapshot.CollectedAt = time.Now().UTC()
@@ -40,6 +44,7 @@ func (collector *WindowsCollector) Collect(ctx context.Context) model.SecuritySn
 	if snapshot.Notices == nil {
 		snapshot.Notices = []model.CollectorNotice{}
 	}
+	attachBrowserSecurity(&snapshot, "windows")
 	return snapshot
 }
 
@@ -78,6 +83,7 @@ $platformSecurity = $null
 $remoteAccess = $null
 $localAccounts = $null
 $threats = $null
+$browserProtections = @()
 
 try {
     $operatingSystem = Get-CimInstance Win32_OperatingSystem
@@ -331,6 +337,45 @@ catch {
 }
 
 try {
+    $preferences = Get-MpPreference -ErrorAction Stop
+    $puaState = switch ([int]$preferences.PUAProtection) {
+        1 { 'enabled' }
+        2 { 'audit' }
+        0 { 'disabled' }
+        default { 'unknown' }
+    }
+    $networkProtectionState = switch ([int]$preferences.EnableNetworkProtection) {
+        1 { 'enabled' }
+        2 { 'audit' }
+        0 { 'disabled' }
+        default { 'unknown' }
+    }
+    $browserProtections += [pscustomobject]@{ Id = 'defender-pua'; Name = 'Potentially unwanted app protection'; State = $puaState; Source = 'Microsoft Defender preferences' }
+    $browserProtections += [pscustomobject]@{ Id = 'defender-network'; Name = 'Microsoft Defender Network Protection'; State = $networkProtectionState; Source = 'Microsoft Defender preferences' }
+}
+catch {
+    $browserProtections += [pscustomobject]@{ Id = 'defender-pua'; Name = 'Potentially unwanted app protection'; State = 'unknown'; Source = 'Microsoft Defender preferences' }
+    $browserProtections += [pscustomobject]@{ Id = 'defender-network'; Name = 'Microsoft Defender Network Protection'; State = 'unknown'; Source = 'Microsoft Defender preferences' }
+    $notices.Add([pscustomobject]@{ Source = 'Web protection'; Severity = 'information'; Message = 'Microsoft Defender web-protection preferences could not be verified.' })
+}
+
+$smartScreenState = 'unknown'
+$smartScreenSource = 'Windows shell configuration'
+try {
+    $policyValue = Get-ItemPropertyValue -Path 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\System' -Name EnableSmartScreen -ErrorAction Stop
+    $smartScreenState = if ([int]$policyValue -eq 1) { 'enabled' } elseif ([int]$policyValue -eq 0) { 'disabled' } else { 'unknown' }
+    $smartScreenSource = 'Windows policy'
+}
+catch {
+    try {
+        $shellValue = [string](Get-ItemPropertyValue -Path 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Explorer' -Name SmartScreenEnabled -ErrorAction Stop)
+        $smartScreenState = if ($shellValue -eq 'Off') { 'disabled' } elseif ([string]::IsNullOrWhiteSpace($shellValue)) { 'unknown' } else { 'enabled' }
+    }
+    catch {}
+}
+$browserProtections += [pscustomobject]@{ Id = 'windows-smartscreen'; Name = 'Microsoft Defender SmartScreen'; State = $smartScreenState; Source = $smartScreenSource }
+
+try {
     $processNames = @{}
     Get-Process -ErrorAction SilentlyContinue | ForEach-Object { $processNames[[int]$_.Id] = $_.ProcessName }
     $connections = @(Get-NetTCPConnection -State Established, Listen |
@@ -356,6 +401,7 @@ catch {
 
 [pscustomobject]@{
     Device = $device
+    BrowserSecurity = [pscustomobject]@{ Coverage = 'unavailable'; Browsers = @(); Protections = @($browserProtections) }
     Defender = $defender
     WindowsBaseline = [pscustomobject]@{
         Update = $windowsUpdate
