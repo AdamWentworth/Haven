@@ -1,14 +1,98 @@
 package collector
 
 import (
+	"database/sql"
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/AdamWentworth/haven/internal/model"
 )
+
+func TestChromiumCookieQueryCannotSelectCredentialColumns(t *testing.T) {
+	query := strings.ToLower(chromiumCookieAggregateQuery)
+	if strings.Contains(query, "select *") {
+		t.Fatal("cookie metadata query must use an explicit projection")
+	}
+	forbidden := regexp.MustCompile(`\b(?:name|value|encrypted_value|path)\b`)
+	if column := forbidden.FindString(query); column != "" {
+		t.Fatalf("cookie metadata query selects forbidden credential column %q", column)
+	}
+}
+
+func TestChromiumCookieInventoryGroupsMetadataWithoutReadingSecrets(t *testing.T) {
+	root := t.TempDir()
+	profilePath := filepath.Join(root, "Default")
+	if err := os.MkdirAll(filepath.Join(profilePath, "Network"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(profilePath, "Preferences"), []byte(`{"profile":{"name":"Personal"}}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	database, err := sql.Open("sqlite", filepath.Join(profilePath, "Network", "Cookies"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := database.Exec(`CREATE TABLE cookies (
+		host_key TEXT, name TEXT, value TEXT, encrypted_value BLOB, path TEXT,
+		expires_utc INTEGER, last_access_utc INTEGER, is_secure INTEGER,
+		is_httponly INTEGER, is_persistent INTEGER
+	)`); err != nil {
+		t.Fatal(err)
+	}
+	now := time.Date(2026, time.September, 4, 12, 0, 0, 0, time.UTC)
+	lastAccess := chromeEpochOffsetMicroseconds + now.UnixMicro()
+	expires := chromeEpochOffsetMicroseconds + now.Add(30*24*time.Hour).UnixMicro()
+	rows := []struct {
+		domain, name, value          string
+		persistent, secure, httpOnly int
+		expires                      int64
+	}{
+		{domain: ".facebook.com", name: "c_user", value: "private-account-value", persistent: 1, secure: 1, httpOnly: 1, expires: expires},
+		{domain: ".facebook.com", name: "xs", value: "private-session-token", persistent: 0, secure: 1, httpOnly: 1},
+		{domain: "accounts.google.com", name: "SID", value: "another-private-token", persistent: 1, secure: 1, httpOnly: 1, expires: expires},
+	}
+	for _, row := range rows {
+		if _, err := database.Exec(`INSERT INTO cookies (host_key, name, value, encrypted_value, path, expires_utc, last_access_utc, is_secure, is_httponly, is_persistent) VALUES (?, ?, ?, ?, '/', ?, ?, ?, ?, ?)`, row.domain, row.name, row.value, []byte("encrypted-secret"), row.expires, lastAccess, row.secure, row.httpOnly, row.persistent); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := database.Close(); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, _, _, err := readChromiumCookieMetadata(filepath.Join(profilePath, "Network", "Cookies")); err != nil {
+		t.Fatalf("read cookie metadata: %v", err)
+	}
+
+	browser, found, partial := scanBrowserRoot(browserRoot{id: "chrome", name: "Google Chrome", kind: "chromium", path: root})
+	if !found || partial || len(browser.Profiles) != 1 {
+		t.Fatalf("unexpected Chrome profile inventory: %#v, found=%t partial=%t", browser, found, partial)
+	}
+	profile := browser.Profiles[0]
+	if profile.Name != "Personal" || profile.CookieStatus != "observed" || profile.CookieCount != 3 || len(profile.Sites) != 2 {
+		t.Fatalf("unexpected cookie metadata: %#v", profile)
+	}
+	if profile.Sites[0].Domain != "accounts.google.com" && profile.Sites[0].Domain != "facebook.com" {
+		t.Fatalf("cookie domains were not normalized: %#v", profile.Sites)
+	}
+	payload, err := json.Marshal(browser)
+	if err != nil {
+		t.Fatal(err)
+	}
+	serialized := string(payload)
+	for _, secret := range []string{"c_user", "private-account-value", "xs", "private-session-token", "SID", "another-private-token", "encrypted-secret"} {
+		if strings.Contains(serialized, secret) {
+			t.Fatalf("cookie inventory leaked a cookie name or value %q: %s", secret, serialized)
+		}
+	}
+	if !strings.Contains(serialized, "facebook.com") || !strings.Contains(serialized, "accounts.google.com") {
+		t.Fatalf("cookie inventory omitted the requested site metadata: %s", serialized)
+	}
+}
 
 func TestChromiumInventoryRetainsCapabilitiesWithoutIdentifiersOrHostPatterns(t *testing.T) {
 	root := t.TempDir()

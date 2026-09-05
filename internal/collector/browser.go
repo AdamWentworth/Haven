@@ -99,12 +99,23 @@ func collectBrowserSecurity(platform string) (*model.BrowserSecurityStatus, []mo
 	}
 	sort.Slice(status.Browsers, func(left, right int) bool { return status.Browsers[left].Name < status.Browsers[right].Name })
 	remainingExtensions := maximumBrowserExtensionsTotal
+	remainingCookieSites := maximumCookieSitesTotal
 	for index := range status.Browsers {
 		if len(status.Browsers[index].Extensions) > remainingExtensions {
 			status.Browsers[index].Extensions = status.Browsers[index].Extensions[:remainingExtensions]
 			partial = true
 		}
 		remainingExtensions -= len(status.Browsers[index].Extensions)
+		for profileIndex := range status.Browsers[index].Profiles {
+			profile := &status.Browsers[index].Profiles[profileIndex]
+			if len(profile.Sites) > remainingCookieSites {
+				profile.Sites = profile.Sites[:remainingCookieSites]
+				profile.CookieStatus = "partial"
+				profile.Truncated = true
+				partial = true
+			}
+			remainingCookieSites -= len(profile.Sites)
+		}
 	}
 	if partial {
 		status.Coverage = "partial"
@@ -184,7 +195,7 @@ func scanBrowserRoot(root browserRoot) (model.BrowserInstallation, bool, bool) {
 	} else if err != nil {
 		return model.BrowserInstallation{}, false, true
 	}
-	browser := model.BrowserInstallation{ID: root.id, Name: root.name, Extensions: []model.BrowserExtension{}}
+	browser := model.BrowserInstallation{ID: root.id, Name: root.name, Extensions: []model.BrowserExtension{}, Profiles: []model.BrowserProfile{}}
 	if root.kind == "firefox" {
 		return scanFirefoxRoot(root, browser)
 	}
@@ -211,11 +222,21 @@ func scanChromiumRoot(root browserRoot, browser model.BrowserInstallation) (mode
 			continue
 		}
 		profiles++
+		if root.id == "chrome" {
+			profile, incomplete := collectChromiumProfile(root.id, entry.Name(), profilePath)
+			browser.Profiles = append(browser.Profiles, profile)
+			if incomplete {
+				partial = true
+			}
+		}
 		if incomplete := scanChromiumExtensions(root.id, entry.Name(), filepath.Join(profilePath, "Extensions"), accumulators); incomplete {
 			partial = true
 		}
 	}
 	browser.ProfileCount = profiles
+	sort.Slice(browser.Profiles, func(left, right int) bool {
+		return strings.ToLower(browser.Profiles[left].Name) < strings.ToLower(browser.Profiles[right].Name)
+	})
 	browser.Extensions = accumulatedExtensions(accumulators)
 	if len(browser.Extensions) > maximumBrowserExtensions {
 		browser.Extensions = browser.Extensions[:maximumBrowserExtensions]

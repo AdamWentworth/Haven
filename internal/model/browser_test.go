@@ -3,6 +3,7 @@ package model
 import (
 	"fmt"
 	"testing"
+	"time"
 )
 
 func TestValidateBrowserSecurityAcceptsPrivacyReducedInventory(t *testing.T) {
@@ -140,5 +141,30 @@ func TestValidateBrowserSecurityRejectsInvalidCookieVerificationCounts(t *testin
 	status.Protections = []BrowserProtectionStatus{{ID: "defender-pua", Name: "Potentially unwanted app protection", State: "default", Source: "Microsoft Defender preferences"}}
 	if ValidateBrowserSecurity(&status) {
 		t.Fatal("a Chrome-policy state was accepted for Defender evidence")
+	}
+}
+
+func TestValidateBrowserSecurityAcceptsBoundedCookieMetadata(t *testing.T) {
+	lastAccess := time.Date(2026, time.September, 4, 12, 0, 0, 0, time.UTC)
+	expires := lastAccess.Add(30 * 24 * time.Hour)
+	status := BrowserSecurityStatus{Coverage: "observed", Browsers: []BrowserInstallation{{
+		ID: "chrome", Name: "Google Chrome", ProfileCount: 1,
+		Profiles: []BrowserProfile{{
+			Fingerprint: "0123456789abcdef01234567", Name: "Personal", CookieStatus: "observed", CookieCount: 3,
+			Sites: []BrowserCookieSite{{Domain: "facebook.com", CookieCount: 3, SessionCookieCount: 1, PersistentCookieCount: 2, SecureCookieCount: 3, HTTPOnlyCookieCount: 2, LastAccessedAt: &lastAccess, LatestExpiryAt: &expires}},
+		}},
+	}}}
+	if !ValidateBrowserSecurity(&status) {
+		t.Fatal("valid privacy-bounded cookie metadata was rejected")
+	}
+
+	status.Browsers[0].Profiles[0].Sites[0].Domain = "Facebook.COM"
+	if ValidateBrowserSecurity(&status) {
+		t.Fatal("an unnormalized cookie domain was accepted")
+	}
+	status.Browsers[0].Profiles[0].Sites[0].Domain = "facebook.com"
+	status.Browsers[0].Profiles[0].Sites[0].SessionCookieCount = 2
+	if ValidateBrowserSecurity(&status) {
+		t.Fatal("inconsistent cookie counts were accepted")
 	}
 }

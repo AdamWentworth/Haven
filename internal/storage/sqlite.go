@@ -1032,6 +1032,9 @@ func (store *Store) SeedSyntheticDevices(ctx context.Context, count int, now tim
 			encryptionPercentage := 100.0
 			lastUpdate := collectedAt.Add(-9 * 24 * time.Hour)
 			signatureUpdate := collectedAt.Add(-4 * time.Hour)
+			recentCookieUse := collectedAt.Add(-2 * time.Hour)
+			dormantCookieUse := collectedAt.Add(-120 * 24 * time.Hour)
+			cookieExpiry := collectedAt.Add(60 * 24 * time.Hour)
 			snapshot.Defender = &model.DefenderStatus{
 				AntivirusEnabled:          &healthy,
 				RealTimeProtectionEnabled: &healthy,
@@ -1046,6 +1049,10 @@ func (store *Store) SeedSyntheticDevices(ctx context.Context, count int, now tim
 				Browsers: []model.BrowserInstallation{{
 					ID: "chrome", Name: "Google Chrome", Version: "140.0.demo", ProfileCount: 1,
 					Extensions: []model.BrowserExtension{{Fingerprint: "0123456789abcdef01234567", Name: "Demo password manager", Version: "1.0", State: "installed", ProfileCount: 1, SiteAccess: "all-sites", OptionalSiteAccess: "none-declared", SensitivePermissions: []string{"cookies"}, OptionalSensitivePermissions: []string{}}},
+					Profiles: []model.BrowserProfile{{Fingerprint: "abcdef0123456789abcdef01", Name: "Personal", CookieStatus: "observed", CookieCount: 8, Sites: []model.BrowserCookieSite{
+						{Domain: "accounts.example.com", CookieCount: 5, SessionCookieCount: 2, PersistentCookieCount: 3, SecureCookieCount: 5, HTTPOnlyCookieCount: 4, LastAccessedAt: &recentCookieUse, LatestExpiryAt: &cookieExpiry},
+						{Domain: "unused.example.com", CookieCount: 3, SessionCookieCount: 0, PersistentCookieCount: 3, SecureCookieCount: 2, HTTPOnlyCookieCount: 1, LastAccessedAt: &dormantCookieUse, LatestExpiryAt: &cookieExpiry},
+					}}},
 				}},
 				Protections: []model.BrowserProtectionStatus{
 					{ID: "defender-pua", Name: "Potentially unwanted app protection", State: "enabled", Source: "Synthetic Defender preferences"},

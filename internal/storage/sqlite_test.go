@@ -1,6 +1,7 @@
 package storage
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"encoding/json"
@@ -32,6 +33,10 @@ func TestStoreSavesLoadsAndExpiresSnapshots(t *testing.T) {
 		FirewallProfiles: []model.FirewallProfileStatus{},
 		BrowserSecurity: &model.BrowserSecurityStatus{Coverage: "observed", Browsers: []model.BrowserInstallation{{
 			ID: "chrome", Name: "Google Chrome", ProfileCount: 1,
+			Profiles: []model.BrowserProfile{{
+				Fingerprint: "abcdef0123456789abcdef01", Name: "Private profile", CookieStatus: "observed", CookieCount: 1,
+				Sites: []model.BrowserCookieSite{{Domain: "private.example", CookieCount: 1, SessionCookieCount: 1}},
+			}},
 			Extensions: []model.BrowserExtension{{Fingerprint: "0123456789abcdef01234567", Name: "Example extension", State: "installed", ProfileCount: 1, SiteAccess: "none-declared", OptionalSiteAccess: "none-declared"}},
 		}}},
 		LinuxBaseline: &model.LinuxBaseline{Workloads: &model.WorkloadInventory{
@@ -65,7 +70,7 @@ func TestStoreSavesLoadsAndExpiresSnapshots(t *testing.T) {
 	if loaded.LinuxBaseline == nil || loaded.LinuxBaseline.Workloads == nil || len(loaded.LinuxBaseline.Workloads.Workloads) != 1 {
 		t.Fatal("the current in-memory observation should retain live workload metadata")
 	}
-	if loaded.BrowserSecurity == nil || len(loaded.BrowserSecurity.Browsers) != 1 {
+	if loaded.BrowserSecurity == nil || len(loaded.BrowserSecurity.Browsers) != 1 || len(loaded.BrowserSecurity.Browsers[0].Profiles) != 1 {
 		t.Fatal("the current in-memory observation should retain live browser metadata")
 	}
 	var historicalPayloadJSON []byte
@@ -84,6 +89,9 @@ func TestStoreSavesLoadsAndExpiresSnapshots(t *testing.T) {
 	}
 	if historical.BrowserSecurity != nil {
 		t.Fatal("browser and extension metadata must never be persisted as observation history")
+	}
+	if bytes.Contains(historicalPayloadJSON, []byte("private.example")) || bytes.Contains(historicalPayloadJSON, []byte("Private profile")) {
+		t.Fatal("Chrome profile labels and cookie domains must never be persisted as observation history")
 	}
 
 	deleted, err := store.DeleteBefore(ctx, collectedAt.Add(time.Second))

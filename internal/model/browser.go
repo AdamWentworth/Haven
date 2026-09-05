@@ -5,11 +5,13 @@ import (
 	"encoding/hex"
 	"regexp"
 	"strings"
+	"time"
 	"unicode"
 	"unicode/utf8"
 )
 
 var browserFingerprintPattern = regexp.MustCompile(`^[0-9a-f]{24}$`)
+var browserDomainPattern = regexp.MustCompile(`^[a-z0-9](?:[a-z0-9.-]{0,251}[a-z0-9])?$`)
 
 var allowedBrowserIdentities = map[string]string{
 	"brave":         "Brave",
@@ -66,6 +68,7 @@ func ValidateBrowserSecurity(status *BrowserSecurityStatus) bool {
 	}
 	seenBrowsers := map[string]struct{}{}
 	totalExtensions := 0
+	totalCookieSites := 0
 	for _, browser := range status.Browsers {
 		canonicalName, allowed := allowedBrowserIdentities[browser.ID]
 		if !allowed || browser.Name != canonicalName || !safeBrowserText(browser.Name, 100, false) || !safeBrowserText(browser.Version, 40, true) || browser.ProfileCount < 0 || browser.ProfileCount > 32 || len(browser.Extensions) > 100 {
@@ -75,6 +78,44 @@ func ValidateBrowserSecurity(status *BrowserSecurityStatus) bool {
 			return false
 		}
 		seenBrowsers[browser.ID] = struct{}{}
+		if len(browser.Profiles) > 32 || len(browser.Profiles) > browser.ProfileCount || (browser.ID != "chrome" && len(browser.Profiles) != 0) {
+			return false
+		}
+		seenProfiles := map[string]struct{}{}
+		for _, profile := range browser.Profiles {
+			if !browserFingerprintPattern.MatchString(profile.Fingerprint) || !safeBrowserText(profile.Name, 100, false) || (profile.CookieStatus != "observed" && profile.CookieStatus != "partial" && profile.CookieStatus != "unavailable") || profile.CookieCount < 0 || profile.CookieCount > 100000 || len(profile.Sites) > 256 {
+				return false
+			}
+			if _, exists := seenProfiles[profile.Fingerprint]; exists {
+				return false
+			}
+			seenProfiles[profile.Fingerprint] = struct{}{}
+			if profile.CookieStatus == "unavailable" && (profile.CookieCount != 0 || len(profile.Sites) != 0 || profile.Truncated) {
+				return false
+			}
+			if profile.Truncated && profile.CookieStatus != "partial" {
+				return false
+			}
+			totalCookieSites += len(profile.Sites)
+			if totalCookieSites > 1024 {
+				return false
+			}
+			seenSites := map[string]struct{}{}
+			observedCookies := 0
+			for _, site := range profile.Sites {
+				if !validCookieDomain(site.Domain) || site.CookieCount < 1 || site.CookieCount > 10000 || site.SessionCookieCount < 0 || site.PersistentCookieCount < 0 || site.SessionCookieCount+site.PersistentCookieCount != site.CookieCount || site.SecureCookieCount < 0 || site.SecureCookieCount > site.CookieCount || site.HTTPOnlyCookieCount < 0 || site.HTTPOnlyCookieCount > site.CookieCount || !validBrowserTime(site.LastAccessedAt) || !validBrowserTime(site.LatestExpiryAt) {
+					return false
+				}
+				if _, exists := seenSites[site.Domain]; exists {
+					return false
+				}
+				seenSites[site.Domain] = struct{}{}
+				observedCookies += site.CookieCount
+			}
+			if observedCookies > profile.CookieCount || (profile.CookieStatus == "observed" && observedCookies != profile.CookieCount) {
+				return false
+			}
+		}
 		totalExtensions += len(browser.Extensions)
 		if totalExtensions > 256 {
 			return false
@@ -154,6 +195,18 @@ func ValidateBrowserSecurity(status *BrowserSecurityStatus) bool {
 		}
 	}
 	return true
+}
+
+func validCookieDomain(value string) bool {
+	return value == strings.ToLower(value) && browserDomainPattern.MatchString(value) && !strings.Contains(value, "..")
+}
+
+func validBrowserTime(value *time.Time) bool {
+	if value == nil {
+		return true
+	}
+	utc := value.UTC()
+	return !utc.Before(time.Date(2000, time.January, 1, 0, 0, 0, 0, time.UTC)) && utc.Before(time.Date(2101, time.January, 1, 0, 0, 0, 0, time.UTC))
 }
 
 func validProtectionEvidence(protection BrowserProtectionStatus) bool {
