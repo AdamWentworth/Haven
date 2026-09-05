@@ -22,6 +22,9 @@ it("keeps the remote dashboard inside a sandbox without a preload or IPC bridge"
 });
 
 it("hardens the packaged executable with encrypted cookies and ASAR integrity", () => {
+	assert.ok(main.includes('path.join(__dirname, "build", "icon.ico")'));
+	assert.ok(manifest.build.files.includes("build/icon.ico"));
+	assert.equal(manifest.build.win.icon, "build/icon.ico");
   assert.deepEqual(manifest.build.electronFuses, {
     runAsNode: false,
     enableCookieEncryption: true,

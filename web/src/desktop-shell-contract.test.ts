@@ -25,8 +25,10 @@ describe("native desktop shell contract", () => {
 	});
 
 	it("pins dependencies and hardens the packaged desktop boundary", () => {
-		expect(manifest.version).toBe("0.25.0");
+		expect(manifest.version).toBe("0.25.1");
 		expect(manifest.build.files).toContain("build/origin.cjs");
+		expect(manifest.build.files).toContain("build/icon.ico");
+		expect(shell).toContain('path.join(__dirname, "build", "icon.ico")');
 		expect(manifest.devDependencies.electron).toMatch(/^\d+\.\d+\.\d+$/);
 		expect(manifest.devDependencies["@electron/fuses"]).toMatch(/^\d+\.\d+\.\d+$/);
 		expect(manifest.build.asar).toBe(true);

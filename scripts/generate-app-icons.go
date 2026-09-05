@@ -1,11 +1,12 @@
 //go:build ignore
 
-// Generate HAVEN's deterministic PWA raster icons from the same simple shield
-// geometry as the bundled SVG. It uses only the Go standard library.
+// Generate HAVEN's deterministic raster and Windows icon assets from the same
+// simple shield geometry as the bundled SVG. It uses only the Go standard library.
 package main
 
 import (
 	"bytes"
+	"encoding/binary"
 	"flag"
 	"image"
 	"image/color"
@@ -17,6 +18,12 @@ import (
 
 type point struct{ x, y float64 }
 
+type renderOptions struct {
+	tiled       bool
+	scale       float64
+	strokeWidth float64
+}
+
 var shield = []point{
 	{256, 64}, {416, 130}, {416, 246}, {409, 292}, {390, 337}, {357, 376},
 	{312, 413}, {256, 436}, {200, 413}, {155, 376}, {122, 337}, {103, 292},
@@ -27,17 +34,17 @@ func main() {
 	check := flag.Bool("check", false, "verify committed icons match the deterministic generator")
 	flag.Parse()
 	assets := []struct {
-		path  string
-		size  int
-		tiled bool
+		path     string
+		generate func() []byte
 	}{
-		{filepath.Join("web", "public", "haven-app-icon-192.png"), 192, false},
-		{filepath.Join("web", "public", "haven-app-icon-512.png"), 512, false},
-		{filepath.Join("web", "public", "haven-maskable-icon-512.png"), 512, true},
-		{filepath.Join("desktop", "build", "icon.png"), 512, false},
+		{filepath.Join("web", "public", "haven-app-icon-192.png"), func() []byte { return encodePNG(render(192, renderOptions{scale: 1, strokeWidth: 14})) }},
+		{filepath.Join("web", "public", "haven-app-icon-512.png"), func() []byte { return encodePNG(render(512, renderOptions{scale: 1, strokeWidth: 14})) }},
+		{filepath.Join("web", "public", "haven-maskable-icon-512.png"), func() []byte { return encodePNG(render(512, renderOptions{tiled: true, scale: 1, strokeWidth: 14})) }},
+		{filepath.Join("desktop", "build", "icon.png"), func() []byte { return encodePNG(render(512, desktopRenderOptions(512))) }},
+		{filepath.Join("desktop", "build", "icon.ico"), encodeWindowsIcon},
 	}
 	for _, asset := range assets {
-		generated := encode(render(asset.size, asset.tiled))
+		generated := asset.generate()
 		if *check {
 			committed, err := os.ReadFile(asset.path)
 			if err != nil || !bytes.Equal(committed, generated) {
@@ -51,7 +58,7 @@ func main() {
 	}
 }
 
-func encode(value image.Image) []byte {
+func encodePNG(value image.Image) []byte {
 	var output bytes.Buffer
 	if err := png.Encode(&output, value); err != nil {
 		panic(err)
@@ -59,8 +66,21 @@ func encode(value image.Image) []byte {
 	return output.Bytes()
 }
 
-func render(size int, tiled bool) *image.NRGBA {
-	const samples = 4
+func desktopRenderOptions(size int) renderOptions {
+	strokeWidth := 16.0
+	if size <= 24 {
+		strokeWidth = 28
+	} else if size <= 48 {
+		strokeWidth = 22
+	}
+	return renderOptions{scale: 1.18, strokeWidth: strokeWidth}
+}
+
+func render(size int, options renderOptions) *image.NRGBA {
+	samples := 4
+	if size <= 32 {
+		samples = 8
+	}
 	large := size * samples
 	canvas := image.NewNRGBA(image.Rect(0, 0, size, size))
 	background := color.RGBA{8, 16, 13, 255}
@@ -73,21 +93,23 @@ func render(size int, tiled bool) *image.NRGBA {
 			alpha := 0
 			for sy := 0; sy < samples; sy++ {
 				for sx := 0; sx < samples; sx++ {
-					px := (float64(x*samples+sx) + .5) * 512 / float64(large)
-					py := (float64(y*samples+sy) + .5) * 512 / float64(large)
+					canvasX := (float64(x*samples+sx) + .5) * 512 / float64(large)
+					canvasY := (float64(y*samples+sy) + .5) * 512 / float64(large)
+					px := 256 + (canvasX-256)/options.scale
+					py := 256 + (canvasY-256)/options.scale
 					shade := color.RGBA{}
-					if tiled {
+					if options.tiled {
 						shade = background
 					}
 					if insidePolygon(point{px, py}, shield) {
 						shade = shieldFill
 					}
-					if polygonDistance(point{px, py}, shield) <= 14 {
+					if polygonDistance(point{px, py}, shield) <= options.strokeWidth {
 						shade = green
 					}
-					if lineDistance(point{px, py}, point{188, 170}, point{188, 342}) <= 14 ||
-						lineDistance(point{px, py}, point{324, 170}, point{324, 342}) <= 14 ||
-						lineDistance(point{px, py}, point{188, 256}, point{324, 256}) <= 14 {
+					if lineDistance(point{px, py}, point{188, 170}, point{188, 342}) <= options.strokeWidth ||
+						lineDistance(point{px, py}, point{324, 170}, point{324, 342}) <= options.strokeWidth ||
+						lineDistance(point{px, py}, point{188, 256}, point{324, 256}) <= options.strokeWidth {
 						shade = pale
 					}
 					premultiplied[0] += int(shade.R) * int(shade.A)
@@ -109,13 +131,53 @@ func render(size int, tiled bool) *image.NRGBA {
 			})
 		}
 	}
-	if tiled && canvas.NRGBAAt(0, 0).A != 255 {
+	if options.tiled && canvas.NRGBAAt(0, 0).A != 255 {
 		panic("maskable icon must have an opaque background")
 	}
-	if !tiled && canvas.NRGBAAt(0, 0).A != 0 {
+	if !options.tiled && canvas.NRGBAAt(0, 0).A != 0 {
 		panic("standard icon must preserve a transparent background")
 	}
 	return canvas
+}
+
+func encodeWindowsIcon() []byte {
+	sizes := []int{16, 20, 24, 32, 40, 48, 64, 128, 256}
+	images := make([][]byte, 0, len(sizes))
+	for _, size := range sizes {
+		images = append(images, encodePNG(render(size, desktopRenderOptions(size))))
+	}
+
+	var output bytes.Buffer
+	mustWrite := func(value any) {
+		if err := binary.Write(&output, binary.LittleEndian, value); err != nil {
+			panic(err)
+		}
+	}
+	mustWrite(uint16(0))
+	mustWrite(uint16(1))
+	mustWrite(uint16(len(images)))
+	offset := 6 + 16*len(images)
+	for index, data := range images {
+		dimension := byte(sizes[index])
+		if sizes[index] == 256 {
+			dimension = 0
+		}
+		mustWrite(dimension)
+		mustWrite(dimension)
+		mustWrite(byte(0))
+		mustWrite(byte(0))
+		mustWrite(uint16(1))
+		mustWrite(uint16(32))
+		mustWrite(uint32(len(data)))
+		mustWrite(uint32(offset))
+		offset += len(data)
+	}
+	for _, data := range images {
+		if _, err := output.Write(data); err != nil {
+			panic(err)
+		}
+	}
+	return output.Bytes()
 }
 
 func insidePolygon(value point, polygon []point) bool {

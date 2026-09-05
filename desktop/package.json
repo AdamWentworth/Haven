@@ -1,7 +1,7 @@
 {
   "name": "haven-desktop",
   "productName": "HAVEN",
-  "version": "0.25.0",
+  "version": "0.25.1",
   "private": true,
   "description": "Native, isolated desktop client for the HAVEN personal security observatory",
   "author": "Adam Wentworth",
@@ -35,6 +35,7 @@
       "security.cjs",
       "build/origin.cjs",
       "build/icon.png",
+      "build/icon.ico",
       "package.json"
     ],
     "directories": {
@@ -43,7 +44,7 @@
     },
     "win": {
       "target": "nsis",
-      "icon": "build/icon.png"
+      "icon": "build/icon.ico"
     },
     "nsis": {
       "oneClick": false,
