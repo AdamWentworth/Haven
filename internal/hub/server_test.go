@@ -57,7 +57,9 @@ func testServer(t *testing.T) (*Server, *storage.Store) {
 		t.Fatal(err)
 	}
 	webFiles := fstest.MapFS{
-		"index.html": &fstest.MapFile{Data: []byte("<!doctype html><title>HAVEN</title>")},
+		"index.html":           &fstest.MapFile{Data: []byte("<!doctype html><title>HAVEN</title>")},
+		"manifest.webmanifest": &fstest.MapFile{Data: []byte(`{"name":"HAVEN"}`)},
+		"sw.js":                &fstest.MapFile{Data: []byte(`self.addEventListener("push", () => {});`)},
 	}
 	snapshot := model.SecuritySnapshot{
 		CollectedAt:      time.Now().UTC(),
@@ -73,6 +75,29 @@ func testServer(t *testing.T) (*Server, *storage.Store) {
 		t.Fatal(err)
 	}
 	return NewServer(staticCollector{snapshot: snapshot}, store, logger, fs.FS(webFiles), WithAlertProjector(alert.NewProjector(store)), WithAccountNotebook(accounts)), store
+}
+
+func TestInstallableAssetsKeepExplicitSecurityBoundaries(t *testing.T) {
+	server, store := testServer(t)
+	defer store.Close()
+
+	manifest := httptest.NewRecorder()
+	server.Handler().ServeHTTP(manifest, httptest.NewRequest(http.MethodGet, "/manifest.webmanifest", nil))
+	if manifest.Code != http.StatusOK || manifest.Header().Get("Content-Type") != "application/manifest+json" {
+		t.Fatalf("unexpected manifest response: status=%d content-type=%q", manifest.Code, manifest.Header().Get("Content-Type"))
+	}
+	if manifest.Header().Get("Cache-Control") != "no-cache" {
+		t.Fatalf("manifest must be revalidated, got %q", manifest.Header().Get("Cache-Control"))
+	}
+
+	worker := httptest.NewRecorder()
+	server.Handler().ServeHTTP(worker, httptest.NewRequest(http.MethodGet, "/sw.js", nil))
+	if worker.Code != http.StatusOK || worker.Header().Get("Service-Worker-Allowed") != "/" {
+		t.Fatalf("unexpected service-worker response: status=%d scope=%q", worker.Code, worker.Header().Get("Service-Worker-Allowed"))
+	}
+	if worker.Header().Get("Cache-Control") != "no-cache" {
+		t.Fatalf("service worker must be revalidated, got %q", worker.Header().Get("Cache-Control"))
+	}
 }
 
 func TestHealthEndpointHasSecurityHeaders(t *testing.T) {

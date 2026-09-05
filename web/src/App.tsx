@@ -4,6 +4,7 @@ import { AccountNotebook } from "./account-notebook";
 import { suggestedBaseline } from "./baseline";
 import { AuthenticationGate } from "./authentication-gate";
 import { DeviceInventory } from "./device-inventory";
+import { type DesktopInstallStatus, isStandaloneApp, useDesktopInstall } from "./desktop-install";
 import { AgentEvidencePanel, FleetPanel } from "./fleet-panel";
 import { actionableFindings, visibleFindingLifecycles } from "./findings";
 import { booleanValue, formatBytes, formatDate, formatDuration, formatInterval, formatPortBinding, formatRelativeTime, formatTimeRemaining, policyValue } from "./format";
@@ -647,6 +648,24 @@ function NotificationPanel({ status, supported, enabled, busy, enable, disable }
   );
 }
 
+function DesktopInstallPanel({ status, install }: { status: DesktopInstallStatus; install: () => Promise<void> }) {
+  const installed = status === "installed";
+  const available = status === "available";
+  return (
+    <section className="panel desktop-install-panel" aria-labelledby="desktop-install-title">
+      <PanelHeading eyebrow="DESKTOP EXPERIENCE" title="Install HAVEN" id="desktop-install-title" icon={<MonitorIcon />} accent="green">
+        Open the same private hub in a dedicated application window from your desktop or Start menu
+      </PanelHeading>
+      <div className="desktop-install-summary">
+        <StatusChip label={installed ? "installed" : available ? "ready to install" : "browser install"} tone={installed ? "healthy" : available ? "configured" : "unknown"} />
+        <p>{installed ? "This window is already running as the installed HAVEN application." : available ? "This browser has verified that HAVEN can be installed as an application." : "Install availability is controlled by this browser. Its app or site menu may provide the install command."}</p>
+      </div>
+      {available && <button className="secondary-action" type="button" onClick={() => void install()}>Install HAVEN</button>}
+      <p className="footnote">The installed experience remains a client of <strong>{window.location.host}</strong>. It adds no privileged local service, native command bridge, second database, or second credential store; passkeys and account-workspace locking remain unchanged.</p>
+    </section>
+  );
+}
+
 function ActionCenter({ actions, audit, capabilities, run, busy }: { actions: SecurityAction[]; audit: AuditEvent[]; capabilities: ActionCapability[]; run: (kind: SecurityActionKind) => void; busy: boolean }) {
   const latest = actions.slice(0, 5);
   return (
@@ -777,6 +796,8 @@ interface ApplicationProps {
 	passkeys: PasskeyInfo[];
 	accountProfiles: AccountProfile[];
 	accountUnlocked: boolean;
+	desktopInstallStatus: DesktopInstallStatus;
+	installDesktopApp: () => Promise<void>;
 	reviewFinding: (finding: SecurityFinding, state: FindingReviewState) => void;
 	saveServiceExpectation: (service: ExpectedServiceInput) => void;
 	saveServiceExpectations: (services: ExpectedServiceInput[]) => void;
@@ -794,7 +815,7 @@ interface ApplicationProps {
 	navigate: (route: AppRoute) => void;
 }
 
-function Application({ snapshot, devices, networkDevices, appliances, events, networkEvents, alerts, runtime, notificationStatus, selectedDevice, selectDevice, refresh, refreshing, error, demoMode, alertsEnabled, alertsSupported, enableAlerts, disableAlerts, reviews, expectedServices, listenerObservations, audit, actions, passkeys, accountProfiles, accountUnlocked, reviewFinding, saveServiceExpectation, saveServiceExpectations, removeServiceExpectation, runAction, addOwnerPasskey, removeOwnerPasskey, saveAccount, removeAccount, unlockAccounts, lockAccounts, actionBusy, signOut, route, navigate }: ApplicationProps) {
+function Application({ snapshot, devices, networkDevices, appliances, events, networkEvents, alerts, runtime, notificationStatus, selectedDevice, selectDevice, refresh, refreshing, error, demoMode, alertsEnabled, alertsSupported, enableAlerts, disableAlerts, reviews, expectedServices, listenerObservations, audit, actions, passkeys, accountProfiles, accountUnlocked, desktopInstallStatus, installDesktopApp, reviewFinding, saveServiceExpectation, saveServiceExpectations, removeServiceExpectation, runAction, addOwnerPasskey, removeOwnerPasskey, saveAccount, removeAccount, unlockAccounts, lockAccounts, actionBusy, signOut, route, navigate }: ApplicationProps) {
   const isLinux = snapshot.linuxBaseline !== null || /linux|ubuntu/i.test(snapshot.device.operatingSystem);
   const defenderHealthy = snapshot.defender?.antivirusEnabled === true
     && snapshot.defender.realTimeProtectionEnabled === true
@@ -814,7 +835,7 @@ function Application({ snapshot, devices, networkDevices, appliances, events, ne
 		? selectedDevice?.displayName || snapshot.device.hostName
 		: route.page === "overview" ? "Overview" : `${route.page.charAt(0).toUpperCase()}${route.page.slice(1)}`;
 	useEffect(() => {
-		document.title = `${browserPageTitle} — HAVEN`;
+		document.title = isStandaloneApp() ? browserPageTitle : `${browserPageTitle} — HAVEN`;
 	}, [browserPageTitle]);
 	const openDevice = (deviceId: string) => {
 		navigate({ page: "device", deviceId, section: "overview" });
@@ -853,7 +874,7 @@ function Application({ snapshot, devices, networkDevices, appliances, events, ne
 	} else if (route.page === "activity") {
 		page = <><PageIntro eyebrow="EVENTS AND DECISIONS" title="Activity">Finding transitions, deliberate control requests, and privacy-bounded owner decisions.</PageIntro><ActivityPanel events={networkEvents} alerts={alerts} />{!demoMode && <ActionCenter actions={actions} audit={audit} capabilities={runtime?.actionCapabilities || []} run={runAction} busy={actionBusy} />}</>;
 	} else if (route.page === "settings") {
-		page = <><PageIntro eyebrow="OWNER ACCESS" title="Settings">Manage this browser's alert destination and the passkeys that protect HAVEN.</PageIntro>{!demoMode ? <><NotificationPanel status={notificationStatus} supported={alertsSupported} enabled={alertsEnabled} busy={actionBusy} enable={enableAlerts} disable={disableAlerts} /><PasskeyPanel passkeys={passkeys} add={addOwnerPasskey} remove={removeOwnerPasskey} busy={actionBusy} /></> : <p className="demo-banner" role="status">Authentication and notification settings are unavailable in synthetic demo mode.</p>}<section className="panel about-panel" aria-labelledby="about-title"><PanelHeading eyebrow="APPLICATION" title="About HAVEN" id="about-title" icon={<HavenIcon />} accent="green">Private, explainable security visibility</PanelHeading><dl className="details-grid"><div><dt>Version</dt><dd>{runtime?.version || "development"}</dd></div><div><dt>Revision</dt><dd>{runtime?.revision && runtime.revision !== "development" ? runtime.revision.slice(0, 12) : "development"}</dd></div><div><dt>Collection</dt><dd>Read-only by default</dd></div><div><dt>Storage</dt><dd>Private SQLite hub</dd></div></dl></section></>;
+		page = <><PageIntro eyebrow="OWNER ACCESS" title="Settings">Manage installation, this browser's alert destination, and the passkeys that protect HAVEN.</PageIntro><DesktopInstallPanel status={desktopInstallStatus} install={installDesktopApp} />{!demoMode ? <><NotificationPanel status={notificationStatus} supported={alertsSupported} enabled={alertsEnabled} busy={actionBusy} enable={enableAlerts} disable={disableAlerts} /><PasskeyPanel passkeys={passkeys} add={addOwnerPasskey} remove={removeOwnerPasskey} busy={actionBusy} /></> : <p className="demo-banner" role="status">Authentication and notification settings are unavailable in synthetic demo mode.</p>}<section className="panel about-panel" aria-labelledby="about-title"><PanelHeading eyebrow="APPLICATION" title="About HAVEN" id="about-title" icon={<HavenIcon />} accent="green">Private, explainable security visibility</PanelHeading><dl className="details-grid"><div><dt>Version</dt><dd>{runtime?.version || "development"}</dd></div><div><dt>Revision</dt><dd>{runtime?.revision && runtime.revision !== "development" ? runtime.revision.slice(0, 12) : "development"}</dd></div><div><dt>Collection</dt><dd>Read-only by default</dd></div><div><dt>Storage</dt><dd>Private SQLite hub</dd></div></dl></section></>;
 	} else {
 		page = <>
 			<div className="device-page-heading"><a href="/devices" onClick={(event) => { if (event.button === 0 && !event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey) { event.preventDefault(); navigate({ page: "devices" }); } }}>← All devices</a><DeviceNavigation deviceId={selectedDeviceId} current={deviceSection} navigate={navigate} /></div>
@@ -889,6 +910,7 @@ function Application({ snapshot, devices, networkDevices, appliances, events, ne
 
 export function App() {
   const { route, navigate } = useAppRoute();
+  const desktopInstall = useDesktopInstall();
   const [authentication, setAuthentication] = useState<AuthStatus | null>(null);
   const [snapshot, setSnapshot] = useState<SecuritySnapshot | null>(null);
   const [devices, setDevices] = useState<DeviceRecord[]>([]);
@@ -1437,5 +1459,5 @@ export function App() {
 
   const selectedDevice = devices.find((device) => device.id === selectedId) || null;
   const selectedEvents = selectedId ? events.filter((event) => event.deviceId === selectedId) : events;
-	return <Application snapshot={snapshot} devices={devices} networkDevices={networkDevices} appliances={appliances} events={selectedEvents} networkEvents={events} alerts={currentAlerts} runtime={runtime} notificationStatus={notificationStatus} selectedDevice={selectedDevice} selectDevice={(id) => void selectDevice(id)} refresh={() => void refreshView()} refreshing={refreshing} error={error} demoMode={demoMode} alertsEnabled={alertsEnabled} alertsSupported={alertsSupported} enableAlerts={(label) => void enableAlerts(label)} disableAlerts={() => void disableAlerts()} reviews={reviews} expectedServices={expectedServices} listenerObservations={listenerObservations} audit={audit} actions={actions} passkeys={passkeys} accountProfiles={accountProfiles} accountUnlocked={demoMode || accountAccess !== null} reviewFinding={(finding, state) => void reviewFinding(finding, state)} saveServiceExpectation={(service) => void saveServiceExpectation(service)} saveServiceExpectations={(services) => void saveServiceBaseline(services)} removeServiceExpectation={(service) => void removeServiceExpectation(service)} runAction={(kind) => void runAction(kind)} addOwnerPasskey={() => void addOwnerPasskey()} removeOwnerPasskey={(passkey) => void removeOwnerPasskey(passkey)} saveAccount={saveAccount} removeAccount={(profile) => void removeAccount(profile)} unlockAccounts={() => void unlockAccounts()} lockAccounts={() => void lockAccounts()} actionBusy={actionBusy} signOut={() => void signOut()} route={route} navigate={navigate} />;
+	return <Application snapshot={snapshot} devices={devices} networkDevices={networkDevices} appliances={appliances} events={selectedEvents} networkEvents={events} alerts={currentAlerts} runtime={runtime} notificationStatus={notificationStatus} selectedDevice={selectedDevice} selectDevice={(id) => void selectDevice(id)} refresh={() => void refreshView()} refreshing={refreshing} error={error} demoMode={demoMode} alertsEnabled={alertsEnabled} alertsSupported={alertsSupported} enableAlerts={(label) => void enableAlerts(label)} disableAlerts={() => void disableAlerts()} reviews={reviews} expectedServices={expectedServices} listenerObservations={listenerObservations} audit={audit} actions={actions} passkeys={passkeys} accountProfiles={accountProfiles} accountUnlocked={demoMode || accountAccess !== null} desktopInstallStatus={desktopInstall.status} installDesktopApp={async () => { try { await desktopInstall.install(); setError(null); } catch (reason) { setError(reason instanceof Error ? reason.message : "HAVEN could not open the browser installation prompt."); } }} reviewFinding={(finding, state) => void reviewFinding(finding, state)} saveServiceExpectation={(service) => void saveServiceExpectation(service)} saveServiceExpectations={(services) => void saveServiceBaseline(services)} removeServiceExpectation={(service) => void removeServiceExpectation(service)} runAction={(kind) => void runAction(kind)} addOwnerPasskey={() => void addOwnerPasskey()} removeOwnerPasskey={(passkey) => void removeOwnerPasskey(passkey)} saveAccount={saveAccount} removeAccount={(profile) => void removeAccount(profile)} unlockAccounts={() => void unlockAccounts()} lockAccounts={() => void lockAccounts()} actionBusy={actionBusy} signOut={() => void signOut()} route={route} navigate={navigate} />;
 }
