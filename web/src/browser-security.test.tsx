@@ -63,7 +63,7 @@ describe("browser security panel", () => {
 		expect(screen.getByRole("heading", { name: "Browser security" })).toBeInTheDocument();
 		expect(screen.getByText("Google Chrome")).toBeInTheDocument();
 		expect(screen.getByText("Password Helper")).toBeInTheDocument();
-		expect(screen.getByText("All sites")).toBeInTheDocument();
+		expect(screen.getAllByText("All sites").length).toBeGreaterThan(0);
 		expect(screen.getByText("Cookies")).toBeInTheDocument();
 		expect(screen.getByText("Downloads · optional")).toBeInTheDocument();
 		expect(screen.getByText("Audit only")).toBeInTheDocument();
@@ -92,14 +92,15 @@ describe("browser security panel", () => {
 		expect(screen.getByText(/could not verify supported browser metadata/i)).toBeInTheDocument();
 	});
 
-	it("filters a profile to conservative review candidates without calling them sessions", async () => {
+	it("filters a profile to conservative cleanup candidates without calling them authenticated sessions", async () => {
 		vi.spyOn(Date, "now").mockReturnValue(new Date("2026-09-04T00:01:00Z").getTime());
 		const user = userEvent.setup();
 		render(<BrowserSecurityPanel status={observed} />);
 		expect(screen.getByText("recent.example.com")).toBeInTheDocument();
-		await user.click(screen.getByRole("button", { name: "Review candidates only" }));
+		await user.selectOptions(screen.getByRole("combobox", { name: "Show" }), "cleanup");
 		expect(screen.getByText("facebook.com")).toBeInTheDocument();
 		expect(screen.queryByText("recent.example.com")).not.toBeInTheDocument();
-		expect(screen.getByRole("button", { name: "Showing review candidates" })).toBeInTheDocument();
+		expect(screen.getByRole("combobox", { name: "Sort by" })).toHaveValue("session-signals");
+		expect(screen.getByText(/neither proves that you are currently signed in/i)).toBeInTheDocument();
 	});
 });

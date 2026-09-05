@@ -3,6 +3,7 @@ import { siBrave, siFirefoxbrowser, siGooglechrome, type SimpleIcon } from "simp
 import { AlertIcon, BrowserIcon, CheckIcon, HelpIcon } from "./icons";
 import type { BrowserCookieSite, BrowserExtension, BrowserExtensionChange, BrowserInstallation, BrowserProfile, BrowserProtectionStatus, BrowserSecurityStatus } from "./types";
 import { StatusChip, type Tone } from "./ui";
+import { cookieSessionSignal, cookieSiteReview, filterCookieSites, sortCookieSites, type CookieSiteFilter, type CookieSiteSort } from "./cookie-review";
 
 const browserIcons: Record<string, SimpleIcon> = {
 	brave: siBrave,
@@ -101,16 +102,6 @@ function ExtensionRow({ extension }: { extension: BrowserExtension }) {
 	</li>;
 }
 
-const dormantCookieAge = 90 * 24 * 60 * 60 * 1000;
-
-function cookieSiteReview(site: BrowserCookieSite, now = Date.now()) {
-	if (!site.lastAccessedAt) return { candidate: true, label: "Review date unavailable", tone: "unknown" as Tone };
-	const timestamp = new Date(site.lastAccessedAt).getTime();
-	if (!Number.isFinite(timestamp)) return { candidate: true, label: "Review date unavailable", tone: "unknown" as Tone };
-	if (now - timestamp >= dormantCookieAge) return { candidate: true, label: "No access 90+ days", tone: "attention" as Tone };
-	return { candidate: false, label: "Recently accessed", tone: "configured" as Tone };
-}
-
 function readableCookieDate(value?: string) {
 	if (!value) return "Not available";
 	const parsed = new Date(value);
@@ -120,8 +111,10 @@ function readableCookieDate(value?: string) {
 
 function CookieSiteRow({ site }: { site: BrowserCookieSite }) {
 	const review = cookieSiteReview(site);
+	const sessionSignal = cookieSessionSignal(site);
+	const reviewTone: Tone = review.state === "dormant" ? "attention" : review.state === "recent" ? "configured" : "unknown";
 	return <li className="browser-cookie-site">
-		<div className="browser-cookie-site-heading"><div><strong>{site.domain}</strong><small>Last cookie access {readableCookieDate(site.lastAccessedAt)}</small></div><StatusChip label={review.label} tone={review.tone} /></div>
+		<div className="browser-cookie-site-heading"><div><strong>{site.domain}</strong><small>Last cookie access {readableCookieDate(site.lastAccessedAt)}</small></div><div className="browser-cookie-signals"><StatusChip label={sessionSignal.label} tone={sessionSignal.level === "limited" ? "unknown" : "configured"} /><StatusChip label={review.label} tone={reviewTone} /></div></div>
 		<div className="browser-cookie-counts" aria-label={`${site.domain} cookie metadata`}>
 			<span><strong>{site.cookieCount}</strong> total</span>
 			<span><strong>{site.sessionCookieCount}</strong> session-scoped</span>
@@ -136,22 +129,28 @@ function CookieSiteRow({ site }: { site: BrowserCookieSite }) {
 
 function CookieProfileReview({ profile }: { profile: BrowserProfile }) {
 	const [query, setQuery] = useState("");
-	const [reviewOnly, setReviewOnly] = useState(false);
+	const [filter, setFilter] = useState<CookieSiteFilter>("all");
+	const [sort, setSort] = useState<CookieSiteSort>("session-signals");
 	const [showAll, setShowAll] = useState(false);
 	const reviewCount = useMemo(() => profile.sites.filter((site) => cookieSiteReview(site).candidate).length, [profile.sites]);
-	const filtered = useMemo(() => profile.sites.filter((site) => {
-		if (reviewOnly && !cookieSiteReview(site).candidate) return false;
-		return site.domain.includes(query.trim().toLowerCase());
-	}), [profile.sites, query, reviewOnly]);
-	const visible = showAll || query.trim() || reviewOnly ? filtered : filtered.slice(0, 20);
+	const filtered = useMemo(() => {
+		const matching = filterCookieSites(profile.sites, filter).filter((site) => site.domain.includes(query.trim().toLowerCase()));
+		return sortCookieSites(matching, sort);
+	}, [profile.sites, query, filter, sort]);
+	const visible = showAll || query.trim() || filter !== "all" ? filtered : filtered.slice(0, 20);
 	const unavailable = profile.cookieStatus === "unavailable";
 	return <details className="browser-cookie-profile" open>
 		<summary><div><strong>{profile.name}</strong><small>{unavailable ? "Cookie metadata unavailable this run" : `${profile.cookieCount} cookie${profile.cookieCount === 1 ? "" : "s"} across ${profile.sites.length} site${profile.sites.length === 1 ? "" : "s"}`}</small></div><StatusChip label={unavailable ? "Unavailable this run" : reviewCount > 0 ? `${reviewCount} to review` : "No old site data"} tone={unavailable ? "unknown" : reviewCount > 0 ? "attention" : "healthy"} /></summary>
 		{unavailable ? <p className="browser-empty">Chrome may be holding this active profile&apos;s cookie database exclusively. This is a collection limitation—not a security problem. HAVEN will retry on the next report; closing Chrome before a report lets the agent try while every profile is idle.</p> : <>
-			<div className="browser-cookie-controls"><label><span>Filter sites</span><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="facebook.com" /></label><button type="button" className={reviewOnly ? "active" : ""} onClick={() => setReviewOnly((current) => !current)}>{reviewOnly ? "Showing review candidates" : "Review candidates only"}</button></div>
+			<p className="browser-session-legend"><strong>Session signal is a ranking hint.</strong> Stronger means this domain has session-scoped cookies plus both Secure and HTTP-only cookies; possible means both protections are present. Neither proves that you are currently signed in.</p>
+			<div className="browser-cookie-controls">
+				<label><span>Find a site</span><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="facebook.com" /></label>
+				<label><span>Show</span><select value={filter} onChange={(event) => { setFilter(event.target.value as CookieSiteFilter); setShowAll(false); }}><option value="all">All sites</option><option value="session-signals">Session signals</option><option value="cleanup">Cleanup candidates</option></select></label>
+				<label><span>Sort by</span><select value={sort} onChange={(event) => setSort(event.target.value as CookieSiteSort)}><option value="session-signals">Session relevance</option><option value="cleanup">Cleanup priority</option><option value="recent">Most recently accessed</option><option value="cookie-count">Most cookies</option><option value="domain">Domain A–Z</option></select></label>
+			</div>
 			{profile.cookieStatus === "partial" && <p className="browser-coverage-note"><HelpIcon size={17} /><span>This profile is a bounded partial view. HAVEN reports the verified rows and never copies the cookie database.</span></p>}
 			{visible.length === 0 ? <p className="browser-empty">No cookie sites match this view.</p> : <ul className="browser-cookie-site-list">{visible.map((site) => <CookieSiteRow site={site} key={site.domain} />)}</ul>}
-			{!showAll && !query.trim() && !reviewOnly && filtered.length > visible.length && <button type="button" className="browser-cookie-show-all" onClick={() => setShowAll(true)}>Show all {filtered.length} sites</button>}
+			{!showAll && !query.trim() && filter === "all" && filtered.length > visible.length && <button type="button" className="browser-cookie-show-all" onClick={() => setShowAll(true)}>Show all {filtered.length} sites</button>}
 		</>}
 	</details>;
 }

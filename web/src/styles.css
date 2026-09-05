@@ -449,14 +449,17 @@ main, footer { width: min(1180px, 92vw); margin-inline: auto; }
 .browser-cookie-profile > summary small { color: var(--muted); font-size: .75rem; }
 .browser-cookie-profile[open] > summary { border-bottom: 1px solid var(--line); }
 .browser-cookie-controls { display: flex; align-items: flex-end; gap: .6rem; padding: .8rem; }
-.browser-cookie-controls label { display: grid; flex: 1; gap: .3rem; color: var(--muted); font-size: .75rem; }
-.browser-cookie-controls input { width: 100%; padding: .56rem .65rem; border: 1px solid var(--line-bright); border-radius: .55rem; color: #e8f4ed; background: rgba(4, 9, 10, .72); font: inherit; }
+.browser-cookie-controls label { display: grid; min-width: 10rem; gap: .3rem; color: var(--muted); font-size: .75rem; }
+.browser-cookie-controls label:first-child { flex: 1; }
+.browser-cookie-controls input, .browser-cookie-controls select { width: 100%; min-height: 2.25rem; padding: .56rem .65rem; border: 1px solid var(--line-bright); border-radius: .55rem; color: #e8f4ed; background: rgba(4, 9, 10, .72); font: inherit; }
+.browser-cookie-controls select { cursor: pointer; }
 .browser-cookie-controls button, .browser-cookie-show-all { min-height: 2.25rem; padding: .52rem .7rem; border: 1px solid var(--line-bright); border-radius: .55rem; color: #cadbd2; background: rgba(255, 255, 255, .025); font: inherit; font-size: .75rem; cursor: pointer; }
 .browser-cookie-controls button:hover, .browser-cookie-controls button.active, .browser-cookie-show-all:hover { color: #dff7ea; border-color: rgba(115, 226, 167, .38); background: rgba(115, 226, 167, .07); }
 .browser-cookie-site-list { display: grid; gap: .55rem; margin: 0; padding: 0 .8rem .8rem; list-style: none; }
 .browser-cookie-site { padding: .75rem; border: 1px solid var(--line); border-radius: .65rem; background: rgba(8, 14, 15, .68); }
 .browser-cookie-site-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: .75rem; }
 .browser-cookie-site-heading > div { display: grid; min-width: 0; gap: .16rem; }
+.browser-cookie-site-heading > .browser-cookie-signals { display: flex; flex-wrap: wrap; justify-content: flex-end; }
 .browser-cookie-site-heading strong { overflow-wrap: anywhere; font-family: "Cascadia Code", "SFMono-Regular", Consolas, monospace; font-size: .82rem; }
 .browser-cookie-site-heading small, .browser-cookie-expiry { color: var(--muted); font-size: .72rem; }
 .browser-cookie-counts { display: flex; flex-wrap: wrap; gap: .4rem; margin-top: .6rem; }
@@ -465,6 +468,8 @@ main, footer { width: min(1180px, 92vw); margin-inline: auto; }
 .browser-cookie-site > p { margin: .6rem 0 0; color: #dec99f; font-size: .77rem; line-height: 1.45; }
 .browser-cookie-expiry { display: block; margin-top: .5rem; }
 .browser-cookie-show-all { display: block; margin: 0 auto .8rem; }
+.browser-session-legend { margin: .8rem .8rem 0; padding: .65rem .7rem; border-left: 2px solid rgba(111, 216, 229, .55); color: var(--muted); background: rgba(111, 216, 229, .035); font-size: .76rem; line-height: 1.5; }
+.browser-session-legend strong { color: #dcebe2; }
 .browser-extension-list { display: grid; gap: .55rem; margin: .85rem 0 0; padding: 0; list-style: none; }
 .browser-extension { min-width: 0; padding: .75rem; border: 1px solid var(--line); border-radius: .7rem; background: rgba(0, 0, 0, .1); }
 .browser-extension.disabled { opacity: .66; }
@@ -746,7 +751,7 @@ footer { display: flex; justify-content: space-between; padding: 2.5rem 0 3rem; 
   .container-only-ports li { align-items: start; flex-direction: column; gap: .25rem; }
   .container-only-ports li span { text-align: left; }
 	.browser-card-heading, .browser-extension-heading, .browser-changes > div, .browser-cookie-review-heading, .browser-cookie-profile > summary, .browser-cookie-controls, .browser-cookie-site-heading, .account-session-heading { align-items: flex-start; flex-direction: column; }
-	.browser-cookie-controls, .browser-cookie-controls button { width: 100%; }
+	.browser-cookie-controls, .browser-cookie-controls label, .browser-cookie-controls button { width: 100%; }
 	.account-session-actions { justify-items: start; }
 	.provider-session-unavailable.compact { max-width: 100%; text-align: left; }
   .account-card-heading, .account-card-footer { align-items: flex-start; flex-direction: column; }

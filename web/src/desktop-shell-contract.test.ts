@@ -22,7 +22,7 @@ describe("native desktop shell contract", () => {
 	});
 
 	it("pins dependencies and hardens the packaged desktop boundary", () => {
-		expect(manifest.version).toBe("0.20.1");
+		expect(manifest.version).toBe("0.20.2");
 		expect(manifest.devDependencies.electron).toMatch(/^\d+\.\d+\.\d+$/);
 		expect(manifest.devDependencies["@electron/fuses"]).toMatch(/^\d+\.\d+\.\d+$/);
 		expect(manifest.build.asar).toBe(true);
