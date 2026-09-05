@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { HavenAPIError, addPasskey, collectSnapshot, getAuthStatus, getDevice, getLatestSnapshot, getNotificationStatus, getRuntimeStatus, listAccountProfiles, listAlerts, listAuditEvents, listBrowserSiteReviews, listDevices, listEvents, listExpectedServices, listFindingReviews, listManagedAppliances, listObservedListeners, listPasskeys, listSecurityActions, lockAccountNotebook, loginWithPasskey, logout, registerPasskey, registerPushDestination, removeAccountProfile, removeBrowserSiteReview, removeExpectedService, removePasskey, removePushDestination, requestSecurityAction, saveAccountProfile, saveBrowserSiteReview, saveExpectedService, saveExpectedServices, saveFindingReview, touchAccountNotebook, unlockAccountNotebook } from "./api";
+import { HavenAPIError, addPasskey, collectSnapshot, getAuthStatus, getDevice, getLatestSnapshot, getNotificationStatus, getRuntimeStatus, getSystemDiagnostics, listAccountProfiles, listAlerts, listAuditEvents, listBrowserSiteReviews, listDevices, listEvents, listExpectedServices, listFindingReviews, listManagedAppliances, listObservedListeners, listPasskeys, listSecurityActions, lockAccountNotebook, loginWithPasskey, logout, registerPasskey, registerPushDestination, removeAccountProfile, removeBrowserSiteReview, removeExpectedService, removePasskey, removePushDestination, requestSecurityAction, saveAccountProfile, saveBrowserSiteReview, saveExpectedService, saveExpectedServices, saveFindingReview, touchAccountNotebook, unlockAccountNotebook } from "./api";
 import { AccountNotebook } from "./account-notebook";
 import { suggestedBaseline } from "./baseline";
 import { AuthenticationGate } from "./authentication-gate";
@@ -9,7 +9,7 @@ import { type DesktopInstallStatus, isStandaloneApp, useDesktopInstall } from ".
 import { AgentEvidencePanel, FleetPanel } from "./fleet-panel";
 import { actionableFindings, visibleFindingLifecycles } from "./findings";
 import { booleanValue, formatBytes, formatDate, formatDuration, formatInterval, formatPortBinding, formatRelativeTime, formatTimeRemaining, policyValue } from "./format";
-import { ActivityIcon, AlertIcon, BellIcon, CheckIcon, ChipIcon, DefenderIcon, DevicesIcon, FirewallIcon, HavenIcon, HelpIcon, LaptopIcon, LockIcon, MonitorIcon, NetworkIcon, RefreshIcon, RemoteAccessIcon, ServerIcon, UpdateIcon, UsersIcon, WorkloadIcon } from "./icons";
+import { ActivityIcon, AlertIcon, BellIcon, CheckIcon, ChipIcon, DefenderIcon, DevicesIcon, FirewallIcon, HavenIcon, HelpIcon, LaptopIcon, LockIcon, MonitorIcon, NetworkIcon, RefreshIcon, RemoteAccessIcon, ServerIcon, SettingsIcon, UpdateIcon, UsersIcon, WorkloadIcon } from "./icons";
 import { componentHealthTone, coverageTone, healthStatusLabel, managedHealthTone, storageSetDetail, storageSetLabel } from "./appliance-health";
 import { AppNavigation, DeviceNavigation, PageIntro } from "./navigation";
 import { bindScopeLabel, endpoint, endpointScope, expectedServiceMatches, expectedServiceOwnerConstrained, isPrivateNetworkAddress, listenerOwnerSummary, liveNetworkRelationships, logicalListeners, networkServiceLabel, normalizeAddress, workloadAttribution, type LogicalListener, type NetworkDeviceObservation } from "./network";
@@ -49,6 +49,7 @@ import type {
   SecurityActionKind,
   SecuritySnapshot,
   SecurityFinding,
+  SystemDiagnostics,
   WorkloadInventory,
 } from "./types";
 import { StatusChip, type Accent, type Tone } from "./ui";
@@ -671,21 +672,80 @@ function DesktopInstallPanel({ status, install }: { status: DesktopInstallStatus
   );
 }
 
-function RecoveryModelPanel() {
+function diagnosticTone(state: SystemDiagnostics["checks"][number]["state"]): Tone {
+	if (state === "pass") return "healthy";
+	if (state === "configured") return "configured";
+	if (state === "warning") return "attention";
+	return "danger";
+}
+
+function SystemDiagnosticsPanel({ diagnostics, devices, desktopVersion }: { diagnostics: SystemDiagnostics | null; devices: DeviceRecord[]; desktopVersion: string | null }) {
+	const enrolled = devices.filter((device) => device.trustState === "enrolled");
+	const compatible = enrolled.filter((device) => device.agent?.compatibility === "current" || device.agent?.compatibility === "compatible").length;
+	return (
+		<section className="panel system-diagnostics-panel" aria-labelledby="system-diagnostics-title">
+			<PanelHeading eyebrow="READ-ONLY OPERATIONS" title="System diagnostics" id="system-diagnostics-title" icon={<SettingsIcon />} accent="green">
+				Evidence HAVEN can verify without repairing, enrolling, exporting private state, or changing deployment configuration
+			</PanelHeading>
+			{diagnostics ? <>
+				<div className="diagnostic-release-grid" aria-label="Installed release summary">
+					<div><span>Hub release</span><strong>{diagnostics.version}</strong><small>{diagnostics.revision === "development" ? "development revision" : diagnostics.revision.slice(0, 12)}</small></div>
+					<div><span>Desktop client</span><strong>{desktopVersion || "Web console"}</strong><small>{desktopVersion ? "native isolated shell" : "no native version detected here"}</small></div>
+					<div><span>Agent protocol</span><strong>{compatible}/{enrolled.length}</strong><small>enrolled agents compatible</small></div>
+					<div><span>Doctor result</span><strong>{diagnostics.status === "not-ready" ? "Not ready" : diagnostics.status === "review" ? "Review" : "Ready"}</strong><small>{diagnostics.summary.passing} verified · {diagnostics.summary.advisory} advisory · {diagnostics.summary.failed} failed</small></div>
+				</div>
+				<div className="diagnostic-check-grid">
+					{diagnostics.checks.map((check) => <article className={`diagnostic-check diagnostic-${check.state}`} key={check.id}>
+						<div><span className="diagnostic-state-icon" aria-hidden="true">{check.state === "fail" ? <AlertIcon size={17} /> : check.state === "warning" ? <HelpIcon size={17} /> : <CheckIcon size={17} />}</span><span><small>{check.area}</small><strong>{check.title}</strong></span><StatusChip label={check.state} tone={diagnosticTone(check.state)} /></div>
+						<p>{check.summary}</p>
+						{check.guidance && <aside><strong>When relevant</strong>{check.guidance}</aside>}
+					</article>)}
+				</div>
+				<p className="footnote">Generated {formatDate(diagnostics.generatedAt)}. Results deliberately omit filesystem paths, hostnames, addresses, device identities, certificate contents, account details, and secret values.</p>
+			</> : <p className="empty-state">The authenticated hub did not return a diagnostic report.</p>}
+		</section>
+	);
+}
+
+function RecoveryModelPanel({ diagnostics }: { diagnostics: SystemDiagnostics | null }) {
+	const recovery = diagnostics?.recovery;
   return (
     <section className="panel recovery-model-panel" aria-labelledby="recovery-model-title">
-      <PanelHeading eyebrow="PORTABLE BY DESIGN" title="Recovery model" id="recovery-model-title" icon={<HavenIcon />} accent="cyan">
-        Rebuild the product from public source; reapply private network choices deliberately
+      <PanelHeading eyebrow="PORTABLE BY DESIGN" title="Recovery map" id="recovery-model-title" icon={<HavenIcon />} accent="cyan">
+		Know exactly what a state restore preserves and what a clean initialization rebuilds
       </PanelHeading>
-      <dl className="details-grid">
-        <div><dt>Product</dt><dd>Clone and verify</dd></div>
-        <div><dt>Deployment</dt><dd>Private configuration</dd></div>
-        <div><dt>Continuity</dt><dd>Complete state directory</dd></div>
-        <div><dt>Clean start</dt><dd>Bootstrap and re-enroll</dd></div>
-      </dl>
-      <p className="footnote">A state backup preserves history, passkeys, and owner decisions, but it is optional for recovery. On a replaced network, HAVEN can start clean and re-enroll each trusted endpoint. The Electron client belongs only on workstations where a dedicated console is useful.</p>
+	  {recovery ? <>
+		<p className="recovery-principle">{recovery.principle}</p>
+		<div className="recovery-boundaries">
+			<section><h3>Complete state restore preserves</h3><ul>{recovery.preserved.map((item) => <li key={item}><CheckIcon size={16} />{item}</li>)}</ul></section>
+			<section><h3>Clean initialization rebuilds</h3><ul>{recovery.reinitialize.map((item) => <li key={item}><RefreshIcon size={16} />{item}</li>)}</ul></section>
+		</div>
+		<div className="recovery-checklist"><h3>Redacted recovery checklist</h3><ol>{recovery.checklist.map((item) => <li key={item}>{item}</li>)}</ol></div>
+	  </> : <p className="empty-state">Recovery guidance is unavailable until hub diagnostics load.</p>}
     </section>
   );
+}
+
+function LifecyclePanel() {
+	const guides = [
+		{ title: "Windows agent", badge: "Task Scheduler", text: "Runs invisibly in the signed-in user's context. Repair by rerunning the installer script; re-enroll only when the local identity is lost or revoked.", command: "haven-agent doctor" },
+		{ title: "Linux agent", badge: "systemd user timer", text: "Reports from a user timer without granting the agent root access. Repair the unit and timer before replacing a valid enrolled identity.", command: "haven-agent doctor" },
+		{ title: "Hub", badge: "Container service", text: "Treat the complete private state directory as one continuity unit. Rebuild the image from source; never commit deployment secrets or state.", command: "haven-hub doctor" },
+		{ title: "Desktop client", badge: "Optional workstation", text: "The Electron shell is a convenience client for one trusted workstation, not a hub or monitoring agent. Reinstalling it does not affect hub data.", command: "No enrollment required" },
+	];
+	return <section className="panel lifecycle-panel" aria-labelledby="lifecycle-title"><PanelHeading eyebrow="INSTALL · REPAIR · RE-ENROLL" title="Lifecycle guide" id="lifecycle-title" icon={<UpdateIcon />} accent="blue">Use the least disruptive recovery step that matches the failed layer</PanelHeading><div className="lifecycle-grid">{guides.map((guide) => <article key={guide.title}><div><h3>{guide.title}</h3><StatusChip label={guide.badge} tone="configured" /></div><p>{guide.text}</p><code>{guide.command}</code></article>)}</div><p className="footnote">Doctor commands are read-only and intentionally do not repair services, rotate certificates, create enrollments, contact third parties, or print private configuration values.</p></section>;
+}
+
+function SystemRecoveryPage({ diagnostics, devices, desktopVersion, desktopInstallStatus, installDesktopApp, demoMode, notificationStatus, alertsSupported, alertsEnabled, actionBusy, enableAlerts, disableAlerts, passkeys, addOwnerPasskey, removeOwnerPasskey, runtime }: { diagnostics: SystemDiagnostics | null; devices: DeviceRecord[]; desktopVersion: string | null; desktopInstallStatus: DesktopInstallStatus; installDesktopApp: () => Promise<void>; demoMode: boolean; notificationStatus: PushNotificationStatus | null; alertsSupported: boolean; alertsEnabled: boolean; actionBusy: boolean; enableAlerts: (label: string) => void; disableAlerts: () => void; passkeys: PasskeyInfo[]; addOwnerPasskey: () => void; removeOwnerPasskey: (passkey: PasskeyInfo) => void; runtime: RuntimeStatus | null }) {
+	return <>
+		<PageIntro eyebrow="OPERATIONS AND CONTINUITY" title="System & Recovery">Verify how HAVEN is running, understand what a backup preserves, and choose the least disruptive repair path.</PageIntro>
+		<SystemDiagnosticsPanel diagnostics={diagnostics} devices={devices} desktopVersion={desktopVersion} />
+		<RecoveryModelPanel diagnostics={diagnostics} />
+		<LifecyclePanel />
+		<DesktopInstallPanel status={desktopInstallStatus} install={installDesktopApp} />
+		{!demoMode ? <><NotificationPanel status={notificationStatus} supported={alertsSupported} enabled={alertsEnabled} busy={actionBusy} enable={enableAlerts} disable={disableAlerts} /><PasskeyPanel passkeys={passkeys} add={addOwnerPasskey} remove={removeOwnerPasskey} busy={actionBusy} /></> : <p className="demo-banner" role="status">Authentication and notification settings are unavailable in synthetic demo mode.</p>}
+		<section className="panel about-panel" aria-labelledby="about-title"><PanelHeading eyebrow="APPLICATION" title="About HAVEN" id="about-title" icon={<HavenIcon />} accent="green">Private, explainable security visibility</PanelHeading><dl className="details-grid"><div><dt>Version</dt><dd>{runtime?.version || "development"}</dd></div><div><dt>Revision</dt><dd>{runtime?.revision && runtime.revision !== "development" ? runtime.revision.slice(0, 12) : "development"}</dd></div><div><dt>Collection</dt><dd>Read-only by default</dd></div><div><dt>Storage</dt><dd>Private SQLite hub</dd></div></dl></section>
+	</>;
 }
 
 function ActionCenter({ actions, audit, capabilities, run, busy }: { actions: SecurityAction[]; audit: AuditEvent[]; capabilities: ActionCapability[]; run: (kind: SecurityActionKind) => void; busy: boolean }) {
@@ -707,22 +767,19 @@ function ActionCenter({ actions, audit, capabilities, run, busy }: { actions: Se
   );
 }
 
-function AwaitingAgents({ devices, runtime, passkeys, actions, audit, error, selectDevice, addOwnerPasskey, removeOwnerPasskey, actionBusy, signOut }: { devices: DeviceRecord[]; runtime: RuntimeStatus | null; passkeys: PasskeyInfo[]; actions: SecurityAction[]; audit: AuditEvent[]; error: string | null; selectDevice: (id: string) => void; addOwnerPasskey: () => void; removeOwnerPasskey: (passkey: PasskeyInfo) => void; actionBusy: boolean; signOut: () => void }) {
+function AwaitingAgents({ devices, runtime, diagnostics, notificationStatus, passkeys, actions, audit, error, selectDevice, addOwnerPasskey, removeOwnerPasskey, actionBusy, signOut, alertsSupported, alertsEnabled, enableAlerts, disableAlerts, desktopInstallStatus, desktopVersion, installDesktopApp, route, navigate }: { devices: DeviceRecord[]; runtime: RuntimeStatus | null; diagnostics: SystemDiagnostics | null; notificationStatus: PushNotificationStatus | null; passkeys: PasskeyInfo[]; actions: SecurityAction[]; audit: AuditEvent[]; error: string | null; selectDevice: (id: string) => void; addOwnerPasskey: () => void; removeOwnerPasskey: (passkey: PasskeyInfo) => void; actionBusy: boolean; signOut: () => void; alertsSupported: boolean; alertsEnabled: boolean; enableAlerts: (label: string) => void; disableAlerts: () => void; desktopInstallStatus: DesktopInstallStatus; desktopVersion: string | null; installDesktopApp: () => Promise<void>; route: AppRoute; navigate: (route: AppRoute) => void }) {
   const awaiting = devices.some((device) => device.status === "awaiting-first-report");
+	const settings = route.page === "settings";
+	useEffect(() => { document.title = isStandaloneApp() ? (settings ? "System & Recovery" : "Devices") : `${settings ? "System & Recovery" : "Devices"} — HAVEN`; }, [settings]);
+	const follow = (event: React.MouseEvent<HTMLAnchorElement>, next: AppRoute) => { if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return; event.preventDefault(); navigate(next); };
   return <>
     <header className="topbar">
-      <a className="brand" href="/" aria-label="HAVEN home"><span className="brand-mark"><HavenIcon /></span><span><strong>HAVEN</strong><small>Personal Security Observatory</small></span></a>
+	  <a className="brand" href="/devices" aria-label="HAVEN home" onClick={(event) => follow(event, { page: "devices" })}><span className="brand-mark"><HavenIcon /></span><span><strong>HAVEN</strong><small>Personal Security Observatory</small></span></a>
+	  <nav className="app-navigation" aria-label="Setup navigation"><a href="/devices" aria-current={!settings ? "page" : undefined} onClick={(event) => follow(event, { page: "devices" })}><DevicesIcon />Devices</a><a href="/settings" aria-current={settings ? "page" : undefined} onClick={(event) => follow(event, { page: "settings" })}><SettingsIcon />System</a></nav>
       <div className="topbar-actions"><span className="local-pill" aria-label="Hub ready"><span className="local-dot" /><span className="local-label">Hub ready</span></span><button className="signout-button" type="button" onClick={signOut} aria-label="Lock HAVEN" title="Lock HAVEN"><LockIcon size={15} /><span className="topbar-action-label">Lock</span></button></div>
     </header>
     <main>
-      <DeviceInventory devices={devices} selectedId="" select={selectDevice} demoMode={false} />
-      {error && <p className="inline-error" role="alert">{error}</p>}
-      <section className="panel awaiting-panel">
-        <PanelHeading eyebrow="NATIVE AGENTS" title={awaiting ? "Waiting for the first observation" : "No endpoints are enrolled yet"} id="awaiting-title" icon={<DevicesIcon />} accent="cyan">The production hub stores and explains observations; native agents collect them from each operating system</PanelHeading>
-        <div className="activity-empty"><strong>{awaiting ? "An enrolled agent has not reported yet." : "The hub is healthy and ready for its first trusted endpoint."}</strong><span>Once an enrolled endpoint reports, its verified protection, firewall, baseline, and connection signals will appear here. Container identities are never treated as household devices.</span></div>
-      </section>
-      <PasskeyPanel passkeys={passkeys} add={addOwnerPasskey} remove={removeOwnerPasskey} busy={actionBusy} />
-      <ActionCenter actions={actions} audit={audit} capabilities={runtime?.actionCapabilities || []} run={() => undefined} busy={actionBusy} />
+	  {settings ? <SystemRecoveryPage diagnostics={diagnostics} devices={devices} desktopVersion={desktopVersion} desktopInstallStatus={desktopInstallStatus} installDesktopApp={installDesktopApp} demoMode={false} notificationStatus={notificationStatus} alertsSupported={alertsSupported} alertsEnabled={alertsEnabled} actionBusy={actionBusy} enableAlerts={enableAlerts} disableAlerts={disableAlerts} passkeys={passkeys} addOwnerPasskey={addOwnerPasskey} removeOwnerPasskey={removeOwnerPasskey} runtime={runtime} /> : <><PageIntro eyebrow="TRUSTED INVENTORY" title="Devices">Enroll a native endpoint, then wait for its first authenticated observation.</PageIntro><DeviceInventory devices={devices} selectedId="" select={selectDevice} demoMode={false} />{error && <p className="inline-error" role="alert">{error}</p>}<section className="panel awaiting-panel"><PanelHeading eyebrow="NATIVE AGENTS" title={awaiting ? "Waiting for the first observation" : "No endpoints are enrolled yet"} id="awaiting-title" icon={<DevicesIcon />} accent="cyan">The production hub stores and explains observations; native agents collect them from each operating system</PanelHeading><div className="activity-empty"><strong>{awaiting ? "An enrolled agent has not reported yet." : "The hub is healthy and ready for its first trusted endpoint."}</strong><span>Once an enrolled endpoint reports, its verified protection, firewall, baseline, and connection signals will appear here. Container identities are never treated as household devices.</span></div></section><PasskeyPanel passkeys={passkeys} add={addOwnerPasskey} remove={removeOwnerPasskey} busy={actionBusy} /><ActionCenter actions={actions} audit={audit} capabilities={runtime?.actionCapabilities || []} run={() => undefined} busy={actionBusy} /></>}
     </main>
     <footer><span>HAVEN {runtime?.version || "development"} · Agent enrollment</span><span>Observe continuously. Act deliberately.</span></footer>
   </>;
@@ -799,6 +856,7 @@ interface ApplicationProps {
 	networkEvents: SecurityEvent[];
 	alerts: HavenAlert[];
 	runtime: RuntimeStatus | null;
+	diagnostics: SystemDiagnostics | null;
 	notificationStatus: PushNotificationStatus | null;
 	selectedDevice: DeviceRecord | null;
 	selectDevice: (id: string) => void;
@@ -820,6 +878,7 @@ interface ApplicationProps {
 	accountProfiles: AccountProfile[];
 	accountUnlocked: boolean;
 	desktopInstallStatus: DesktopInstallStatus;
+	desktopVersion: string | null;
 	installDesktopApp: () => Promise<void>;
 	reviewFinding: (finding: SecurityFinding, state: FindingReviewState) => void;
 	classifyBrowserSite: (review: BrowserSiteReviewInput) => void;
@@ -840,7 +899,7 @@ interface ApplicationProps {
 	navigate: (route: AppRoute) => void;
 }
 
-function Application({ snapshot, devices, networkDevices, appliances, events, networkEvents, alerts, runtime, notificationStatus, selectedDevice, selectDevice, refresh, refreshing, error, demoMode, alertsEnabled, alertsSupported, enableAlerts, disableAlerts, reviews, browserSiteReviews, expectedServices, listenerObservations, audit, actions, passkeys, accountProfiles, accountUnlocked, desktopInstallStatus, installDesktopApp, reviewFinding, classifyBrowserSite, resetBrowserSite, saveServiceExpectation, saveServiceExpectations, removeServiceExpectation, runAction, addOwnerPasskey, removeOwnerPasskey, saveAccount, removeAccount, unlockAccounts, lockAccounts, actionBusy, signOut, route, navigate }: ApplicationProps) {
+function Application({ snapshot, devices, networkDevices, appliances, events, networkEvents, alerts, runtime, diagnostics, notificationStatus, selectedDevice, selectDevice, refresh, refreshing, error, demoMode, alertsEnabled, alertsSupported, enableAlerts, disableAlerts, reviews, browserSiteReviews, expectedServices, listenerObservations, audit, actions, passkeys, accountProfiles, accountUnlocked, desktopInstallStatus, desktopVersion, installDesktopApp, reviewFinding, classifyBrowserSite, resetBrowserSite, saveServiceExpectation, saveServiceExpectations, removeServiceExpectation, runAction, addOwnerPasskey, removeOwnerPasskey, saveAccount, removeAccount, unlockAccounts, lockAccounts, actionBusy, signOut, route, navigate }: ApplicationProps) {
   const isLinux = snapshot.linuxBaseline !== null || /linux|ubuntu/i.test(snapshot.device.operatingSystem);
   const defenderHealthy = snapshot.defender?.antivirusEnabled === true
     && snapshot.defender.realTimeProtectionEnabled === true
@@ -858,7 +917,7 @@ function Application({ snapshot, devices, networkDevices, appliances, events, ne
 	const deviceSection: DeviceSection = route.page === "device" ? route.section || "overview" : "overview";
 	const browserPageTitle = route.page === "device"
 		? selectedDevice?.displayName || snapshot.device.hostName
-		: route.page === "overview" ? "Overview" : `${route.page.charAt(0).toUpperCase()}${route.page.slice(1)}`;
+		: route.page === "overview" ? "Overview" : route.page === "settings" ? "System & Recovery" : `${route.page.charAt(0).toUpperCase()}${route.page.slice(1)}`;
 	useEffect(() => {
 		document.title = isStandaloneApp() ? browserPageTitle : `${browserPageTitle} — HAVEN`;
 	}, [browserPageTitle]);
@@ -899,7 +958,7 @@ function Application({ snapshot, devices, networkDevices, appliances, events, ne
 	} else if (route.page === "activity") {
 		page = <><PageIntro eyebrow="EVENTS AND DECISIONS" title="Activity">Finding transitions, deliberate control requests, and privacy-bounded owner decisions.</PageIntro><ActivityPanel events={networkEvents} alerts={alerts} />{!demoMode && <ActionCenter actions={actions} audit={audit} capabilities={runtime?.actionCapabilities || []} run={runAction} busy={actionBusy} />}</>;
 	} else if (route.page === "settings") {
-		page = <><PageIntro eyebrow="OWNER ACCESS" title="Settings">Manage installation, recovery boundaries, this browser's alert destination, and the passkeys that protect HAVEN.</PageIntro><DesktopInstallPanel status={desktopInstallStatus} install={installDesktopApp} /><RecoveryModelPanel />{!demoMode ? <><NotificationPanel status={notificationStatus} supported={alertsSupported} enabled={alertsEnabled} busy={actionBusy} enable={enableAlerts} disable={disableAlerts} /><PasskeyPanel passkeys={passkeys} add={addOwnerPasskey} remove={removeOwnerPasskey} busy={actionBusy} /></> : <p className="demo-banner" role="status">Authentication and notification settings are unavailable in synthetic demo mode.</p>}<section className="panel about-panel" aria-labelledby="about-title"><PanelHeading eyebrow="APPLICATION" title="About HAVEN" id="about-title" icon={<HavenIcon />} accent="green">Private, explainable security visibility</PanelHeading><dl className="details-grid"><div><dt>Version</dt><dd>{runtime?.version || "development"}</dd></div><div><dt>Revision</dt><dd>{runtime?.revision && runtime.revision !== "development" ? runtime.revision.slice(0, 12) : "development"}</dd></div><div><dt>Collection</dt><dd>Read-only by default</dd></div><div><dt>Storage</dt><dd>Private SQLite hub</dd></div></dl></section></>;
+		page = <SystemRecoveryPage diagnostics={diagnostics} devices={devices} desktopVersion={desktopVersion} desktopInstallStatus={desktopInstallStatus} installDesktopApp={installDesktopApp} demoMode={demoMode} notificationStatus={notificationStatus} alertsSupported={alertsSupported} alertsEnabled={alertsEnabled} actionBusy={actionBusy} enableAlerts={enableAlerts} disableAlerts={disableAlerts} passkeys={passkeys} addOwnerPasskey={addOwnerPasskey} removeOwnerPasskey={removeOwnerPasskey} runtime={runtime} />;
 	} else {
 		page = <>
 			<div className="device-page-heading"><a href="/devices" onClick={(event) => { if (event.button === 0 && !event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey) { event.preventDefault(); navigate({ page: "devices" }); } }}>← All devices</a><DeviceNavigation deviceId={selectedDeviceId} current={deviceSection} navigate={navigate} /></div>
@@ -954,6 +1013,7 @@ export function App() {
   const [accountProfiles, setAccountProfiles] = useState<AccountProfile[]>([]);
   const [accountAccess, setAccountAccess] = useState<AccountAccessGrant | null>(null);
   const [runtime, setRuntime] = useState<RuntimeStatus | null>(null);
+	const [diagnostics, setDiagnostics] = useState<SystemDiagnostics | null>(null);
   const [notificationStatus, setNotificationStatus] = useState<PushNotificationStatus | null>(null);
   const [selectedId, setSelectedId] = useState(route.deviceId || "");
   const [demoMode, setDemoMode] = useState(false);
@@ -978,7 +1038,7 @@ export function App() {
   const refresh = useCallback(async (signal?: AbortSignal) => {
     setRefreshing(true);
     try {
-		const [initialInventory, runtimeStatus, activity, activeAlerts, pushStatus, managedAppliances] = await Promise.all([listDevices(signal), getRuntimeStatus(signal), listEvents(undefined, signal), listAlerts(signal), getNotificationStatus(signal), listManagedAppliances(signal)]);
+		const [initialInventory, runtimeStatus, diagnosticReport, activity, activeAlerts, pushStatus, managedAppliances] = await Promise.all([listDevices(signal), getRuntimeStatus(signal), getSystemDiagnostics(signal), listEvents(undefined, signal), listAlerts(signal), getNotificationStatus(signal), listManagedAppliances(signal)]);
 		let accounts: AccountProfile[] | null = null;
 		try {
 			if (runtimeStatus.demoMode) accounts = await listAccountProfiles("", signal);
@@ -1006,6 +1066,7 @@ export function App() {
       setEvents(activity);
       setCurrentAlerts(activeAlerts);
       setRuntime(runtimeStatus);
+		setDiagnostics(diagnosticReport);
       setNotificationStatus(pushStatus);
 		if (accounts !== null) setAccountProfiles(accounts);
       setDemoMode(runtimeStatus.demoMode);
@@ -1463,7 +1524,7 @@ export function App() {
     const controller = new AbortController();
     const poll = async () => {
       try {
-		const [inventory, runtimeStatus, activity, activeAlerts, pushStatus, managedAppliances] = await Promise.all([listDevices(controller.signal), getRuntimeStatus(controller.signal), listEvents(undefined, controller.signal), listAlerts(controller.signal), getNotificationStatus(controller.signal), listManagedAppliances(controller.signal)]);
+		const [inventory, runtimeStatus, diagnosticReport, activity, activeAlerts, pushStatus, managedAppliances] = await Promise.all([listDevices(controller.signal), getRuntimeStatus(controller.signal), getSystemDiagnostics(controller.signal), listEvents(undefined, controller.signal), listAlerts(controller.signal), getNotificationStatus(controller.signal), listManagedAppliances(controller.signal)]);
         let observed: { id: string; snapshot: SecuritySnapshot } | null;
         if (runtimeStatus.demoMode || runtimeStatus.localCollection) {
           const latest = await getLatestSnapshot(controller.signal);
@@ -1478,6 +1539,7 @@ export function App() {
         setEvents(activity);
         setCurrentAlerts(activeAlerts);
         setRuntime(runtimeStatus);
+		setDiagnostics(diagnosticReport);
         setNotificationStatus(pushStatus);
         setDemoMode(runtimeStatus.demoMode);
         setSnapshot(observed?.snapshot || null);
@@ -1512,10 +1574,10 @@ export function App() {
   }
 
   if (!snapshot) {
-    return <AwaitingAgents devices={devices} runtime={runtime} passkeys={passkeys} actions={actions} audit={audit} error={error} selectDevice={(id) => void selectDevice(id)} addOwnerPasskey={() => void addOwnerPasskey()} removeOwnerPasskey={(passkey) => void removeOwnerPasskey(passkey)} actionBusy={actionBusy} signOut={() => void signOut()} />;
+    return <AwaitingAgents devices={devices} runtime={runtime} diagnostics={diagnostics} notificationStatus={notificationStatus} passkeys={passkeys} actions={actions} audit={audit} error={error} selectDevice={(id) => void selectDevice(id)} addOwnerPasskey={() => void addOwnerPasskey()} removeOwnerPasskey={(passkey) => void removeOwnerPasskey(passkey)} actionBusy={actionBusy} signOut={() => void signOut()} alertsSupported={alertsSupported} alertsEnabled={alertsEnabled} enableAlerts={(label) => void enableAlerts(label)} disableAlerts={() => void disableAlerts()} desktopInstallStatus={desktopInstall.status} desktopVersion={desktopInstall.nativeVersion} installDesktopApp={async () => { try { await desktopInstall.install(); setError(null); } catch (reason) { setError(reason instanceof Error ? reason.message : "HAVEN could not open the browser installation prompt."); } }} route={route} navigate={navigate} />;
   }
 
   const selectedDevice = devices.find((device) => device.id === selectedId) || null;
   const selectedEvents = selectedId ? events.filter((event) => event.deviceId === selectedId) : events;
-	return <Application snapshot={snapshot} devices={devices} networkDevices={networkDevices} appliances={appliances} events={selectedEvents} networkEvents={events} alerts={currentAlerts} runtime={runtime} notificationStatus={notificationStatus} selectedDevice={selectedDevice} selectDevice={(id) => void selectDevice(id)} refresh={() => void refreshView()} refreshing={refreshing} error={error} demoMode={demoMode} alertsEnabled={alertsEnabled} alertsSupported={alertsSupported} enableAlerts={(label) => void enableAlerts(label)} disableAlerts={() => void disableAlerts()} reviews={reviews} browserSiteReviews={browserSiteReviews} expectedServices={expectedServices} listenerObservations={listenerObservations} audit={audit} actions={actions} passkeys={passkeys} accountProfiles={accountProfiles} accountUnlocked={demoMode || accountAccess !== null} desktopInstallStatus={desktopInstall.status} installDesktopApp={async () => { try { await desktopInstall.install(); setError(null); } catch (reason) { setError(reason instanceof Error ? reason.message : "HAVEN could not open the browser installation prompt."); } }} reviewFinding={(finding, state) => void reviewFinding(finding, state)} classifyBrowserSite={(review) => void classifyBrowserSite(review)} resetBrowserSite={(review) => void resetBrowserSite(review)} saveServiceExpectation={(service) => void saveServiceExpectation(service)} saveServiceExpectations={(services) => void saveServiceBaseline(services)} removeServiceExpectation={(service) => void removeServiceExpectation(service)} runAction={(kind) => void runAction(kind)} addOwnerPasskey={() => void addOwnerPasskey()} removeOwnerPasskey={(passkey) => void removeOwnerPasskey(passkey)} saveAccount={saveAccount} removeAccount={(profile) => void removeAccount(profile)} unlockAccounts={() => void unlockAccounts()} lockAccounts={() => void lockAccounts()} actionBusy={actionBusy} signOut={() => void signOut()} route={route} navigate={navigate} />;
+	return <Application snapshot={snapshot} devices={devices} networkDevices={networkDevices} appliances={appliances} events={selectedEvents} networkEvents={events} alerts={currentAlerts} runtime={runtime} diagnostics={diagnostics} notificationStatus={notificationStatus} selectedDevice={selectedDevice} selectDevice={(id) => void selectDevice(id)} refresh={() => void refreshView()} refreshing={refreshing} error={error} demoMode={demoMode} alertsEnabled={alertsEnabled} alertsSupported={alertsSupported} enableAlerts={(label) => void enableAlerts(label)} disableAlerts={() => void disableAlerts()} reviews={reviews} browserSiteReviews={browserSiteReviews} expectedServices={expectedServices} listenerObservations={listenerObservations} audit={audit} actions={actions} passkeys={passkeys} accountProfiles={accountProfiles} accountUnlocked={demoMode || accountAccess !== null} desktopInstallStatus={desktopInstall.status} desktopVersion={desktopInstall.nativeVersion} installDesktopApp={async () => { try { await desktopInstall.install(); setError(null); } catch (reason) { setError(reason instanceof Error ? reason.message : "HAVEN could not open the browser installation prompt."); } }} reviewFinding={(finding, state) => void reviewFinding(finding, state)} classifyBrowserSite={(review) => void classifyBrowserSite(review)} resetBrowserSite={(review) => void resetBrowserSite(review)} saveServiceExpectation={(service) => void saveServiceExpectation(service)} saveServiceExpectations={(services) => void saveServiceBaseline(services)} removeServiceExpectation={(service) => void removeServiceExpectation(service)} runAction={(kind) => void runAction(kind)} addOwnerPasskey={() => void addOwnerPasskey()} removeOwnerPasskey={(passkey) => void removeOwnerPasskey(passkey)} saveAccount={saveAccount} removeAccount={(profile) => void removeAccount(profile)} unlockAccounts={() => void unlockAccounts()} lockAccounts={() => void lockAccounts()} actionBusy={actionBusy} signOut={() => void signOut()} route={route} navigate={navigate} />;
 }

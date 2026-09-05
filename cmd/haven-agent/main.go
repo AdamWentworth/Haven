@@ -11,10 +11,12 @@ import (
 	"os/signal"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/AdamWentworth/haven/internal/agent"
 	"github.com/AdamWentworth/haven/internal/buildinfo"
 	"github.com/AdamWentworth/haven/internal/collector"
+	"github.com/AdamWentworth/haven/internal/diagnostic"
 	"github.com/AdamWentworth/haven/internal/workload"
 )
 
@@ -35,6 +37,34 @@ func main() {
 
 func run(ctx context.Context, command string, arguments []string) error {
 	switch command {
+	case "doctor":
+		flags := flag.NewFlagSet("doctor", flag.ContinueOnError)
+		jsonOutput := flags.Bool("json", false, "write machine-readable JSON")
+		if err := flags.Parse(arguments); err != nil {
+			return err
+		}
+		if flags.NArg() != 0 {
+			return errors.New("usage: haven-agent doctor [--json]")
+		}
+		directory, err := agent.DefaultDirectory()
+		if err != nil {
+			return err
+		}
+		report := diagnostic.Agent(ctx, directory, defaultInstallation(), time.Now().UTC())
+		if *jsonOutput {
+			contents, err := diagnostic.JSON(report)
+			if err != nil {
+				return err
+			}
+			fmt.Println(string(contents))
+		} else {
+			fmt.Print(diagnostic.Text(report))
+		}
+		if report.Status == "not-ready" {
+			return errors.New("HAVEN agent doctor found one or more failed checks")
+		}
+		return nil
+
 	case "collect":
 		return writeJSON(collector.NewForCurrentPlatform().Collect(ctx))
 
@@ -124,7 +154,7 @@ func run(ctx context.Context, command string, arguments []string) error {
 	case "version":
 		return writeJSON(map[string]string{"version": buildinfo.Version, "revision": buildinfo.Revision})
 	default:
-		return errors.New("usage: haven-agent [collect | enroll | export-docker-inventory | report | status | version]")
+		return errors.New("usage: haven-agent [collect | doctor | enroll | export-docker-inventory | report | status | version]")
 	}
 }
 

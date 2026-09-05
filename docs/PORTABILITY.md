@@ -55,6 +55,23 @@ A clean reinitialization requires no private backup. It intentionally loses hist
 
 For a personal pre-release deployment, the clean-start drill above is the more useful portability test. A destructive restore rehearsal should wait until HAVEN has a dedicated, versioned export manifest and an isolated test environment; it should never be improvised against the live household hub.
 
+## Read-only diagnostics
+
+Milestone 0.24 makes the recovery model inspectable without adding an automated repair surface:
+
+```powershell
+haven-hub doctor
+haven-hub doctor --json
+haven-agent doctor
+haven-agent doctor --json
+```
+
+The hub command verifies that the configured state directory and SQLite header are readable, the protected owner-material manifest is complete, the hub authority and server certificate chain are valid, the owner origin is HTTPS, and both listeners are structurally configured. When the hub is already running, the System & Recovery page uses its existing database connection for a stronger readiness probe. The offline CLI deliberately does not open the application store because doing so could create a database or apply migrations.
+
+The agent command verifies its existing configuration, client certificate chain, locally recorded accepted-report sequence, and packaged installation identity. It does not contact the hub, submit a report, create a directory, enroll, repair a scheduler, or rotate a certificate. A failed check produces a non-zero exit after all results are printed; an advisory identifies a bounded follow-up such as an identity nearing expiry.
+
+Both formats include the same fixed redacted recovery checklist. Output never includes actual paths, hostnames, addresses, device IDs, account details, certificate contents, or secret values. The dashboard report is authenticated and sent with `Cache-Control: no-store`.
+
 ## Desktop origin configuration
 
 The Electron application remains pinned to one exact HTTPS origin. The origin is selected when the installer is built, not from an environment variable when the installed app launches:

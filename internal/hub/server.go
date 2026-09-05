@@ -22,6 +22,7 @@ import (
 	"github.com/AdamWentworth/haven/internal/browserreview"
 	"github.com/AdamWentworth/haven/internal/buildinfo"
 	"github.com/AdamWentworth/haven/internal/collector"
+	"github.com/AdamWentworth/haven/internal/diagnostic"
 	"github.com/AdamWentworth/haven/internal/fleet"
 	"github.com/AdamWentworth/haven/internal/model"
 	"github.com/AdamWentworth/haven/internal/notification"
@@ -44,6 +45,7 @@ type Server struct {
 	appliances      *appliance.Monitor
 	accounts        *account.Service
 	browserReviews  *browserreview.Service
+	diagnostics     func(context.Context) diagnostic.Report
 
 	collectionMutex sync.Mutex
 	latestMutex     sync.RWMutex
@@ -90,6 +92,10 @@ func WithBrowserSiteReviews(service *browserreview.Service) ServerOption {
 	return func(server *Server) { server.browserReviews = service }
 }
 
+func WithDiagnostics(provider func(context.Context) diagnostic.Report) ServerOption {
+	return func(server *Server) { server.diagnostics = provider }
+}
+
 func NewServer(
 	securityCollector collector.Collector,
 	store *storage.Store,
@@ -116,6 +122,7 @@ func (server *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/health", server.health)
 	server.registerAuthenticationRoutes(mux)
 	mux.Handle("GET /api/runtime", server.protected(http.HandlerFunc(server.runtimeStatus)))
+	mux.Handle("GET /api/diagnostics", server.protected(http.HandlerFunc(server.systemDiagnostics)))
 	mux.Handle("POST /api/security/snapshot", server.mutating(http.HandlerFunc(server.securitySnapshot)))
 	mux.Handle("GET /api/security/latest", server.protected(http.HandlerFunc(server.latestSecuritySnapshot)))
 	mux.Handle("GET /api/devices", server.protected(http.HandlerFunc(server.devices)))
@@ -148,6 +155,15 @@ func (server *Server) Handler() http.Handler {
 	mux.Handle("POST /api/browser-site-reviews/remove", server.mutating(http.HandlerFunc(server.removeBrowserSiteReview)))
 	mux.HandleFunc("/", server.webApplication)
 	return server.securityHeaders(mux)
+}
+
+func (server *Server) systemDiagnostics(writer http.ResponseWriter, request *http.Request) {
+	writer.Header().Set("Cache-Control", "no-store")
+	if server.diagnostics == nil {
+		http.Error(writer, "system diagnostics are unavailable", http.StatusServiceUnavailable)
+		return
+	}
+	server.writeJSON(writer, http.StatusOK, server.diagnostics(request.Context()))
 }
 
 func (server *Server) managedAppliances(writer http.ResponseWriter, request *http.Request) {

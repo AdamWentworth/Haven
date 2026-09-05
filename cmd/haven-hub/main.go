@@ -25,6 +25,7 @@ import (
 	"github.com/AdamWentworth/haven/internal/authn"
 	"github.com/AdamWentworth/haven/internal/browserreview"
 	"github.com/AdamWentworth/haven/internal/collector"
+	"github.com/AdamWentworth/haven/internal/diagnostic"
 	"github.com/AdamWentworth/haven/internal/hub"
 	"github.com/AdamWentworth/haven/internal/notification"
 	"github.com/AdamWentworth/haven/internal/storage"
@@ -64,6 +65,33 @@ func runCommand(command string, arguments []string) (bool, error) {
 	defer cancel()
 
 	switch command {
+	case "doctor":
+		flags := flag.NewFlagSet("doctor", flag.ContinueOnError)
+		jsonOutput := flags.Bool("json", false, "write machine-readable JSON")
+		if err := flags.Parse(arguments); err != nil {
+			return true, err
+		}
+		if flags.NArg() != 0 {
+			return true, errors.New("usage: haven-hub doctor [--json]")
+		}
+		report, err := offlineHubDiagnostics(ctx)
+		if err != nil {
+			return true, err
+		}
+		if *jsonOutput {
+			contents, err := diagnostic.JSON(report)
+			if err != nil {
+				return true, err
+			}
+			fmt.Println(string(contents))
+		} else {
+			fmt.Print(diagnostic.Text(report))
+		}
+		if report.Status == "not-ready" {
+			return true, errors.New("HAVEN hub doctor found one or more failed checks")
+		}
+		return true, nil
+
 	case "auth":
 		if len(arguments) == 0 || arguments[0] != "bootstrap" {
 			return true, errors.New("usage: haven-hub auth bootstrap [--valid-for 10m]")
@@ -229,10 +257,57 @@ func openStore(ctx context.Context) (*storage.Store, error) {
 	return storage.Open(ctx, dataPath)
 }
 
+func offlineHubDiagnostics(ctx context.Context) (diagnostic.Report, error) {
+	stateDirectory, err := storage.DefaultStateDirectory()
+	if err != nil {
+		return diagnostic.Report{}, err
+	}
+	dataPath, err := storage.DefaultPath()
+	if err != nil {
+		return diagnostic.Report{}, err
+	}
+	demoMode, err := configuredBoolean("HAVEN_DEMO_MODE")
+	if err != nil {
+		return diagnostic.Report{}, err
+	}
+	localCollection, err := configuredBooleanWithDefault("HAVEN_LOCAL_COLLECTION_ENABLED", true)
+	if err != nil {
+		return diagnostic.Report{}, err
+	}
+	uiAddress := configuredAddress("HAVEN_LISTEN_ADDRESS", "127.0.0.1:5080")
+	agentAddress := configuredAddress("HAVEN_AGENT_LISTEN_ADDRESS", "127.0.0.1:5443")
+	agentServerNames, err := configuredAgentServerNames()
+	if err != nil {
+		return diagnostic.Report{}, err
+	}
+	publicOrigin := ""
+	if !demoMode {
+		publicOrigin, err = configuredPublicOrigin(uiAddress)
+		if err != nil {
+			return diagnostic.Report{}, err
+		}
+	}
+	managedAppliances := 0
+	managedApplianceError := false
+	if configurationPath := strings.TrimSpace(os.Getenv("HAVEN_MANAGED_APPLIANCES_FILE")); configurationPath != "" {
+		definitions, loadErr := appliance.LoadDefinitions(configurationPath)
+		if loadErr != nil {
+			managedApplianceError = true
+		} else {
+			managedAppliances = len(definitions)
+		}
+	}
+	return diagnostic.Hub(ctx, diagnostic.HubOptions{StateDirectory: stateDirectory, DataPath: dataPath, PublicOrigin: publicOrigin, DashboardAddress: uiAddress, AgentAddress: agentAddress, AgentServerNames: agentServerNames, Production: !demoMode, LocalCollection: localCollection, ManagedAppliances: managedAppliances, ManagedApplianceError: managedApplianceError}), nil
+}
+
 func run(logger *slog.Logger) error {
 	startupContext, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	store, err := openStore(startupContext)
+	dataPath, err := storage.DefaultPath()
+	if err != nil {
+		return err
+	}
+	store, err := storage.Open(startupContext, dataPath)
 	if err != nil {
 		return err
 	}
@@ -279,6 +354,7 @@ func run(logger *slog.Logger) error {
 		return err
 	}
 	var managedApplianceMonitor *appliance.Monitor
+	managedAppliances := 0
 	if configurationPath := strings.TrimSpace(os.Getenv("HAVEN_MANAGED_APPLIANCES_FILE")); configurationPath != "" {
 		definitions, err := appliance.LoadDefinitions(configurationPath)
 		if err != nil {
@@ -288,12 +364,14 @@ func run(logger *slog.Logger) error {
 		if err != nil {
 			return err
 		}
+		managedAppliances = len(definitions)
 		logger.Info("credential-free managed-appliance monitoring configured", "appliances", len(definitions), "interval", collectionInterval.String())
 	}
 
 	uiAddress := configuredAddress("HAVEN_LISTEN_ADDRESS", "127.0.0.1:5080")
 	agentAddress := configuredAddress("HAVEN_AGENT_LISTEN_ADDRESS", "127.0.0.1:5443")
 	serverOptions := []hub.ServerOption{hub.WithLocalCollection(localCollection), hub.WithAlertProjector(alert.NewProjector(store))}
+	publicOrigin := ""
 	if managedApplianceMonitor != nil {
 		serverOptions = append(serverOptions, hub.WithManagedAppliances(managedApplianceMonitor))
 	}
@@ -301,7 +379,7 @@ func run(logger *slog.Logger) error {
 		serverOptions = append(serverOptions, hub.WithDemoMode())
 		logger.Info("synthetic demo mode enabled")
 	} else {
-		publicOrigin, err := configuredPublicOrigin(uiAddress)
+		publicOrigin, err = configuredPublicOrigin(uiAddress)
 		if err != nil {
 			return err
 		}
@@ -332,6 +410,13 @@ func run(logger *slog.Logger) error {
 		}
 		logger.Info("passkey authentication enabled", "origin", publicOrigin)
 	}
+	diagnosticOptions := diagnostic.HubOptions{StateDirectory: stateDirectory, DataPath: dataPath, PublicOrigin: publicOrigin, DashboardAddress: uiAddress, AgentAddress: agentAddress, AgentServerNames: agentServerNames, Production: !demoMode, LocalCollection: localCollection, ManagedAppliances: managedAppliances}
+	serverOptions = append(serverOptions, hub.WithDiagnostics(func(ctx context.Context) diagnostic.Report {
+		options := diagnosticOptions
+		options.Now = time.Now().UTC()
+		options.StoreProbe = store.Ping
+		return diagnostic.Hub(ctx, options)
+	}))
 	dashboard := hub.NewServer(collector.NewForCurrentPlatform(), store, logger, webFiles, serverOptions...)
 	uiServer := hardenedServer(uiAddress, dashboard.Handler())
 	agentServer := hardenedServer(agentAddress, hub.NewAgentServer(store, pki, logger).Handler())

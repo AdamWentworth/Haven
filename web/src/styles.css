@@ -753,6 +753,44 @@ tbody tr:hover { background: rgba(115, 226, 167, .035); }
 .state { color: var(--blue); }
 .footnote { margin: .8rem 0 0; font-size: .72rem; }
 .empty-state { padding: 1.5rem 0; color: var(--muted); text-align: center; }
+.diagnostic-release-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: .7rem; margin: 1rem 0; }
+.diagnostic-release-grid > div { display: grid; gap: .28rem; min-width: 0; padding: .85rem; border: 1px solid var(--line); border-radius: .72rem; background: rgba(255, 255, 255, .018); }
+.diagnostic-release-grid span { color: var(--muted); font-size: .75rem; letter-spacing: .06em; text-transform: uppercase; }
+.diagnostic-release-grid strong { overflow: hidden; color: #e6f2eb; font-size: 1.05rem; text-overflow: ellipsis; }
+.diagnostic-release-grid small { color: var(--muted); font-size: .75rem; line-height: 1.4; }
+.diagnostic-check-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .7rem; }
+.diagnostic-check { min-width: 0; padding: .9rem; border: 1px solid var(--line); border-left: 3px solid var(--green); border-radius: .75rem; background: rgba(0, 0, 0, .1); }
+.diagnostic-check.diagnostic-configured { border-left-color: var(--blue); }
+.diagnostic-check.diagnostic-warning { border-left-color: var(--amber); }
+.diagnostic-check.diagnostic-fail { border-left-color: var(--danger); }
+.diagnostic-check > div { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: .6rem; }
+.diagnostic-state-icon { display: grid; width: 2rem; height: 2rem; place-items: center; border-radius: .58rem; color: var(--green); background: rgba(115, 226, 167, .07); }
+.diagnostic-warning .diagnostic-state-icon { color: var(--amber); background: rgba(244, 191, 103, .07); }
+.diagnostic-fail .diagnostic-state-icon { color: var(--danger); background: rgba(255, 117, 122, .07); }
+.diagnostic-check small, .diagnostic-check strong { display: block; }
+.diagnostic-check small { margin-bottom: .16rem; color: var(--muted); font-size: .75rem; letter-spacing: .06em; text-transform: uppercase; }
+.diagnostic-check strong { color: #e3eee8; font-size: .875rem; }
+.diagnostic-check > p { margin: .7rem 0 0; color: #bdcdc4; font-size: .8125rem; line-height: 1.52; }
+.diagnostic-check aside { margin-top: .65rem; padding-top: .65rem; border-top: 1px solid var(--line); color: var(--muted); font-size: .75rem; line-height: 1.5; }
+.diagnostic-check aside strong { display: inline; margin-right: .35rem; color: var(--cyan); font-size: inherit; }
+.recovery-principle { max-width: 900px; margin: 1rem 0; color: #c8d7cf; font-size: .8125rem; line-height: 1.6; }
+.recovery-boundaries { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .8rem; }
+.recovery-boundaries > section, .recovery-checklist { padding: 1rem; border: 1px solid var(--line); border-radius: .8rem; background: rgba(255, 255, 255, .018); }
+.recovery-boundaries h3, .recovery-checklist h3 { margin: 0 0 .75rem; color: #e3eee8; font-size: .875rem; }
+.recovery-boundaries ul { display: grid; gap: .6rem; margin: 0; padding: 0; list-style: none; }
+.recovery-boundaries li { display: grid; grid-template-columns: auto 1fr; align-items: start; gap: .48rem; color: #bdcdc4; font-size: .8125rem; line-height: 1.48; }
+.recovery-boundaries li svg { margin-top: .12rem; color: var(--green); }
+.recovery-boundaries > section:last-child li svg { color: var(--cyan); }
+.recovery-checklist { margin-top: .8rem; }
+.recovery-checklist ol { display: grid; gap: .5rem; margin: 0; padding-left: 1.3rem; }
+.recovery-checklist li { padding-left: .3rem; color: #bdcdc4; font-size: .8125rem; line-height: 1.48; }
+.recovery-checklist li::marker { color: var(--cyan); font-weight: 700; }
+.lifecycle-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .7rem; margin-top: 1rem; }
+.lifecycle-grid article { min-width: 0; padding: .9rem; border: 1px solid var(--line); border-radius: .75rem; background: rgba(0, 0, 0, .1); }
+.lifecycle-grid article > div { display: flex; align-items: center; justify-content: space-between; gap: .6rem; }
+.lifecycle-grid h3 { margin: 0; color: #e3eee8; font-size: .875rem; }
+.lifecycle-grid p { margin: .65rem 0; color: #bdcdc4; font-size: .8125rem; line-height: 1.5; }
+.lifecycle-grid code { display: inline-block; padding: .32rem .46rem; border: 1px solid rgba(111, 216, 229, .18); border-radius: .45rem; color: var(--cyan); background: rgba(111, 216, 229, .04); font-size: .75rem; user-select: all; }
 .notices-panel { border-color: rgba(244, 191, 103, .25); }
 .notices-list { display: grid; gap: .6rem; margin: 1rem 0 0; padding: 0; list-style: none; }
 .notice { padding: .8rem .9rem; border-radius: .7rem; color: #e9d3ae; background: rgba(244, 191, 103, .07); font-size: .82rem; }
@@ -831,7 +869,9 @@ th, .process-id, .protocol, .footnote, footer { font-size: .75rem; }
   .device-navigation a { flex: 0 0 auto; }
   .hero { align-items: start; flex-direction: column; padding-top: 3rem; }
   .collection-time { text-align: left; }
-	.summary-grid, .details-grid, .profile-grid, .baseline-grid, .action-grid, .action-history-grid, .service-grid, .workload-grid, .expectation-form, .baseline-suggestion-list, .network-metrics, .network-alert-list, .network-overview-columns, .network-flow-list, .notification-destinations, .appliance-grid, .fleet-metrics, .account-grid, .account-form-grid, .account-session-controls, .account-session-checks, .account-session-review ul, .browser-grid, .browser-protections > div, .browser-hardening-grid, .incident-card ol { grid-template-columns: 1fr; }
+	.summary-grid, .details-grid, .profile-grid, .baseline-grid, .action-grid, .action-history-grid, .service-grid, .workload-grid, .expectation-form, .baseline-suggestion-list, .network-metrics, .network-alert-list, .network-overview-columns, .network-flow-list, .notification-destinations, .appliance-grid, .fleet-metrics, .account-grid, .account-form-grid, .account-session-controls, .account-session-checks, .account-session-review ul, .browser-grid, .browser-protections > div, .browser-hardening-grid, .incident-card ol, .diagnostic-release-grid, .diagnostic-check-grid, .recovery-boundaries, .lifecycle-grid { grid-template-columns: 1fr; }
+	.diagnostic-check > div { grid-template-columns: auto minmax(0, 1fr); }
+	.diagnostic-check .status-chip { grid-column: 2; width: fit-content; }
 	.browser-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 	.account-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 	.account-summary .section-heading { align-items: flex-start; flex-direction: column; }

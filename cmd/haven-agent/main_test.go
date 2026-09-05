@@ -1,6 +1,9 @@
 package main
 
 import (
+	"context"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/AdamWentworth/haven/internal/buildinfo"
@@ -21,5 +24,16 @@ func TestDefaultInstallationRecognizesSystemdInvocation(t *testing.T) {
 	buildinfo.AgentInstallation = "interactive"
 	if got := defaultInstallation(); got != "interactive" {
 		t.Fatalf("expected interactive installation, got %q", got)
+	}
+}
+
+func TestDoctorDoesNotEnrollOrCreateAgentState(t *testing.T) {
+	directory := filepath.Join(t.TempDir(), "absent-agent")
+	t.Setenv("HAVEN_AGENT_STATE_DIRECTORY", directory)
+	if err := run(context.Background(), "doctor", nil); err == nil {
+		t.Fatal("an absent identity must make doctor return a failed status")
+	}
+	if _, err := os.Stat(directory); !os.IsNotExist(err) {
+		t.Fatalf("doctor must not initialize or enroll an agent, stat error = %v", err)
 	}
 }

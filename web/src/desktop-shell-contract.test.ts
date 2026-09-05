@@ -25,7 +25,7 @@ describe("native desktop shell contract", () => {
 	});
 
 	it("pins dependencies and hardens the packaged desktop boundary", () => {
-		expect(manifest.version).toBe("0.23.0");
+		expect(manifest.version).toBe("0.24.0");
 		expect(manifest.build.files).toContain("build/origin.cjs");
 		expect(manifest.devDependencies.electron).toMatch(/^\d+\.\d+\.\d+$/);
 		expect(manifest.devDependencies["@electron/fuses"]).toMatch(/^\d+\.\d+\.\d+$/);

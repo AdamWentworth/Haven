@@ -1,4 +1,4 @@
-import type { AccountAccessGrant, AccountProfile, AccountProfileInput, AuditEvent, AuthStatus, BrowserSiteReview, BrowserSiteReviewInput, BrowserSiteReviewKey, DeviceDetail, DeviceRecord, ExpectedService, ExpectedServiceInput, FindingReview, FindingReviewState, HavenAlert, ManagedApplianceStatus, ObservedListener, PasskeyInfo, PushDestination, PushNotificationStatus, RuntimeStatus, SecurityAction, SecurityActionKind, SecurityEvent, SecuritySnapshot } from "./types";
+import type { AccountAccessGrant, AccountProfile, AccountProfileInput, AuditEvent, AuthStatus, BrowserSiteReview, BrowserSiteReviewInput, BrowserSiteReviewKey, DeviceDetail, DeviceRecord, ExpectedService, ExpectedServiceInput, FindingReview, FindingReviewState, HavenAlert, ManagedApplianceStatus, ObservedListener, PasskeyInfo, PushDestination, PushNotificationStatus, RuntimeStatus, SecurityAction, SecurityActionKind, SecurityEvent, SecuritySnapshot, SystemDiagnostics } from "./types";
 import type { SerializedPushSubscription } from "./push";
 
 export class HavenAPIError extends Error {
@@ -91,6 +91,8 @@ export const saveBrowserSiteReview = (review: BrowserSiteReviewInput) => postJSO
 export const removeBrowserSiteReview = (review: BrowserSiteReviewKey) => postJSON<void>("/api/browser-site-reviews/remove", review);
 
 export const getRuntimeStatus = (signal?: AbortSignal) => getJSON<RuntimeStatus>("/api/runtime", signal);
+
+export const getSystemDiagnostics = (signal?: AbortSignal) => getJSON<SystemDiagnostics>("/api/diagnostics", signal);
 
 export const listEvents = (deviceId?: string, signal?: AbortSignal) => {
   const query = new URLSearchParams({ limit: "60" });
