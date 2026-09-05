@@ -1,0 +1,61 @@
+{
+  "name": "haven-desktop",
+  "productName": "HAVEN",
+  "version": "0.17.0",
+  "private": true,
+  "description": "Native, isolated desktop client for the HAVEN personal security observatory",
+  "author": "Adam Wentworth",
+  "license": "MIT",
+  "main": "main.cjs",
+  "scripts": {
+    "start": "electron .",
+    "check": "node --check main.cjs && node --check security.cjs",
+    "test": "node --test",
+    "dist:windows": "electron-builder --win nsis --x64",
+    "verify:fuses": "node verify-fuses.cjs"
+  },
+  "devDependencies": {
+    "@electron/fuses": "2.1.3",
+    "electron": "44.2.0",
+    "electron-builder": "26.15.3"
+  },
+  "build": {
+    "appId": "com.adamwentworth.haven",
+    "productName": "HAVEN",
+    "artifactName": "HAVEN-${version}-${arch}-Setup.${ext}",
+    "asar": true,
+    "compression": "maximum",
+    "files": [
+      "main.cjs",
+      "security.cjs",
+      "build/icon.png",
+      "package.json"
+    ],
+    "directories": {
+      "buildResources": "build",
+      "output": "dist"
+    },
+    "win": {
+      "target": "nsis",
+      "icon": "build/icon.png"
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "shortcutName": "HAVEN"
+    },
+    "electronFuses": {
+      "runAsNode": false,
+      "enableCookieEncryption": true,
+      "enableNodeOptionsEnvironmentVariable": false,
+      "enableNodeCliInspectArguments": false,
+      "enableEmbeddedAsarIntegrityValidation": true,
+      "onlyLoadAppFromAsar": true,
+      "loadBrowserProcessSpecificV8Snapshot": false,
+      "grantFileProtocolExtraPrivileges": false
+    }
+  }
+}

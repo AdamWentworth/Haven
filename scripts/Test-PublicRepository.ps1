@@ -28,7 +28,7 @@ try {
     )
 
     $textExtensions = @(
-        '', '.css', '.dockerignore', '.go', '.gitignore', '.html', '.js',
+        '', '.cjs', '.css', '.dockerignore', '.go', '.gitignore', '.html', '.js',
         '.json', '.md', '.ps1', '.sh', '.toml', '.ts', '.tsx', '.txt',
         '.xml', '.yaml', '.yml'
     )
@@ -94,8 +94,13 @@ try {
 			# the email check; every other secret and address check still sees the
 			# original line.
 			$emailCheckLine = $line -replace '(?i)\b[A-Z0-9_.-]+@[A-Z0-9_.:-]+\.(?:service|socket)\b', ''
+			# npm lockfiles can reproduce third-party package deprecation messages
+			# containing maintainer addresses. Continue every credential, token, IP,
+			# and path check, but do not treat upstream metadata as HAVEN user data.
+			$isDependencyLock = $relativePath -match '(?i)(?:^|/)package-lock\.json$'
 
             foreach ($check in $checks) {
+				if ($isDependencyLock -and $check.Name -eq 'non-example email address') { continue }
 				$checkedLine = if ($check.Name -eq 'non-example email address') { $emailCheckLine } else { $line }
 				if ($checkedLine -match $check.Pattern) {
                     $findings.Add("$relativePath`:$lineNumber`: $($check.Name)")

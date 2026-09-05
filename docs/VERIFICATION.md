@@ -20,6 +20,8 @@ HAVEN treats security statements as testable claims. A green test does not prove
 | The account notebook has no secret-ingestion contract | Strict profile schema and bounded free text | API tests reject unknown password fields and recognizable authenticator setup links; UI tests require a prominent no-secrets warning and verify there is no password-value input |
 | Structured review facts do not weaken the secret boundary | Bounded encrypted review-detail lines | Go validation tests reject recognizable secret formats and duplicate facts; ciphertext tests require both review facts and context notes to remain absent from raw storage |
 | Provider branding does not create a tracking request | Locally bundled icon paths plus a local monogram fallback | Rendered UI tests require the known-provider SVG mark; the implementation contains no remote logo URL |
+| The native dashboard cannot invoke local Node, filesystem, shell, or arbitrary IPC capabilities | Sandboxed Electron renderer with no preload bridge | Desktop and frontend contract tests require Node integration off, context isolation and sandboxing on, no preload/IPC/shell API, exact-origin navigation, denied popups, and explicit permission handling |
+| Packaged desktop protections match the documented boundary | Electron executable fuse table | CI builds the Windows package and reads the produced executable, requiring Node launch and injection fuses disabled plus encrypted cookies, embedded-ASAR integrity, and ASAR-only loading enabled |
 | Installing HAVEN does not create a second trust boundary | Same-origin standalone manifest plus the existing service worker | Manifest contract tests require root-scoped same-origin launch paths and local icons; hook tests require the browser-owned install event before offering installation |
 | Installability does not create an authenticated offline cache | Push-only service worker | Contract tests reject a fetch handler or Cache API use, while service-worker registration tests require no notification-permission call |
 | Account guidance follows only owner-recorded facts | Deterministic checklist projection | Go tests pin suggestions for disabled two-step verification, reused passwords, missing recovery, missing backup-code readiness, weak-only factors, unknown fields, and stale reviews without producing threat alerts |
@@ -68,6 +70,15 @@ npm ci
 npm run test:coverage
 npm run build
 npm audit --audit-level=high
+Set-Location ..
+
+Set-Location .\desktop
+npm ci
+npm test
+npm run check
+npm audit --audit-level=high
+npm run dist:windows
+npm run verify:fuses
 Set-Location ..
 
 pwsh -NoProfile -File .\scripts\Test-PublicRepository.ps1

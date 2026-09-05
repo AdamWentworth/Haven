@@ -95,6 +95,9 @@ describe("HAVEN routed console", () => {
 
 		expect(await screen.findByRole("heading", { name: "Home security overview" })).toBeInTheDocument();
 		expect(screen.queryByRole("heading", { name: "Owner passkeys" })).not.toBeInTheDocument();
+		expect(screen.getByLabelText("Agent hub")).toBeInTheDocument();
+		expect(screen.getByRole("button", { name: "Refresh HAVEN view" })).toBeInTheDocument();
+		expect(screen.getByRole("button", { name: "Lock HAVEN" })).toBeInTheDocument();
 
 		await user.click(screen.getByRole("link", { name: "Devices" }));
 		expect(await screen.findByRole("heading", { name: "Devices", level: 1 })).toBeInTheDocument();
