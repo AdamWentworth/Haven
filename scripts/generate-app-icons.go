@@ -22,8 +22,10 @@ type renderOptions struct {
 	scale float64
 }
 
-var outerShield = smoothOuterShield()
-var innerShield = smoothInnerShield()
+var outerShield = havenOuterShield()
+var outlineShield = havenOutlineShield()
+var innerShield = havenInnerShield()
+var monogram = havenMonogram()
 
 func main() {
 	check := flag.Bool("check", false, "verify committed icons match the deterministic generator")
@@ -76,10 +78,8 @@ func render(size int, options renderOptions) *image.NRGBA {
 	}
 	large := size * samples
 	canvas := image.NewNRGBA(image.Rect(0, 0, size, size))
-	background := color.RGBA{8, 16, 13, 255}
-	shieldFill := color.RGBA{16, 37, 29, 255}
-	green := color.RGBA{115, 226, 167, 255}
-	pale := color.RGBA{223, 245, 232, 255}
+	background := color.RGBA{6, 18, 25, 255}
+	outline := color.RGBA{224, 255, 248, 255}
 	for y := 0; y < size; y++ {
 		for x := 0; x < size; x++ {
 			var premultiplied [3]int
@@ -95,15 +95,16 @@ func render(size int, options renderOptions) *image.NRGBA {
 						shade = background
 					}
 					if insidePolygon(point{px, py}, outerShield) {
-						shade = green
+						shade = diagonalGradient(px, py, color.RGBA{4, 220, 139, 255}, color.RGBA{5, 181, 220, 255})
+					}
+					if insidePolygon(point{px, py}, outlineShield) {
+						shade = outline
 					}
 					if insidePolygon(point{px, py}, innerShield) {
-						shade = shieldFill
+						shade = verticalGradient(py, 66, 438, color.RGBA{7, 25, 36, 255}, color.RGBA{5, 34, 46, 255})
 					}
-					if insideRoundedRect(point{px, py}, 7.6, 7.1, 2.35, 9.8, .7) ||
-						insideRoundedRect(point{px, py}, 14.05, 7.1, 2.35, 9.8, .7) ||
-						insideRoundedRect(point{px, py}, 9.25, 10.9, 5.5, 2.2, 1.1) {
-						shade = pale
+					if insidePolygon(point{px, py}, monogram) {
+						shade = verticalGradient(py, 122, 390, color.RGBA{86, 235, 164, 255}, color.RGBA{15, 207, 224, 255})
 					}
 					premultiplied[0] += int(shade.R) * int(shade.A)
 					premultiplied[1] += int(shade.G) * int(shade.A)
@@ -188,6 +189,22 @@ func iconPoint(x, y float64) point {
 	return point{x * 512 / 24, y * 512 / 24}
 }
 
+func interpolate(start, end color.RGBA, amount float64) color.RGBA {
+	amount = max(0, min(amount, 1))
+	mix := func(left, right uint8) uint8 {
+		return uint8(float64(left) + (float64(right)-float64(left))*amount + .5)
+	}
+	return color.RGBA{R: mix(start.R, end.R), G: mix(start.G, end.G), B: mix(start.B, end.B), A: mix(start.A, end.A)}
+}
+
+func verticalGradient(y, startY, endY float64, start, end color.RGBA) color.RGBA {
+	return interpolate(start, end, (y-startY)/(endY-startY))
+}
+
+func diagonalGradient(x, y float64, start, end color.RGBA) color.RGBA {
+	return interpolate(start, end, .35*x/512+.65*y/512)
+}
+
 func appendQuadratic(values []point, control, end point) []point {
 	start := values[len(values)-1]
 	for step := 1; step <= 24; step++ {
@@ -214,45 +231,56 @@ func appendCubic(values []point, firstControl, secondControl, end point) []point
 	return values
 }
 
-func smoothOuterShield() []point {
-	values := []point{iconPoint(11.35, 1.93)}
-	values = appendQuadratic(values, iconPoint(12, 1.67), iconPoint(12.65, 1.93))
-	values = append(values, iconPoint(20.03, 4.92))
-	values = appendQuadratic(values, iconPoint(20.55, 5.13), iconPoint(20.55, 5.69))
-	values = append(values, iconPoint(20.55, 11.41))
-	values = appendCubic(values, iconPoint(20.55, 16.24), iconPoint(17.47, 19.82), iconPoint(12.55, 21.59))
-	values = appendQuadratic(values, iconPoint(12, 21.79), iconPoint(11.45, 21.59))
-	values = appendCubic(values, iconPoint(6.53, 19.82), iconPoint(3.45, 16.24), iconPoint(3.45, 11.41))
-	values = append(values, iconPoint(3.45, 5.69))
-	values = appendQuadratic(values, iconPoint(3.45, 5.13), iconPoint(3.97, 4.92))
-	return append(values, iconPoint(11.35, 1.93))
+func havenOuterShield() []point {
+	values := []point{iconPoint(12, 1.7)}
+	values = appendCubic(values, iconPoint(10.6, 2.85), iconPoint(8.4, 4.05), iconPoint(4.1, 5.12))
+	values = appendCubic(values, iconPoint(3.7, 5.22), iconPoint(3.48, 5.58), iconPoint(3.48, 6.02))
+	values = append(values, iconPoint(3.48, 10.4))
+	values = appendCubic(values, iconPoint(3.48, 15.6), iconPoint(6.35, 19.25), iconPoint(11.58, 21.58))
+	values = appendQuadratic(values, iconPoint(12, 21.77), iconPoint(12.42, 21.58))
+	values = appendCubic(values, iconPoint(17.65, 19.25), iconPoint(20.52, 15.6), iconPoint(20.52, 10.4))
+	values = append(values, iconPoint(20.52, 6.02))
+	values = appendCubic(values, iconPoint(20.52, 5.58), iconPoint(20.3, 5.22), iconPoint(19.9, 5.12))
+	values = appendCubic(values, iconPoint(15.6, 4.05), iconPoint(13.4, 2.85), iconPoint(12, 1.7))
+	return values
 }
 
-func smoothInnerShield() []point {
-	values := []point{iconPoint(11.56, 3.63)}
-	values = appendQuadratic(values, iconPoint(12, 3.45), iconPoint(12.44, 3.63))
-	values = append(values, iconPoint(18.48, 6.08))
-	values = appendQuadratic(values, iconPoint(18.85, 6.23), iconPoint(18.85, 6.63))
-	values = append(values, iconPoint(18.85, 11.41))
-	values = appendCubic(values, iconPoint(18.85, 15.24), iconPoint(16.45, 18.15), iconPoint(12.37, 19.71))
-	values = appendQuadratic(values, iconPoint(12, 19.85), iconPoint(11.63, 19.71))
-	values = appendCubic(values, iconPoint(7.55, 18.15), iconPoint(5.15, 15.24), iconPoint(5.15, 11.41))
-	values = append(values, iconPoint(5.15, 6.63))
-	values = appendQuadratic(values, iconPoint(5.15, 6.23), iconPoint(5.52, 6.08))
-	return append(values, iconPoint(11.56, 3.63))
+func havenOutlineShield() []point {
+	values := []point{iconPoint(12, 2.9)}
+	values = appendCubic(values, iconPoint(10.85, 3.82), iconPoint(8.75, 4.85), iconPoint(5.05, 5.82))
+	values = appendCubic(values, iconPoint(4.75, 5.9), iconPoint(4.58, 6.17), iconPoint(4.58, 6.5))
+	values = append(values, iconPoint(4.58, 10.4))
+	values = appendCubic(values, iconPoint(4.58, 15.05), iconPoint(7.04, 18.22), iconPoint(11.62, 20.47))
+	values = appendQuadratic(values, iconPoint(12, 20.66), iconPoint(12.38, 20.47))
+	values = appendCubic(values, iconPoint(16.96, 18.22), iconPoint(19.42, 15.05), iconPoint(19.42, 10.4))
+	values = append(values, iconPoint(19.42, 6.5))
+	values = appendCubic(values, iconPoint(19.42, 6.17), iconPoint(19.25, 5.9), iconPoint(18.95, 5.82))
+	values = appendCubic(values, iconPoint(15.25, 4.85), iconPoint(13.15, 3.82), iconPoint(12, 2.9))
+	return values
 }
 
-func insideRoundedRect(value point, x, y, width, height, radius float64) bool {
-	x *= 512 / 24
-	y *= 512 / 24
-	width *= 512 / 24
-	height *= 512 / 24
-	radius *= 512 / 24
-	if value.x < x || value.x > x+width || value.y < y || value.y > y+height {
-		return false
+func havenInnerShield() []point {
+	values := []point{iconPoint(12, 3.14)}
+	values = appendCubic(values, iconPoint(10.88, 4.02), iconPoint(8.83, 5.02), iconPoint(5.29, 5.95))
+	values = appendCubic(values, iconPoint(5.07, 6.01), iconPoint(4.94, 6.21), iconPoint(4.94, 6.46))
+	values = append(values, iconPoint(4.94, 10.4))
+	values = appendCubic(values, iconPoint(4.94, 14.86), iconPoint(7.27, 17.88), iconPoint(11.68, 20.06))
+	values = appendQuadratic(values, iconPoint(12, 20.22), iconPoint(12.32, 20.06))
+	values = appendCubic(values, iconPoint(16.73, 17.88), iconPoint(19.06, 14.86), iconPoint(19.06, 10.4))
+	values = append(values, iconPoint(19.06, 6.46))
+	values = appendCubic(values, iconPoint(19.06, 6.21), iconPoint(18.93, 6.01), iconPoint(18.71, 5.95))
+	values = appendCubic(values, iconPoint(15.17, 5.02), iconPoint(13.12, 4.02), iconPoint(12, 3.14))
+	return values
+}
+
+func havenMonogram() []point {
+	return []point{
+		iconPoint(7.55, 7), iconPoint(9.45, 5.92), iconPoint(9.62, 6.02),
+		iconPoint(9.62, 10.25), iconPoint(14.38, 10.25), iconPoint(14.38, 6.02),
+		iconPoint(14.55, 5.92), iconPoint(16.45, 7), iconPoint(16.58, 7.25),
+		iconPoint(16.58, 16.55), iconPoint(16.45, 16.82), iconPoint(14.55, 18.22),
+		iconPoint(14.38, 18.45), iconPoint(14.38, 12.55), iconPoint(9.62, 12.55),
+		iconPoint(9.62, 18.45), iconPoint(9.45, 18.22), iconPoint(7.55, 16.82),
+		iconPoint(7.42, 16.55), iconPoint(7.42, 7.25), iconPoint(7.55, 7),
 	}
-	nearestX := max(x+radius, min(value.x, x+width-radius))
-	nearestY := max(y+radius, min(value.y, y+height-radius))
-	dx, dy := value.x-nearestX, value.y-nearestY
-	return dx*dx+dy*dy <= radius*radius
 }
