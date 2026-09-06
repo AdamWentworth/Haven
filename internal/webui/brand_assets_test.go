@@ -152,6 +152,7 @@ func TestCanonicalBrandMarkRetainsApprovedShieldAndMonogramPalette(t *testing.T)
 		"upper upright":     {180, 180, color.NRGBA{R: 70, G: 229, B: 177, A: 255}},
 		"monogram bridge":   {256, 240, color.NRGBA{R: 55, G: 223, B: 190, A: 255}},
 		"lower upright":     {320, 350, color.NRGBA{R: 25, G: 211, B: 215, A: 255}},
+		"lower H clearance": {320, 390, color.NRGBA{R: 5, G: 33, B: 45, A: 255}},
 	}
 	for label, sample := range want {
 		if got := nrgbaAt(standard, sample.x, sample.y); got != sample.color {
