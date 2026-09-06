@@ -278,9 +278,9 @@ func havenMonogram() []point {
 		iconPoint(7.55, 7), iconPoint(9.45, 5.92), iconPoint(9.62, 6.02),
 		iconPoint(9.62, 10.25), iconPoint(14.38, 10.25), iconPoint(14.38, 6.02),
 		iconPoint(14.55, 5.92), iconPoint(16.45, 7), iconPoint(16.58, 7.25),
-		iconPoint(16.58, 16.55), iconPoint(16.45, 16.82), iconPoint(14.55, 18.22),
-		iconPoint(14.38, 18.45), iconPoint(14.38, 12.55), iconPoint(9.62, 12.55),
-		iconPoint(9.62, 18.45), iconPoint(9.45, 18.22), iconPoint(7.55, 16.82),
-		iconPoint(7.42, 16.55), iconPoint(7.42, 7.25), iconPoint(7.55, 7),
+		iconPoint(16.58, 15.55), iconPoint(16.45, 15.82), iconPoint(14.55, 17.12),
+		iconPoint(14.38, 17.35), iconPoint(14.38, 12.55), iconPoint(9.62, 12.55),
+		iconPoint(9.62, 17.35), iconPoint(9.45, 17.12), iconPoint(7.55, 15.82),
+		iconPoint(7.42, 15.55), iconPoint(7.42, 7.25), iconPoint(7.55, 7),
 	}
 }
