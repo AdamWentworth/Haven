@@ -6,8 +6,8 @@
   "start_url": "/",
   "scope": "/",
   "display": "standalone",
-  "background_color": "#08100d",
-  "theme_color": "#08100d",
+  "background_color": "#061219",
+  "theme_color": "#061219",
   "categories": ["security", "utilities"],
   "icons": [
     {
