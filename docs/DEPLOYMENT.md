@@ -1,10 +1,10 @@
 # Hub deployment
 
-HAVEN's production hub runs in resource-bounded containers on the always-on Ubuntu application server. Development workstations continue to run the Go process directly; Docker is not required there.
+HAVEN's production hub is designed for a resource-bounded container on an always-on Linux host. Development workstations can run the Go process directly; Docker is not required there.
 
 ## Delivery model
 
-The public repository does not use a persistent self-hosted GitHub Actions runner. GitHub-hosted CI performs the tests and publishes one immutable GHCR image for each successful push to `main`. A separate private HomeOps repository owns the production runner, Compose model, DNS and TLS configuration, backup service, health checks, and rollback procedure. HAVEN sends only an allowlisted repository identity and full approved commit hash across that boundary.
+The public repository does not use a persistent self-hosted GitHub Actions runner. GitHub-hosted CI performs the tests and publishes one immutable GHCR image for each successful push to `main`. A private operations repository can own the production runner, Compose model, DNS and TLS configuration, backup service, health checks, and rollback procedure. HAVEN's reference deployment sends only an allowlisted repository identity and full approved commit hash across that boundary.
 
 The private workflow independently confirms that the hash is the current HAVEN `main` revision, pulls its commit-tagged image, and verifies the embedded revision label. Public repository workflow code never executes directly on the household server, and the hub container does not receive the Docker socket, host namespaces, devices, broad host mounts, or privileged mode.
 
@@ -36,12 +36,12 @@ Passkeys are bound to the exact private HTTPS origin. Choose the permanent hostn
 
 ## First installation
 
-Production templates and the runner workflow belong to private HomeOps. Real addresses and filesystem paths belong only in the server's untracked `.env` file.
+Production templates and runner authority belong to a private operations layer. Real addresses and filesystem paths belong only in host configuration or the server's untracked `.env` file.
 
 1. Allow GitHub-hosted HAVEN CI to verify and publish the commit-tagged hub image.
-2. Register the production runner only with the private HomeOps repository.
-3. Install HomeOps' untracked HAVEN environment on the server and create its data, TLS, and protected backup directories.
-4. Manually dispatch the first exact HAVEN `main` revision from HomeOps and verify the dashboard, DNS record, container limits, and backup timer.
+2. Register any production runner only with the private operations repository.
+3. Install the untracked HAVEN environment on the server and create its data, TLS, and protected backup directories.
+4. Manually dispatch the first exact HAVEN `main` revision from the private operations layer and verify the dashboard, DNS record, container limits, and backup timer.
 5. After the manual path is proven, enable the public CI workflow's narrowly scoped cross-repository dispatch credential.
 
 After the proxy generates its internal authority, install only its public root certificate in each owner's trust store. Never copy the authority private key to a client. Configure LAN clients—or the router's DHCP service—to use the private resolver. WireGuard client profiles can use the same resolver explicitly.
@@ -68,7 +68,7 @@ Endpoint agents run natively with the smallest privileges their collectors requi
 
 Every current report carries the reporter's public release, immutable source revision, platform, bounded installation kind, observed capabilities, and current collection-notice count. The hub first validates the observation schema. An accepted report from a different release is displayed as protocol compatible rather than as an update requirement; an exact build match remains stronger provenance. Milestone 0.18 reporters add an optional privacy-bounded browser-security object under observation schema 2; milestone 0.19 extends that object with fixed Chrome session-protection evidence and optional meaningful extension changes; milestone 0.20 adds bounded live-only Chrome profile and domain-level cookie metadata. Deploy the 0.20 hub before updating agents because older strict decoders do not recognize the profile field. The console-free Windows artifact embeds `windows-task` so an older scheduled task that still invokes plain `report` remains truthful after an in-place binary update; systemd invocations are recognized from systemd's own execution environment. Older reporters remain visible without newer optional evidence until deliberately updated; no hub process pushes or installs binaries on an endpoint.
 
-GitHub-hosted CI attaches a checksummed agent bundle to each verified commit for 30 days. The public Windows installer builds and stamps the current checkout, repairs an existing task in place, and preserves enrollment. Its status companion is read-only; its high-confirmation uninstaller preserves identity unless identity removal is separately requested. The Linux lifecycle script provides the corresponding source-based user-systemd workflow. Private HomeOps may instead extract the revision-matched Linux binary from the approved hub image, but it must retain the same systemd sandbox and verify the embedded revision before activation.
+GitHub-hosted CI attaches a checksummed agent bundle to each verified commit for 30 days. The public Windows installer builds and stamps the current checkout, repairs an existing task in place, and preserves enrollment. Its status companion is read-only; its high-confirmation uninstaller preserves identity unless identity removal is separately requested. The Linux lifecycle script provides the corresponding source-based user-systemd workflow. A private deployment workflow may instead extract the revision-matched Linux binary from the approved hub image, but it must retain the same systemd sandbox and verify the embedded revision before activation.
 
 Deploy the 0.20 hub before updating an endpoint binary. The newer hub accepts older reports without Chrome profile metadata, while an older strict decoder rejects the new profile field. No database migration is required because Chrome profile metadata exists only in the latest in-memory observation and is removed before historical persistence. After the hub readiness check succeeds, update reporters one endpoint at a time and require a current report before proceeding to the next device.
 
@@ -84,6 +84,6 @@ Each updated agent creates `browser-extension-baseline.json` inside its existing
 
 The public `packaging/systemd` definitions provide a generic, unprivileged Linux timer and a hardened one-shot reporting service. They contain no endpoint address, enrollment token, certificate, device identity, username, or private deployment path. Installers must create the per-user state directory before activation and enable lingering deliberately when reporting must continue without an interactive login.
 
-The Ubuntu application server runs a separate native agent even though it also hosts the hub container. Its stable host identity is independent from both the Linux login name and Docker's ephemeral container hostname. The private deployment extracts the CI-built agent from the same revision-pinned image, enrolls it once as `Ubuntu Application Server`, and schedules reports with the lingering user systemd manager. The reporting service starts without an interactive login, blocks both conventional Docker-socket paths, makes the home and system trees read-only, and writes only its dedicated identity directory.
+A Linux host should run a separate native agent even when it also hosts the hub container. Its stable enrolled identity is independent from both the Linux login name and Docker's ephemeral container hostname. A private deployment can extract the CI-built agent from the same revision-pinned image, enroll it once with an owner-selected label, and schedule reports with the lingering user systemd manager. The reporting service starts without an interactive login, blocks both conventional Docker-socket paths, makes the home and system trees read-only, and writes only its dedicated identity directory.
 
 Before each report, systemd starts a distinct one-shot Docker inventory exporter. Docker socket access is root-equivalent; this helper is intentionally short-lived, has only the Unix address family, and can write only the agent state directory. It queries the fixed running-container list endpoint and writes a sanitized mode-0600 inventory. The normal reporting service starts after it exits, validates the file, and correlates host listeners with published mappings. Environment variables, commands, mounts, arbitrary labels, logs, IDs, container network addresses, and Docker control operations are excluded. The hub removes this inventory before historical persistence.

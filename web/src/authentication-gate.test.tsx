@@ -30,9 +30,9 @@ describe("owner authentication gate", () => {
 		const user = userEvent.setup();
 		render(<AuthenticationGate status={{ configured: false, authenticated: false, origin: "https://haven.example.test", useConfiguredOrigin: false }} authenticate={authenticate} />);
 		await user.clear(screen.getByLabelText("Passkey label"));
-		await user.type(screen.getByLabelText("Passkey label"), " ADAM-PC ");
+		await user.type(screen.getByLabelText("Passkey label"), " DESK-WORKSTATION ");
 		await user.type(screen.getByLabelText("One-time enrollment code"), " enroll-code ");
 		await user.click(screen.getByRole("button", { name: "Create HAVEN passkey" }));
-		expect(authenticate).toHaveBeenCalledWith("enroll-code", "ADAM-PC");
+		expect(authenticate).toHaveBeenCalledWith("enroll-code", "DESK-WORKSTATION");
 	});
 });

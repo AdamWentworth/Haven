@@ -2,7 +2,7 @@
 
 ## Reporting a vulnerability
 
-Do not place exploit details, credentials, personal observations, or private infrastructure information in a public issue. Use GitHub private vulnerability reporting once the repository is published.
+Do not place exploit details, credentials, personal observations, or private infrastructure information in a public issue. Use [GitHub private vulnerability reporting](https://github.com/AdamWentworth/Haven/security/advisories/new).
 
 ## Supported versions
 

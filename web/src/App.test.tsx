@@ -181,7 +181,7 @@ describe("HAVEN routed console", () => {
 	it("runs NAS SSH health only after a clear owner confirmation", async () => {
 		const user = userEvent.setup();
 		const appliance: ManagedApplianceStatus = {
-			id: "tnas", displayName: "TNAS-98B9", kind: "nas", address: ["192", "168", "1", "69"].join("."), status: "healthy",
+			id: "example-nas", displayName: "Example NAS", kind: "nas", address: "192.0.2.69", status: "healthy",
 			configuredAt: "2026-09-04T08:00:00Z", lastCheckedAt: "2026-09-07T20:00:00Z", services: [],
 			health: {
 				provider: "terramaster-tos5", status: "healthy", deepCheckMode: "manual", deepCheckAvailable: true,
@@ -201,7 +201,7 @@ describe("HAVEN routed console", () => {
 		expect(screen.getByText(/runs only when requested/i)).toBeInTheDocument();
 		await user.click(button);
 		expect(window.confirm).toHaveBeenCalledWith(expect.stringContaining("may trigger the appliance's login notification"));
-		await waitFor(() => expect(api.runManagedApplianceDeepCheck).toHaveBeenCalledWith("tnas"));
+		await waitFor(() => expect(api.runManagedApplianceDeepCheck).toHaveBeenCalledWith("example-nas"));
 	});
 
 	it("opens the private account-security notebook as a dedicated workspace", async () => {

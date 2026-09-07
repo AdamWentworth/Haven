@@ -17,8 +17,11 @@ services:
       HAVEN_RETENTION_DAYS: "${HAVEN_RETENTION_DAYS:-90}"
       HAVEN_PUBLIC_ORIGIN: "${HAVEN_PUBLIC_ORIGIN:-http://localhost:5080}"
       HAVEN_LOCAL_COLLECTION_ENABLED: "false"
+      HAVEN_AGENT_LISTEN_ADDRESS: "0.0.0.0:5443"
+      HAVEN_AGENT_SERVER_NAMES: "${HAVEN_AGENT_SERVER_NAMES:-localhost}"
     ports:
       - "127.0.0.1:${HAVEN_PORT:-5080}:8080"
+      - "127.0.0.1:${HAVEN_AGENT_PORT:-5443}:5443"
     volumes:
       - haven-data:/var/lib/haven
 
