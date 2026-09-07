@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { HavenAPIError, addPasskey, collectSnapshot, getAuthStatus, getDevice, getLatestSnapshot, getNotificationStatus, getRuntimeStatus, getSystemDiagnostics, listAccountProfiles, listAlerts, listAuditEvents, listBrowserSiteReviews, listDevices, listEvents, listExpectedServices, listFindingReviews, listManagedAppliances, listObservedListeners, listPasskeys, listSecurityActions, lockAccountNotebook, loginWithPasskey, logout, registerPasskey, registerPushDestination, removeAccountProfile, removeBrowserSiteReview, removeExpectedService, removePasskey, removePushDestination, requestSecurityAction, saveAccountProfile, saveBrowserSiteReview, saveExpectedService, saveExpectedServices, saveFindingReview, touchAccountNotebook, unlockAccountNotebook } from "./api";
+import { HavenAPIError, addPasskey, collectSnapshot, getAuthStatus, getDevice, getLatestSnapshot, getNotificationStatus, getRuntimeStatus, getSystemDiagnostics, listAccountProfiles, listAlerts, listAuditEvents, listBrowserSiteReviews, listDevices, listEvents, listExpectedServices, listFindingReviews, listManagedAppliances, listObservedListeners, listPasskeys, listSecurityActions, lockAccountNotebook, loginWithPasskey, logout, registerPasskey, registerPushDestination, removeAccountProfile, removeBrowserSiteReview, removeExpectedService, removePasskey, removePushDestination, requestSecurityAction, runManagedApplianceDeepCheck, saveAccountProfile, saveBrowserSiteReview, saveExpectedService, saveExpectedServices, saveFindingReview, touchAccountNotebook, unlockAccountNotebook } from "./api";
 import { AccountNotebook } from "./account-notebook";
 import { suggestedBaseline } from "./baseline";
 import { AuthenticationGate } from "./authentication-gate";
@@ -247,7 +247,7 @@ function PanelHeading({
   );
 }
 
-function ApplianceHealthPanel({ health }: { health: ManagedHealthStatus }) {
+function ApplianceHealthPanel({ health, runDeepCheck, busy }: { health: ManagedHealthStatus; runDeepCheck?: () => void; busy?: boolean }) {
 	const coverage = [
 		["Disks + SMART", health.coverage.disks],
 		["Storage sets", health.coverage.raid],
@@ -257,7 +257,8 @@ function ApplianceHealthPanel({ health }: { health: ManagedHealthStatus }) {
 	] as const;
 	const systemTemperatures = health.temperatures.filter((temperature) => temperature.kind !== "disk");
 	return <section className="appliance-health" aria-label="Read-only NAS health">
-		<div className="appliance-health-heading"><div><strong>Storage health</strong><small>Read-only evidence · checked {formatRelativeTime(health.lastCheckedAt)}</small></div><StatusChip label={healthStatusLabel(health.status)} tone={managedHealthTone(health.status)} /></div>
+		<div className="appliance-health-heading"><div><strong>Storage health</strong><small>Latest health evidence checked {formatRelativeTime(health.lastCheckedAt)}</small></div><StatusChip label={healthStatusLabel(health.status)} tone={managedHealthTone(health.status)} /></div>
+		{health.deepCheckAvailable && <div className="appliance-deep-check"><span><strong>Deep disk health</strong><small>{health.lastDeepCheckedAt ? `Last checked ${formatRelativeTime(health.lastDeepCheckedAt)}` : "Not checked yet"} · runs only when requested</small></span><button type="button" onClick={runDeepCheck} disabled={busy}>{busy ? "Checking…" : "Run deep check"}</button></div>}
 		<div className="appliance-health-system">
 			<span><small>Model</small><strong>{health.system.model || "Not exposed"}</strong></span>
 			<span><small>Firmware</small><strong>{health.system.firmwareVersion || "Not exposed"}</strong></span>
@@ -279,7 +280,7 @@ function ApplianceHealthPanel({ health }: { health: ManagedHealthStatus }) {
 
 type NetworkView = "overview" | "network" | "appliances";
 
-function NetworkOverview({ devices, appliances, events, alerts, selectedId, selectDevice, demoMode, view }: { devices: NetworkDeviceObservation[]; appliances: ManagedApplianceStatus[]; events: SecurityEvent[]; alerts: HavenAlert[]; selectedId: string; selectDevice: (id: string) => void; demoMode: boolean; view: NetworkView }) {
+function NetworkOverview({ devices, appliances, events, alerts, selectedId, selectDevice, runApplianceDeepCheck, deepCheckBusy, demoMode, view }: { devices: NetworkDeviceObservation[]; appliances: ManagedApplianceStatus[]; events: SecurityEvent[]; alerts: HavenAlert[]; selectedId: string; selectDevice: (id: string) => void; runApplianceDeepCheck: (appliance: ManagedApplianceStatus) => void; deepCheckBusy: string | null; demoMode: boolean; view: NetworkView }) {
 	const summaries = useMemo(() => devices.map((entry) => {
 		const snapshot = entry.snapshot;
 		const listeners = logicalListeners(snapshot?.connections || []);
@@ -386,7 +387,7 @@ function NetworkOverview({ devices, appliances, events, alerts, selectedId, sele
 					const statusLabel = appliance.health ? healthStatusLabel(appliance.health.status) : appliance.status;
 					return <article className="appliance-card" key={appliance.id}>
 						<header><span className="device-icon"><ServerIcon /></span><span><strong>{appliance.displayName}</strong><small>{appliance.kind.toUpperCase()} · {appliance.address} · checked {formatRelativeTime(appliance.lastCheckedAt)}</small></span><StatusChip label={statusLabel} tone={tone} /></header>
-						{appliance.health && <ApplianceHealthPanel health={appliance.health} />}
+						{appliance.health && <ApplianceHealthPanel health={appliance.health} runDeepCheck={() => runApplianceDeepCheck(appliance)} busy={deepCheckBusy === appliance.id} />}
 						<ul>{appliance.services.map((service) => {
 							const serviceTone: Tone = service.reachable ? "healthy" : !service.lastCheckedAt ? "unknown" : service.required && service.consecutiveFailures >= 2 ? "attention" : "configured";
 							return <li key={service.id}><span><strong>{service.name}</strong><small>{service.protocol} {service.port}{service.tls ? " · TLS" : ""}{service.required ? " · required" : " · visibility only"}</small>{service.certificate && <small>Certificate valid until {formatDate(service.certificate.notAfter)} · {service.certificate.nameValid ? "address matches" : "address does not match certificate name"}</small>}</span><StatusChip label={service.reachable ? "reachable" : !service.lastCheckedAt ? "pending" : "not reached"} tone={serviceTone} /></li>;
@@ -893,13 +894,15 @@ interface ApplicationProps {
 	removeAccount: (profile: AccountProfile) => void;
 	unlockAccounts: () => void;
 	lockAccounts: () => void;
+	runApplianceDeepCheck: (appliance: ManagedApplianceStatus) => void;
+	deepCheckBusy: string | null;
 	actionBusy: boolean;
 	signOut: () => void;
 	route: AppRoute;
 	navigate: (route: AppRoute) => void;
 }
 
-function Application({ snapshot, devices, networkDevices, appliances, events, networkEvents, alerts, runtime, diagnostics, notificationStatus, selectedDevice, selectDevice, refresh, refreshing, error, demoMode, alertsEnabled, alertsSupported, enableAlerts, disableAlerts, reviews, browserSiteReviews, expectedServices, listenerObservations, audit, actions, passkeys, accountProfiles, accountUnlocked, desktopInstallStatus, desktopVersion, installDesktopApp, reviewFinding, classifyBrowserSite, resetBrowserSite, saveServiceExpectation, saveServiceExpectations, removeServiceExpectation, runAction, addOwnerPasskey, removeOwnerPasskey, saveAccount, removeAccount, unlockAccounts, lockAccounts, actionBusy, signOut, route, navigate }: ApplicationProps) {
+function Application({ snapshot, devices, networkDevices, appliances, events, networkEvents, alerts, runtime, diagnostics, notificationStatus, selectedDevice, selectDevice, refresh, refreshing, error, demoMode, alertsEnabled, alertsSupported, enableAlerts, disableAlerts, reviews, browserSiteReviews, expectedServices, listenerObservations, audit, actions, passkeys, accountProfiles, accountUnlocked, desktopInstallStatus, desktopVersion, installDesktopApp, reviewFinding, classifyBrowserSite, resetBrowserSite, saveServiceExpectation, saveServiceExpectations, removeServiceExpectation, runAction, addOwnerPasskey, removeOwnerPasskey, saveAccount, removeAccount, unlockAccounts, lockAccounts, runApplianceDeepCheck, deepCheckBusy, actionBusy, signOut, route, navigate }: ApplicationProps) {
   const isLinux = snapshot.linuxBaseline !== null || /linux|ubuntu/i.test(snapshot.device.operatingSystem);
   const defenderHealthy = snapshot.defender?.antivirusEnabled === true
     && snapshot.defender.realTimeProtectionEnabled === true
@@ -946,13 +949,13 @@ function Application({ snapshot, devices, networkDevices, appliances, events, ne
 
 	let page: React.ReactNode;
 	if (route.page === "overview") {
-		page = <><PageIntro eyebrow="PERSONAL SECURITY OBSERVATORY" title="Home security overview">Current alerts, coverage, and meaningful changes across trusted devices and explicitly configured appliances.</PageIntro><NetworkOverview devices={networkDevices} appliances={appliances} events={networkEvents} alerts={alerts} selectedId={selectedDeviceId} selectDevice={openDevice} demoMode={demoMode} view="overview" /></>;
+		page = <><PageIntro eyebrow="PERSONAL SECURITY OBSERVATORY" title="Home security overview">Current alerts, coverage, and meaningful changes across trusted devices and explicitly configured appliances.</PageIntro><NetworkOverview devices={networkDevices} appliances={appliances} events={networkEvents} alerts={alerts} selectedId={selectedDeviceId} selectDevice={openDevice} runApplianceDeepCheck={runApplianceDeepCheck} deepCheckBusy={deepCheckBusy} demoMode={demoMode} view="overview" /></>;
 	} else if (route.page === "devices") {
 		page = <><PageIntro eyebrow="TRUSTED INVENTORY" title="Devices">Choose an enrolled endpoint to inspect its posture and verify that its reporter is current, compatible, and collecting the expected evidence.</PageIntro><FleetPanel devices={devices} runtime={runtime} /><DeviceInventory devices={devices} selectedId={selectedDeviceId} select={openDevice} demoMode={demoMode} /></>;
 	} else if (route.page === "network") {
-		page = <><PageIntro eyebrow="LIVE OBSERVATION" title="Network">Current device coverage and relationship summaries without packet capture or retained remote endpoints.</PageIntro><NetworkOverview devices={networkDevices} appliances={appliances} events={networkEvents} alerts={alerts} selectedId={selectedDeviceId} selectDevice={openDevice} demoMode={demoMode} view="network" /></>;
+		page = <><PageIntro eyebrow="LIVE OBSERVATION" title="Network">Current device coverage and relationship summaries without packet capture or retained remote endpoints.</PageIntro><NetworkOverview devices={networkDevices} appliances={appliances} events={networkEvents} alerts={alerts} selectedId={selectedDeviceId} selectDevice={openDevice} runApplianceDeepCheck={runApplianceDeepCheck} deepCheckBusy={deepCheckBusy} demoMode={demoMode} view="network" /></>;
 	} else if (route.page === "appliances") {
-		page = <><PageIntro eyebrow="READ-ONLY HEALTH" title="Appliances">Bounded reachability and health evidence from devices explicitly configured by the owner.</PageIntro><NetworkOverview devices={networkDevices} appliances={appliances} events={networkEvents} alerts={alerts} selectedId={selectedDeviceId} selectDevice={openDevice} demoMode={demoMode} view="appliances" /></>;
+		page = <><PageIntro eyebrow="READ-ONLY HEALTH" title="Appliances">Bounded reachability and health evidence from devices explicitly configured by the owner.</PageIntro><NetworkOverview devices={networkDevices} appliances={appliances} events={networkEvents} alerts={alerts} selectedId={selectedDeviceId} selectDevice={openDevice} runApplianceDeepCheck={runApplianceDeepCheck} deepCheckBusy={deepCheckBusy} demoMode={demoMode} view="appliances" /></>;
 	} else if (route.page === "accounts") {
 		page = <><PageIntro eyebrow="IDENTITY AND RECOVERY" title="Accounts">An informal, encrypted notebook for the security measures you have confirmed directly at each provider.</PageIntro><AccountNotebook profiles={accountProfiles} demoMode={demoMode} unlocked={accountUnlocked} busy={actionBusy} unlock={unlockAccounts} lock={lockAccounts} save={saveAccount} remove={removeAccount} /></>;
 	} else if (route.page === "activity") {
@@ -1020,6 +1023,7 @@ export function App() {
   const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [actionBusy, setActionBusy] = useState(false);
+  const [deepCheckBusy, setDeepCheckBusy] = useState<string | null>(null);
   const [inventoryLoaded, setInventoryLoaded] = useState(false);
   const selectedIdRef = useRef(route.deviceId || "");
   const accountAccessRef = useRef<AccountAccessGrant | null>(null);
@@ -1278,6 +1282,21 @@ export function App() {
       setActionBusy(false);
     }
   }, [runtime?.actionCapabilities]);
+
+	const runApplianceDeepCheck = useCallback(async (appliance: ManagedApplianceStatus) => {
+		if (!window.confirm(`Run one read-only deep health check on “${appliance.displayName}”? This makes one pinned SSH login and may trigger the appliance's login notification.`)) return;
+		setDeepCheckBusy(appliance.id);
+		try {
+			const updated = await runManagedApplianceDeepCheck(appliance.id);
+			setAppliances((current) => current.map((item) => item.id === updated.id ? updated : item));
+			setAudit(await listAuditEvents());
+			setError(null);
+		} catch (reason) {
+			setError(reason instanceof Error ? reason.message : "The appliance deep check could not be completed.");
+		} finally {
+			setDeepCheckBusy(null);
+		}
+	}, []);
 
   const addOwnerPasskey = useCallback(async () => {
     const entered = window.prompt("Name this passkey so you can recognize it later (for example, Ubuntu laptop, iPhone, or security key).", "Another trusted device");
@@ -1579,5 +1598,5 @@ export function App() {
 
   const selectedDevice = devices.find((device) => device.id === selectedId) || null;
   const selectedEvents = selectedId ? events.filter((event) => event.deviceId === selectedId) : events;
-	return <Application snapshot={snapshot} devices={devices} networkDevices={networkDevices} appliances={appliances} events={selectedEvents} networkEvents={events} alerts={currentAlerts} runtime={runtime} diagnostics={diagnostics} notificationStatus={notificationStatus} selectedDevice={selectedDevice} selectDevice={(id) => void selectDevice(id)} refresh={() => void refreshView()} refreshing={refreshing} error={error} demoMode={demoMode} alertsEnabled={alertsEnabled} alertsSupported={alertsSupported} enableAlerts={(label) => void enableAlerts(label)} disableAlerts={() => void disableAlerts()} reviews={reviews} browserSiteReviews={browserSiteReviews} expectedServices={expectedServices} listenerObservations={listenerObservations} audit={audit} actions={actions} passkeys={passkeys} accountProfiles={accountProfiles} accountUnlocked={demoMode || accountAccess !== null} desktopInstallStatus={desktopInstall.status} desktopVersion={desktopInstall.nativeVersion} installDesktopApp={async () => { try { await desktopInstall.install(); setError(null); } catch (reason) { setError(reason instanceof Error ? reason.message : "HAVEN could not open the browser installation prompt."); } }} reviewFinding={(finding, state) => void reviewFinding(finding, state)} classifyBrowserSite={(review) => void classifyBrowserSite(review)} resetBrowserSite={(review) => void resetBrowserSite(review)} saveServiceExpectation={(service) => void saveServiceExpectation(service)} saveServiceExpectations={(services) => void saveServiceBaseline(services)} removeServiceExpectation={(service) => void removeServiceExpectation(service)} runAction={(kind) => void runAction(kind)} addOwnerPasskey={() => void addOwnerPasskey()} removeOwnerPasskey={(passkey) => void removeOwnerPasskey(passkey)} saveAccount={saveAccount} removeAccount={(profile) => void removeAccount(profile)} unlockAccounts={() => void unlockAccounts()} lockAccounts={() => void lockAccounts()} actionBusy={actionBusy} signOut={() => void signOut()} route={route} navigate={navigate} />;
+	return <Application snapshot={snapshot} devices={devices} networkDevices={networkDevices} appliances={appliances} events={selectedEvents} networkEvents={events} alerts={currentAlerts} runtime={runtime} diagnostics={diagnostics} notificationStatus={notificationStatus} selectedDevice={selectedDevice} selectDevice={(id) => void selectDevice(id)} refresh={() => void refreshView()} refreshing={refreshing} error={error} demoMode={demoMode} alertsEnabled={alertsEnabled} alertsSupported={alertsSupported} enableAlerts={(label) => void enableAlerts(label)} disableAlerts={() => void disableAlerts()} reviews={reviews} browserSiteReviews={browserSiteReviews} expectedServices={expectedServices} listenerObservations={listenerObservations} audit={audit} actions={actions} passkeys={passkeys} accountProfiles={accountProfiles} accountUnlocked={demoMode || accountAccess !== null} desktopInstallStatus={desktopInstall.status} desktopVersion={desktopInstall.nativeVersion} installDesktopApp={async () => { try { await desktopInstall.install(); setError(null); } catch (reason) { setError(reason instanceof Error ? reason.message : "HAVEN could not open the browser installation prompt."); } }} reviewFinding={(finding, state) => void reviewFinding(finding, state)} classifyBrowserSite={(review) => void classifyBrowserSite(review)} resetBrowserSite={(review) => void resetBrowserSite(review)} saveServiceExpectation={(service) => void saveServiceExpectation(service)} saveServiceExpectations={(services) => void saveServiceBaseline(services)} removeServiceExpectation={(service) => void removeServiceExpectation(service)} runAction={(kind) => void runAction(kind)} addOwnerPasskey={() => void addOwnerPasskey()} removeOwnerPasskey={(passkey) => void removeOwnerPasskey(passkey)} saveAccount={saveAccount} removeAccount={(profile) => void removeAccount(profile)} unlockAccounts={() => void unlockAccounts()} lockAccounts={() => void lockAccounts()} runApplianceDeepCheck={(appliance) => void runApplianceDeepCheck(appliance)} deepCheckBusy={deepCheckBusy} actionBusy={actionBusy} signOut={() => void signOut()} route={route} navigate={navigate} />;
 }

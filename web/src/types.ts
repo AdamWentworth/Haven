@@ -347,6 +347,9 @@ export type ManagedHealthComponentState = "healthy" | "observed" | "standby" | "
 export interface ManagedHealthStatus {
   provider: string;
   status: "pending" | "unavailable" | "partial" | "healthy" | "attention";
+  deepCheckMode?: "automatic" | "manual";
+  deepCheckAvailable: boolean;
+  lastDeepCheckedAt?: string | null;
   lastCheckedAt: string | null;
   lastChangedAt: string | null;
   consecutiveFailures: number;

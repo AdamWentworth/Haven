@@ -173,6 +173,12 @@ main, footer { width: min(1180px, 92vw); margin-inline: auto; }
 .appliance-health-heading strong, .appliance-health-heading small { display: block; }
 .appliance-health-heading strong { font-size: .74rem; }
 .appliance-health-heading small { margin-top: .18rem; color: var(--muted); font-size: .6rem; }
+.appliance-deep-check { display: flex; align-items: center; justify-content: space-between; gap: .75rem; margin-top: .65rem; padding: .55rem .6rem; border: 1px solid var(--line); border-radius: .55rem; background: rgba(255, 255, 255, .015); }
+.appliance-deep-check strong, .appliance-deep-check small { display: block; }
+.appliance-deep-check strong { font-size: .67rem; }
+.appliance-deep-check small { margin-top: .16rem; color: var(--muted); font-size: .59rem; line-height: 1.35; }
+.appliance-deep-check button { flex: 0 0 auto; padding: .42rem .62rem; border: 1px solid rgba(92, 231, 167, .28); border-radius: 999px; background: rgba(92, 231, 167, .07); color: var(--good); font: inherit; font-size: .62rem; font-weight: 750; cursor: pointer; }
+.appliance-deep-check button:disabled { cursor: wait; opacity: .58; }
 .appliance-health-system { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 1px; margin-top: .65rem; overflow: hidden; border: 1px solid var(--line); border-radius: .55rem; background: var(--line); }
 .appliance-health-system > span { min-width: 0; padding: .55rem; background: #0d1618; }
 .appliance-health-system small, .appliance-health-system strong { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

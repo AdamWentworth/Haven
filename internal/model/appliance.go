@@ -28,6 +28,7 @@ type ManagedServiceDefinition struct {
 // of deployment configuration, API responses, or persisted observations.
 type ManagedHealthDefinition struct {
 	Provider          string `json:"provider"`
+	DeepCheckMode     string `json:"deepCheckMode,omitempty"`
 	SNMPPort          int    `json:"snmpPort"`
 	CommunityFile     string `json:"communityFile"`
 	SSHPort           int    `json:"sshPort"`
@@ -83,6 +84,9 @@ type ManagedCertificateStatus struct {
 type ManagedHealthStatus struct {
 	Provider            string                `json:"provider"`
 	Status              string                `json:"status"`
+	DeepCheckMode       string                `json:"deepCheckMode,omitempty"`
+	DeepCheckAvailable  bool                  `json:"deepCheckAvailable"`
+	LastDeepCheckedAt   *time.Time            `json:"lastDeepCheckedAt,omitempty"`
 	LastCheckedAt       *time.Time            `json:"lastCheckedAt"`
 	LastChangedAt       *time.Time            `json:"lastChangedAt"`
 	ConsecutiveFailures int                   `json:"consecutiveFailures"`

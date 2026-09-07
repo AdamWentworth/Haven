@@ -30,6 +30,12 @@ import (
 	"github.com/AdamWentworth/haven/internal/storage"
 )
 
+type managedApplianceMonitor interface {
+	Probe(context.Context) error
+	Status(context.Context) ([]model.ManagedApplianceStatus, error)
+	DeepCheck(context.Context, string) (model.ManagedApplianceStatus, error)
+}
+
 type Server struct {
 	collector       collector.Collector
 	store           *storage.Store
@@ -42,7 +48,7 @@ type Server struct {
 	actions         *action.Service
 	alertProjector  *alert.Projector
 	notifications   *notification.Service
-	appliances      *appliance.Monitor
+	appliances      managedApplianceMonitor
 	accounts        *account.Service
 	browserReviews  *browserreview.Service
 	diagnostics     func(context.Context) diagnostic.Report
@@ -80,7 +86,7 @@ func WithNotifications(service *notification.Service) ServerOption {
 	return func(server *Server) { server.notifications = service }
 }
 
-func WithManagedAppliances(monitor *appliance.Monitor) ServerOption {
+func WithManagedAppliances(monitor managedApplianceMonitor) ServerOption {
 	return func(server *Server) { server.appliances = monitor }
 }
 
@@ -128,6 +134,7 @@ func (server *Server) Handler() http.Handler {
 	mux.Handle("GET /api/devices", server.protected(http.HandlerFunc(server.devices)))
 	mux.Handle("GET /api/devices/{deviceID}", server.protected(http.HandlerFunc(server.deviceDetail)))
 	mux.Handle("GET /api/appliances", server.protected(http.HandlerFunc(server.managedAppliances)))
+	mux.Handle("POST /api/appliances/{applianceID}/deep-check", server.mutating(http.HandlerFunc(server.deepCheckManagedAppliance)))
 	mux.Handle("POST /api/devices/{deviceID}/revoke", server.mutating(http.HandlerFunc(server.revokeDevice)))
 	mux.Handle("GET /api/events", server.protected(http.HandlerFunc(server.securityEvents)))
 	mux.Handle("GET /api/alerts", server.protected(http.HandlerFunc(server.currentAlerts)))
@@ -179,6 +186,38 @@ func (server *Server) managedAppliances(writer http.ResponseWriter, request *htt
 		return
 	}
 	server.writeJSON(writer, http.StatusOK, statuses)
+}
+
+func (server *Server) deepCheckManagedAppliance(writer http.ResponseWriter, request *http.Request) {
+	writer.Header().Set("Cache-Control", "no-store")
+	applianceID := request.PathValue("applianceID")
+	if applianceID == "" || len(applianceID) > 40 || strings.ContainsAny(applianceID, "/?#") {
+		http.NotFound(writer, request)
+		return
+	}
+	if server.demoMode || server.appliances == nil {
+		server.writeJSON(writer, http.StatusConflict, map[string]string{"error": "On-demand appliance health is unavailable on this hub."})
+		return
+	}
+	status, err := server.appliances.DeepCheck(request.Context(), applianceID)
+	if err != nil {
+		code := http.StatusBadGateway
+		message := "The read-only deep check could not be completed."
+		switch {
+		case errors.Is(err, appliance.ErrApplianceNotFound):
+			code, message = http.StatusNotFound, "The managed appliance was not found."
+		case errors.Is(err, appliance.ErrDeepCheckUnavailable):
+			code, message = http.StatusConflict, "This appliance is not configured for owner-requested deep checks."
+		case errors.Is(err, appliance.ErrDeepCheckTooSoon):
+			code, message = http.StatusTooManyRequests, "Wait one minute before requesting another deep check."
+		}
+		_ = server.store.AppendAudit(request.Context(), storage.AuditEvent{Actor: "owner", Action: "appliance.health.deep-check", Target: applianceID, Outcome: "failed", Detail: "An owner-requested, read-only appliance deep check did not complete. No credential or remote response content was retained.", OccurredAt: time.Now().UTC()})
+		server.logger.Warn("managed-appliance deep check did not complete", "appliance", applianceID, "error", err)
+		server.writeJSON(writer, code, map[string]string{"error": message})
+		return
+	}
+	_ = server.store.AppendAudit(request.Context(), storage.AuditEvent{Actor: "owner", Action: "appliance.health.deep-check", Target: applianceID, Outcome: "succeeded", Detail: "An owner-requested, read-only appliance deep check refreshed bounded disk, SMART, temperature, storage-set, and firmware evidence.", OccurredAt: time.Now().UTC()})
+	server.writeJSON(writer, http.StatusOK, status)
 }
 
 func (server *Server) health(writer http.ResponseWriter, request *http.Request) {

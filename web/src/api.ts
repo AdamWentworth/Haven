@@ -61,6 +61,9 @@ export const listDevices = (signal?: AbortSignal) => getJSON<DeviceRecord[]>("/a
 
 export const listManagedAppliances = (signal?: AbortSignal) => getJSON<ManagedApplianceStatus[]>("/api/appliances", signal);
 
+export const runManagedApplianceDeepCheck = (applianceId: string) =>
+  postJSON<ManagedApplianceStatus>(`/api/appliances/${encodeURIComponent(applianceId)}/deep-check`);
+
 const accountGrantHeaders = (grant: string): Record<string, string> => grant ? { "X-HAVEN-Account-Access": grant } : {};
 
 export const listAccountProfiles = (grant: string, signal?: AbortSignal) => getJSON<AccountProfile[]>("/api/account-profiles", signal, accountGrantHeaders(grant));

@@ -360,6 +360,42 @@ func TestManagedApplianceEndpointAndAlertsUseExplicitStoredChecks(t *testing.T) 
 	}
 }
 
+type deepCheckMonitorStub struct {
+	requestedID string
+	status      model.ManagedApplianceStatus
+	err         error
+}
+
+func (*deepCheckMonitorStub) Probe(context.Context) error { return nil }
+func (monitor *deepCheckMonitorStub) Status(context.Context) ([]model.ManagedApplianceStatus, error) {
+	return []model.ManagedApplianceStatus{monitor.status}, nil
+}
+func (monitor *deepCheckMonitorStub) DeepCheck(_ context.Context, id string) (model.ManagedApplianceStatus, error) {
+	monitor.requestedID = id
+	return monitor.status, monitor.err
+}
+
+func TestManagedApplianceDeepCheckEndpointIsExplicitAndBounded(t *testing.T) {
+	server, store := testServer(t)
+	defer store.Close()
+	deepChecked := time.Now().UTC()
+	monitor := &deepCheckMonitorStub{status: model.ManagedApplianceStatus{ID: "nas", DisplayName: "Test NAS", Health: &model.ManagedHealthStatus{DeepCheckMode: "manual", DeepCheckAvailable: true, LastDeepCheckedAt: &deepChecked}}}
+	server.appliances = monitor
+
+	response := httptest.NewRecorder()
+	server.Handler().ServeHTTP(response, httptest.NewRequest(http.MethodPost, "/api/appliances/nas/deep-check", nil))
+	if response.Code != http.StatusOK || monitor.requestedID != "nas" || !strings.Contains(response.Body.String(), `"lastDeepCheckedAt"`) {
+		t.Fatalf("unexpected deep-check response: %d %s", response.Code, response.Body.String())
+	}
+
+	monitor.err = appliance.ErrDeepCheckTooSoon
+	rateLimited := httptest.NewRecorder()
+	server.Handler().ServeHTTP(rateLimited, httptest.NewRequest(http.MethodPost, "/api/appliances/nas/deep-check", nil))
+	if rateLimited.Code != http.StatusTooManyRequests || !strings.Contains(rateLimited.Body.String(), "Wait one minute") {
+		t.Fatalf("duplicate deep check was not safely bounded: %d %s", rateLimited.Code, rateLimited.Body.String())
+	}
+}
+
 func TestSnapshotEndpointPersistsObservation(t *testing.T) {
 	server, store := testServer(t)
 	defer store.Close()

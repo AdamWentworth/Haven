@@ -2,6 +2,7 @@ package appliance
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -69,6 +70,97 @@ func TestLoadDefinitionsAcceptsOnlyExplicitPrivateEndpoints(t *testing.T) {
 	}
 	if len(definitions) != 1 || definitions[0].ID != "home-nas" || definitions[0].Kind != "nas" || definitions[0].Services[0].Protocol != "TCP" || definitions[0].Health == nil || definitions[0].Health.Provider != "terramaster-tos5" {
 		t.Fatalf("configuration was not normalized: %#v", definitions)
+	}
+	if definitions[0].Health.DeepCheckMode != "automatic" {
+		t.Fatalf("legacy configuration must retain automatic deep checks: %#v", definitions[0].Health)
+	}
+}
+
+func TestLoadDefinitionsAcceptsManualDeepChecksAndRejectsUnknownModes(t *testing.T) {
+	privateAddress := strings.Join([]string{"192", "168", "1", "69"}, ".")
+	base := fmt.Sprintf(`{"appliances":[{"id":"nas","displayName":"NAS","kind":"nas","address":%q,"health":{"provider":"terramaster-tos5","deepCheckMode":"MODE","communityFile":"/run/secrets/community","sshUsername":"adam","sshPrivateKeyFile":"/run/secrets/key","sshHostKeySHA256":"SHA256:+z7AR7nyLAfU5Vzn0J3/DtnnQ4hqy7TshW3nWeu+uxU"},"services":[{"id":"smb","name":"SMB","protocol":"TCP","port":445}]}]}`, privateAddress)
+	path := filepath.Join(t.TempDir(), "appliances.json")
+	if err := os.WriteFile(path, []byte(strings.Replace(base, "MODE", "manual", 1)), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	definitions, err := LoadDefinitions(path)
+	if err != nil || definitions[0].Health.DeepCheckMode != "manual" {
+		t.Fatalf("manual deep-check mode was not accepted: %#v %v", definitions, err)
+	}
+	if err := os.WriteFile(path, []byte(strings.Replace(base, "MODE", "weekly", 1)), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := LoadDefinitions(path); err == nil {
+		t.Fatal("an unknown deep-check mode was accepted")
+	}
+}
+
+func TestManualRoutineHealthUsesSNMPWithoutSSHAndPreservesDeepEvidence(t *testing.T) {
+	checked := time.Date(2026, time.September, 7, 20, 0, 0, 0, time.UTC)
+	deepChecked := checked.Add(-6 * time.Hour)
+	sshCalls := 0
+	monitor := &Monitor{
+		probeSNMP: func(context.Context, string, model.ManagedHealthDefinition) (healthReport, error) {
+			return healthReport{Coverage: model.ManagedHealthCoverage{Capacity: "verified"}, Volumes: []model.ManagedVolumeHealth{{Name: "/Volume1", CapacityBytes: 100, AvailableBytes: 60, State: "healthy"}}}, nil
+		},
+		probeSSH: func(context.Context, string, model.ManagedHealthDefinition) (healthReport, error) {
+			sshCalls++
+			return healthReport{}, nil
+		},
+	}
+	previous := model.ManagedHealthStatus{
+		LastDeepCheckedAt: &deepChecked,
+		System:            model.ManagedSystemHealth{Model: "F4-212", FirmwareVersion: "5.1.73"},
+		Coverage:          model.ManagedHealthCoverage{Disks: "verified", RAID: "unsupported", Temperature: "verified", Capacity: "verified", Firmware: "verified"},
+		Disks:             []model.ManagedDiskHealth{{Name: "/dev/sda", State: "healthy", SMART: "healthy"}},
+	}
+	status := monitor.probeRoutineHealth(context.Background(), strings.Join([]string{"192", "168", "1", "69"}, "."), model.ManagedHealthDefinition{Provider: "terramaster-tos5", DeepCheckMode: "manual"}, &previous, checked)
+	if sshCalls != 0 {
+		t.Fatalf("manual routine monitoring made %d SSH call(s)", sshCalls)
+	}
+	if status.LastDeepCheckedAt == nil || !status.LastDeepCheckedAt.Equal(deepChecked) || status.System.Model != "F4-212" || len(status.Disks) != 1 || len(status.Volumes) != 1 {
+		t.Fatalf("manual routine monitoring did not preserve deep evidence while refreshing SNMP: %#v", status)
+	}
+}
+
+type deepCheckStore struct {
+	definition model.ManagedApplianceDefinition
+	health     *model.ManagedHealthStatus
+}
+
+func (store *deepCheckStore) SyncManagedAppliances(context.Context, []model.ManagedApplianceDefinition, time.Time) error {
+	return nil
+}
+func (store *deepCheckStore) RecordManagedApplianceProbe(context.Context, string, []model.ManagedServiceStatus, time.Time) error {
+	return nil
+}
+func (store *deepCheckStore) RecordManagedApplianceHealth(_ context.Context, _ string, health model.ManagedHealthStatus, _ time.Time) error {
+	store.health = &health
+	return nil
+}
+func (store *deepCheckStore) ListManagedAppliances(context.Context) ([]model.ManagedApplianceStatus, error) {
+	return []model.ManagedApplianceStatus{{ID: store.definition.ID, DisplayName: store.definition.DisplayName, Health: store.health}}, nil
+}
+
+func TestOwnerRequestedDeepCheckRunsSSHOnceAndRecordsTimestamp(t *testing.T) {
+	checked := time.Date(2026, time.September, 7, 21, 0, 0, 0, time.UTC)
+	definition := model.ManagedApplianceDefinition{ID: "nas", DisplayName: "NAS", Address: strings.Join([]string{"192", "168", "1", "69"}, "."), Health: &model.ManagedHealthDefinition{Provider: "terramaster-tos5", DeepCheckMode: "manual"}}
+	store := &deepCheckStore{definition: definition}
+	monitor := &Monitor{store: store, definitions: []model.ManagedApplianceDefinition{definition}, now: func() time.Time { return checked }, lastDeepChecks: make(map[string]time.Time)}
+	sshCalls := 0
+	monitor.probeSSH = func(context.Context, string, model.ManagedHealthDefinition) (healthReport, error) {
+		sshCalls++
+		return healthReport{System: model.ManagedSystemHealth{Model: "F4-212"}, Coverage: model.ManagedHealthCoverage{Disks: "verified", RAID: "unsupported", Temperature: "verified", Capacity: "verified", Firmware: "verified"}}, nil
+	}
+	status, err := monitor.DeepCheck(context.Background(), "nas")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if sshCalls != 1 || status.Health == nil || status.Health.LastDeepCheckedAt == nil || !status.Health.LastDeepCheckedAt.Equal(checked) {
+		t.Fatalf("owner-requested deep check was not bounded and recorded: calls=%d status=%#v", sshCalls, status)
+	}
+	if _, err := monitor.DeepCheck(context.Background(), "nas"); !errors.Is(err, ErrDeepCheckTooSoon) {
+		t.Fatalf("immediate duplicate deep check was not rate limited: %v", err)
 	}
 }
 

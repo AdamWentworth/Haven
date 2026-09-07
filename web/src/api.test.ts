@@ -67,6 +67,7 @@ describe("HAVEN API client", () => {
 		await api.saveExpectedService(service);
 		await api.saveExpectedServices("device", [service]);
 		await api.removeExpectedService({ id: "service/one", deviceId: "device" } as ExpectedService);
+		await api.runManagedApplianceDeepCheck("nas/one");
 		const account = { provider: "Google", label: "Personal", category: "email", twoStepStatus: "unknown", factors: [], passwordStatus: "unknown", recoveryStatus: "unknown", backupCodesStatus: "unknown", sessionStatus: "unknown", sessionChecks: [] } as AccountProfileInput;
 		await api.saveAccountProfile(account, "account-access");
 		await api.removeAccountProfile("account/one", "account-access");
@@ -83,6 +84,7 @@ describe("HAVEN API client", () => {
 		expect(fetchMock.mock.calls.map(([url]) => url)).toContain("/api/expected-services/service%2Fone/remove");
 		expect(fetchMock.mock.calls.map(([url]) => url)).toContain("/api/account-profiles/account%2Fone/remove");
 		expect(fetchMock.mock.calls.map(([url]) => url)).toContain("/api/browser-site-reviews/remove");
+		expect(fetchMock.mock.calls.map(([url]) => url)).toContain("/api/appliances/nas%2Fone/deep-check");
 
 		fetchMock.mockResolvedValueOnce(response(null, 204));
 		await expect(api.logout()).resolves.toBeUndefined();
