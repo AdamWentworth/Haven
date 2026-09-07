@@ -19,6 +19,7 @@ import (
 	"regexp"
 	"sort"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -31,6 +32,13 @@ const (
 	maximumServices    = 16
 	FailureThreshold   = 2
 	StaleAfter         = 35 * time.Minute
+	DeepCheckCooldown  = time.Minute
+)
+
+var (
+	ErrApplianceNotFound    = errors.New("managed appliance was not found")
+	ErrDeepCheckUnavailable = errors.New("managed appliance deep check is unavailable")
+	ErrDeepCheckTooSoon     = errors.New("managed appliance deep check was requested too recently")
 )
 
 var identifierPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,39}$`)
@@ -49,11 +57,15 @@ type StatusStore interface {
 }
 
 type Monitor struct {
-	store       StatusStore
-	logger      *slog.Logger
-	definitions []model.ManagedApplianceDefinition
-	dialer      *net.Dialer
-	now         func() time.Time
+	store          StatusStore
+	logger         *slog.Logger
+	definitions    []model.ManagedApplianceDefinition
+	dialer         *net.Dialer
+	now            func() time.Time
+	operationMutex sync.Mutex
+	lastDeepChecks map[string]time.Time
+	probeSNMP      func(context.Context, string, model.ManagedHealthDefinition) (healthReport, error)
+	probeSSH       func(context.Context, string, model.ManagedHealthDefinition) (healthReport, error)
 }
 
 func LoadDefinitions(path string) ([]model.ManagedApplianceDefinition, error) {
@@ -111,6 +123,13 @@ func LoadDefinitions(path string) ([]model.ManagedApplianceDefinition, error) {
 		if definition.Health != nil {
 			health := definition.Health
 			health.Provider = strings.ToLower(strings.TrimSpace(health.Provider))
+			health.DeepCheckMode = strings.ToLower(strings.TrimSpace(health.DeepCheckMode))
+			if health.DeepCheckMode == "" {
+				health.DeepCheckMode = "automatic"
+			}
+			if health.DeepCheckMode != "automatic" && health.DeepCheckMode != "manual" {
+				return nil, fmt.Errorf("managed appliance %q has invalid deep-check mode %q", definition.ID, health.DeepCheckMode)
+			}
 			health.CommunityFile = strings.TrimSpace(health.CommunityFile)
 			health.SSHUsername = strings.TrimSpace(health.SSHUsername)
 			health.SSHPrivateKeyFile = strings.TrimSpace(health.SSHPrivateKeyFile)
@@ -203,11 +222,14 @@ func NewMonitor(ctx context.Context, store StatusStore, logger *slog.Logger, def
 		logger = slog.Default()
 	}
 	monitor := &Monitor{
-		store:       store,
-		logger:      logger,
-		definitions: append([]model.ManagedApplianceDefinition(nil), definitions...),
-		dialer:      &net.Dialer{Timeout: 1500 * time.Millisecond},
-		now:         time.Now,
+		store:          store,
+		logger:         logger,
+		definitions:    append([]model.ManagedApplianceDefinition(nil), definitions...),
+		dialer:         &net.Dialer{Timeout: 1500 * time.Millisecond},
+		now:            time.Now,
+		lastDeepChecks: make(map[string]time.Time),
+		probeSNMP:      probeSNMPHealth,
+		probeSSH:       probeSSHHealth,
 	}
 	if err := monitor.store.SyncManagedAppliances(ctx, monitor.definitions, monitor.now().UTC()); err != nil {
 		return nil, fmt.Errorf("synchronize managed appliances: %w", err)
@@ -216,6 +238,12 @@ func NewMonitor(ctx context.Context, store StatusStore, logger *slog.Logger, def
 }
 
 func (monitor *Monitor) Probe(ctx context.Context) error {
+	monitor.operationMutex.Lock()
+	defer monitor.operationMutex.Unlock()
+	previous, err := monitor.statusByID(ctx)
+	if err != nil {
+		return fmt.Errorf("load managed appliance state: %w", err)
+	}
 	for _, definition := range monitor.definitions {
 		checkedAt := monitor.now().UTC()
 		results := make([]model.ManagedServiceStatus, 0, len(definition.Services))
@@ -229,13 +257,129 @@ func (monitor *Monitor) Probe(ctx context.Context) error {
 			return fmt.Errorf("record managed appliance %q: %w", definition.ID, err)
 		}
 		if definition.Health != nil {
-			health := probeManagedHealth(ctx, definition.Address, *definition.Health, checkedAt)
+			health := monitor.probeRoutineHealth(ctx, definition.Address, *definition.Health, previous[definition.ID].Health, checkedAt)
 			if err := monitor.store.RecordManagedApplianceHealth(ctx, definition.ID, health, checkedAt); err != nil {
 				return fmt.Errorf("record managed appliance %q health: %w", definition.ID, err)
 			}
 		}
 	}
 	return nil
+}
+
+// DeepCheck performs the credential-bounded SSH portion of appliance health
+// collection only after an authenticated owner explicitly requests it.
+func (monitor *Monitor) DeepCheck(ctx context.Context, applianceID string) (model.ManagedApplianceStatus, error) {
+	monitor.operationMutex.Lock()
+	defer monitor.operationMutex.Unlock()
+	definition, ok := monitor.definitionByID(applianceID)
+	if !ok {
+		return model.ManagedApplianceStatus{}, ErrApplianceNotFound
+	}
+	if definition.Health == nil || definition.Health.DeepCheckMode != "manual" {
+		return model.ManagedApplianceStatus{}, ErrDeepCheckUnavailable
+	}
+	checkedAt := monitor.now().UTC()
+	if last := monitor.lastDeepChecks[definition.ID]; !last.IsZero() && checkedAt.Sub(last) < DeepCheckCooldown {
+		return model.ManagedApplianceStatus{}, ErrDeepCheckTooSoon
+	}
+	monitor.lastDeepChecks[definition.ID] = checkedAt
+	previous, err := monitor.statusByID(ctx)
+	if err != nil {
+		return model.ManagedApplianceStatus{}, fmt.Errorf("load managed appliance state: %w", err)
+	}
+	report, err := monitor.probeSSH(ctx, definition.Address, *definition.Health)
+	if err != nil {
+		return model.ManagedApplianceStatus{}, err
+	}
+	health := model.ManagedHealthStatus{Provider: definition.Health.Provider, Status: "partial", Coverage: unknownCoverage(), DeepCheckMode: "manual", DeepCheckAvailable: true, LastCheckedAt: timePointer(checkedAt), LastDeepCheckedAt: timePointer(checkedAt)}
+	if prior := previous[definition.ID].Health; prior != nil {
+		health = *prior
+		health.LastCheckedAt = timePointer(checkedAt)
+		health.LastDeepCheckedAt = timePointer(checkedAt)
+		health.DeepCheckMode = "manual"
+		health.DeepCheckAvailable = true
+		health.ErrorClass = ""
+	}
+	applyHealthReport(&health, report)
+	health.Status = deriveHealthStatus(health)
+	if err := monitor.store.RecordManagedApplianceHealth(ctx, definition.ID, health, checkedAt); err != nil {
+		return model.ManagedApplianceStatus{}, fmt.Errorf("record managed appliance %q deep health: %w", definition.ID, err)
+	}
+	statuses, err := monitor.store.ListManagedAppliances(ctx)
+	if err != nil {
+		return model.ManagedApplianceStatus{}, err
+	}
+	for _, status := range statuses {
+		if status.ID == definition.ID {
+			return status, nil
+		}
+	}
+	return model.ManagedApplianceStatus{}, ErrApplianceNotFound
+}
+
+func (monitor *Monitor) probeRoutineHealth(ctx context.Context, address string, definition model.ManagedHealthDefinition, previous *model.ManagedHealthStatus, checkedAt time.Time) model.ManagedHealthStatus {
+	if definition.DeepCheckMode != "manual" {
+		status := probeManagedHealthWith(ctx, address, definition, checkedAt, monitor.probeSNMP, monitor.probeSSH)
+		status.DeepCheckMode = "automatic"
+		status.DeepCheckAvailable = false
+		if status.ErrorClass != "ssh-health-unavailable" && status.ErrorClass != "health-sources-unavailable" {
+			status.LastDeepCheckedAt = timePointer(checkedAt)
+		}
+		return status
+	}
+	status := model.ManagedHealthStatus{Provider: definition.Provider, Status: "unavailable", Coverage: unknownCoverage(), LastCheckedAt: timePointer(checkedAt), DeepCheckMode: "manual", DeepCheckAvailable: true}
+	if previous != nil {
+		preserveDeepHealth(&status, *previous)
+	}
+	report, err := monitor.probeSNMP(ctx, address, definition)
+	if err != nil {
+		status.ErrorClass = "snmp-health-unavailable"
+		return status
+	}
+	applyHealthReport(&status, report)
+	status.Status = deriveHealthStatus(status)
+	return status
+}
+
+func preserveDeepHealth(target *model.ManagedHealthStatus, previous model.ManagedHealthStatus) {
+	target.LastDeepCheckedAt = previous.LastDeepCheckedAt
+	if target.LastDeepCheckedAt == nil && hasDeepHealthEvidence(previous) {
+		target.LastDeepCheckedAt = previous.LastCheckedAt
+	}
+	target.System = previous.System
+	target.Disks = append([]model.ManagedDiskHealth(nil), previous.Disks...)
+	target.Pools = append([]model.ManagedPoolHealth(nil), previous.Pools...)
+	target.Volumes = append([]model.ManagedVolumeHealth(nil), previous.Volumes...)
+	target.Temperatures = append([]model.ManagedTemperature(nil), previous.Temperatures...)
+	target.Coverage.Disks = previous.Coverage.Disks
+	target.Coverage.RAID = previous.Coverage.RAID
+	target.Coverage.Temperature = previous.Coverage.Temperature
+	target.Coverage.Firmware = previous.Coverage.Firmware
+}
+
+func hasDeepHealthEvidence(status model.ManagedHealthStatus) bool {
+	return status.System.Model != "" || status.System.FirmwareVersion != "" || status.Coverage.Disks == "verified" || status.Coverage.Firmware == "verified"
+}
+
+func (monitor *Monitor) statusByID(ctx context.Context) (map[string]model.ManagedApplianceStatus, error) {
+	statuses, err := monitor.store.ListManagedAppliances(ctx)
+	if err != nil {
+		return nil, err
+	}
+	result := make(map[string]model.ManagedApplianceStatus, len(statuses))
+	for _, status := range statuses {
+		result[status.ID] = status
+	}
+	return result, nil
+}
+
+func (monitor *Monitor) definitionByID(id string) (model.ManagedApplianceDefinition, bool) {
+	for _, definition := range monitor.definitions {
+		if definition.ID == id {
+			return definition, true
+		}
+	}
+	return model.ManagedApplianceDefinition{}, false
 }
 
 func (monitor *Monitor) Status(ctx context.Context) ([]model.ManagedApplianceStatus, error) {

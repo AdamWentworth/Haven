@@ -33,15 +33,19 @@ var devicePathPattern = regexp.MustCompile(`/dev/[A-Za-z0-9._/-]+`)
 type healthReport = model.ManagedHealthReport
 
 func probeManagedHealth(ctx context.Context, address string, definition model.ManagedHealthDefinition, checkedAt time.Time) model.ManagedHealthStatus {
+	return probeManagedHealthWith(ctx, address, definition, checkedAt, probeSNMPHealth, probeSSHHealth)
+}
+
+func probeManagedHealthWith(ctx context.Context, address string, definition model.ManagedHealthDefinition, checkedAt time.Time, snmpProbe func(context.Context, string, model.ManagedHealthDefinition) (healthReport, error), sshProbe func(context.Context, string, model.ManagedHealthDefinition) (healthReport, error)) model.ManagedHealthStatus {
 	status := model.ManagedHealthStatus{
 		Provider: definition.Provider, LastCheckedAt: timePointer(checkedAt),
 		Coverage: unknownCoverage(), Status: "unavailable",
 	}
-	snmpReport, snmpErr := probeSNMPHealth(ctx, address, definition)
+	snmpReport, snmpErr := snmpProbe(ctx, address, definition)
 	if snmpErr == nil {
 		applyHealthReport(&status, snmpReport)
 	}
-	sshReport, sshErr := probeSSHHealth(ctx, address, definition)
+	sshReport, sshErr := sshProbe(ctx, address, definition)
 	if sshErr == nil {
 		applyHealthReport(&status, sshReport)
 	}

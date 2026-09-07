@@ -6,7 +6,7 @@ import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { App } from "./App";
-import type { AuthStatus, DeviceRecord, RuntimeStatus, SecuritySnapshot, SystemDiagnostics } from "./types";
+import type { AuthStatus, DeviceRecord, ManagedApplianceStatus, RuntimeStatus, SecuritySnapshot, SystemDiagnostics } from "./types";
 
 const fixtures = vi.hoisted(() => {
 	const device: DeviceRecord = {
@@ -79,7 +79,7 @@ const fixtures = vi.hoisted(() => {
 
 const api = vi.hoisted(() => ({
 	HavenAPIError: class HavenAPIError extends Error { constructor(message: string, readonly status: number) { super(message); } },
-	addPasskey: vi.fn(), collectSnapshot: vi.fn(), getAuthStatus: vi.fn(), getDevice: vi.fn(), getLatestSnapshot: vi.fn(), getNotificationStatus: vi.fn(), getRuntimeStatus: vi.fn(), getSystemDiagnostics: vi.fn(), listAccountProfiles: vi.fn(), listAlerts: vi.fn(), listAuditEvents: vi.fn(), listDevices: vi.fn(), listEvents: vi.fn(), listExpectedServices: vi.fn(), listFindingReviews: vi.fn(), listManagedAppliances: vi.fn(), listObservedListeners: vi.fn(), listPasskeys: vi.fn(), listSecurityActions: vi.fn(), lockAccountNotebook: vi.fn(), loginWithPasskey: vi.fn(), logout: vi.fn(), registerPasskey: vi.fn(), registerPushDestination: vi.fn(), removeAccountProfile: vi.fn(), removeExpectedService: vi.fn(), removePasskey: vi.fn(), removePushDestination: vi.fn(), requestSecurityAction: vi.fn(), saveAccountProfile: vi.fn(), saveExpectedService: vi.fn(), saveExpectedServices: vi.fn(), saveFindingReview: vi.fn(), touchAccountNotebook: vi.fn(), unlockAccountNotebook: vi.fn(), revokeDevice: vi.fn(),
+	addPasskey: vi.fn(), collectSnapshot: vi.fn(), getAuthStatus: vi.fn(), getDevice: vi.fn(), getLatestSnapshot: vi.fn(), getNotificationStatus: vi.fn(), getRuntimeStatus: vi.fn(), getSystemDiagnostics: vi.fn(), listAccountProfiles: vi.fn(), listAlerts: vi.fn(), listAuditEvents: vi.fn(), listDevices: vi.fn(), listEvents: vi.fn(), listExpectedServices: vi.fn(), listFindingReviews: vi.fn(), listManagedAppliances: vi.fn(), listObservedListeners: vi.fn(), listPasskeys: vi.fn(), listSecurityActions: vi.fn(), lockAccountNotebook: vi.fn(), loginWithPasskey: vi.fn(), logout: vi.fn(), registerPasskey: vi.fn(), registerPushDestination: vi.fn(), removeAccountProfile: vi.fn(), removeExpectedService: vi.fn(), removePasskey: vi.fn(), removePushDestination: vi.fn(), requestSecurityAction: vi.fn(), runManagedApplianceDeepCheck: vi.fn(), saveAccountProfile: vi.fn(), saveExpectedService: vi.fn(), saveExpectedServices: vi.fn(), saveFindingReview: vi.fn(), touchAccountNotebook: vi.fn(), unlockAccountNotebook: vi.fn(), revokeDevice: vi.fn(),
 }));
 
 vi.mock("./api", () => api);
@@ -176,6 +176,32 @@ describe("HAVEN routed console", () => {
 		expect(screen.getByRole("heading", { name: "Recovery map" })).toBeInTheDocument();
 		expect(screen.getByRole("link", { name: "System" })).toHaveAttribute("aria-current", "page");
 		expect(screen.getByText("0/0")).toBeInTheDocument();
+	});
+
+	it("runs NAS SSH health only after a clear owner confirmation", async () => {
+		const user = userEvent.setup();
+		const appliance: ManagedApplianceStatus = {
+			id: "tnas", displayName: "TNAS-98B9", kind: "nas", address: ["192", "168", "1", "69"].join("."), status: "healthy",
+			configuredAt: "2026-09-04T08:00:00Z", lastCheckedAt: "2026-09-07T20:00:00Z", services: [],
+			health: {
+				provider: "terramaster-tos5", status: "healthy", deepCheckMode: "manual", deepCheckAvailable: true,
+				lastDeepCheckedAt: "2026-09-07T14:00:00Z", lastCheckedAt: "2026-09-07T20:00:00Z", lastChangedAt: null,
+				consecutiveFailures: 0, system: { model: "F4-212" },
+				coverage: { disks: "verified", raid: "unsupported", temperature: "verified", capacity: "verified", firmware: "verified" },
+				disks: [], pools: [], volumes: [], temperatures: [],
+			},
+		};
+		window.history.replaceState(null, "", "/appliances");
+		api.listManagedAppliances.mockResolvedValue([appliance]);
+		api.runManagedApplianceDeepCheck.mockResolvedValue({ ...appliance, health: { ...appliance.health!, lastDeepCheckedAt: "2026-09-07T21:00:00Z" } });
+		vi.spyOn(window, "confirm").mockReturnValue(true);
+		render(<App />);
+
+		const button = await screen.findByRole("button", { name: "Run deep check" });
+		expect(screen.getByText(/runs only when requested/i)).toBeInTheDocument();
+		await user.click(button);
+		expect(window.confirm).toHaveBeenCalledWith(expect.stringContaining("may trigger the appliance's login notification"));
+		await waitFor(() => expect(api.runManagedApplianceDeepCheck).toHaveBeenCalledWith("tnas"));
 	});
 
 	it("opens the private account-security notebook as a dedicated workspace", async () => {
