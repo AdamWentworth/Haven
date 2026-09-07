@@ -19,17 +19,26 @@ Use `example.com`, generic device names, and the documentation-only address rang
 ## Repository safeguards
 
 - `.gitignore` excludes dependency trees, generated web assets, credentials, captures, databases, certificates, dumps, and local configuration.
-- `scripts/Test-PublicRepository.ps1` checks proposed repository content for common credentials and personal infrastructure identifiers.
-- `.githooks/pre-commit` runs the staged-content check before each commit.
+- `scripts/Test-PublicRepository.ps1` checks proposed repository content for common credentials and personal infrastructure identifiers. Staged mode reads the Git index rather than the possibly different working-tree copy.
+- `.githooks/pre-commit` runs the staged-content check before each commit. It is versioned with executable mode and fails clearly when PowerShell 7 is unavailable.
+- `.git/info/haven-private-identifiers` may contain local hostnames, project labels, or other literal strings that this clone must reject. Git metadata cannot be committed; the file is intentionally owner-maintained and absent from CI.
 - Go modules and npm dependencies have committed checksums or lock files.
 - Tests and demo mode use synthetic fixtures. `HAVEN_DEMO_MODE=true` filters every non-synthetic device and never invokes the live collector.
-- Once hosted publicly, enable GitHub secret scanning, push protection, dependency alerts, and CodeQL default setup.
+- The upstream repository enables GitHub secret scanning, push protection, Dependabot security updates, private vulnerability reporting, and CodeQL. Fork owners should enable the equivalent controls for their own namespace.
 
 Run the check manually with:
 
 ```powershell
 pwsh -NoProfile -File .\scripts\Test-PublicRepository.ps1
 ```
+
+Git intentionally does not enable hooks from a cloned repository. Activate HAVEN's versioned hooks once in each development clone:
+
+```powershell
+pwsh -NoProfile -File .\scripts\Enable-GitHooks.ps1
+```
+
+The equivalent portable Git setting is `git config --local core.hooksPath .githooks`; `pwsh` must be available when committing. Local hooks improve feedback but are not a security boundary, so CI repeats the repository check on every push and pull request.
 
 ## Secret and deployment configuration
 

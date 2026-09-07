@@ -34,7 +34,7 @@ func TestLinuxCollectorBuildsPrivacyBoundedHostSnapshot(t *testing.T) {
 		command("systemctl", "--failed", "--no-legend", "--plain"):                                                      []byte("certbot.service loaded failed failed Certbot\n"),
 		command("systemctl", "is-enabled", "unattended-upgrades.service"):                                               []byte("enabled\n"),
 		command("systemctl", "is-active", "unattended-upgrades.service"):                                                []byte("active\n"),
-		command("systemctl", "--user", "list-sockets", "--no-legend", "--no-pager", "--plain", "--all", "--show-types"): []byte("127.0.0.1:8081 Stream binderledger-localhost-proxy@8081.socket binderledger-localhost-proxy@8081.service\n"),
+		command("systemctl", "--user", "list-sockets", "--no-legend", "--no-pager", "--plain", "--all", "--show-types"): []byte("127.0.0.1:8081 Stream example-localhost-proxy@8081.socket example-localhost-proxy@8081.service\n"),
 		command("aa-status", "--enabled"):                                                                               []byte{},
 		command("timedatectl", "show", "-p", "NTPSynchronized", "--value"):                                              []byte("yes\n"),
 		command("df", "-Pk", "/"):                                                                                       []byte("Filesystem 1024-blocks Used Available Capacity Mounted on\n/dev/sda3 100000 30000 70000 30% /\n"),
@@ -49,7 +49,7 @@ func TestLinuxCollectorBuildsPrivacyBoundedHostSnapshot(t *testing.T) {
 		"/etc/default/ufw":  []byte("DEFAULT_INPUT_POLICY=\"DROP\"\nDEFAULT_OUTPUT_POLICY=\"ACCEPT\"\n"),
 	}
 	collector := NewLinuxCollector(runner)
-	collector.hostname = func() (string, error) { return "adam-ubuntu", nil }
+	collector.hostname = func() (string, error) { return "example-server", nil }
 	collector.readFile = func(path string) ([]byte, error) {
 		if contents, ok := files[path]; ok {
 			return contents, nil
@@ -59,7 +59,7 @@ func TestLinuxCollectorBuildsPrivacyBoundedHostSnapshot(t *testing.T) {
 	collector.stat = func(string) (os.FileInfo, error) { return nil, os.ErrNotExist }
 
 	snapshot := collector.Collect(context.Background())
-	if snapshot.Device.HostName != "adam-ubuntu" || snapshot.Device.OperatingSystem != "Ubuntu 24.04.4 LTS" {
+	if snapshot.Device.HostName != "example-server" || snapshot.Device.OperatingSystem != "Ubuntu 24.04.4 LTS" {
 		t.Fatalf("unexpected Linux identity: %#v", snapshot.Device)
 	}
 	if snapshot.LinuxBaseline == nil || snapshot.LinuxBaseline.Updates == nil || *snapshot.LinuxBaseline.Updates.PendingPackageCount != 13 {
@@ -71,7 +71,7 @@ func TestLinuxCollectorBuildsPrivacyBoundedHostSnapshot(t *testing.T) {
 	if snapshot.LinuxBaseline.SSH.PasswordAuthentication != "no" || snapshot.LinuxBaseline.SSH.KeyboardInteractiveAuthentication != "no" || snapshot.LinuxBaseline.SSH.PermitRootLogin != "prohibit-password" {
 		t.Fatalf("SSH posture was not collected: %#v", snapshot.LinuxBaseline.SSH)
 	}
-	if len(snapshot.Connections) != 4 || snapshot.Connections[0].ProcessName != "caddy" || snapshot.Connections[0].SystemdUnit != "caddy.service" || snapshot.Connections[1].State != "Established" || snapshot.Connections[2].SystemdUnit != "binderledger-localhost-proxy@8081.service" || snapshot.Connections[3].Protocol != "UDP" || snapshot.Connections[3].State != "Bound" {
+	if len(snapshot.Connections) != 4 || snapshot.Connections[0].ProcessName != "caddy" || snapshot.Connections[0].SystemdUnit != "caddy.service" || snapshot.Connections[1].State != "Established" || snapshot.Connections[2].SystemdUnit != "example-localhost-proxy@8081.service" || snapshot.Connections[3].Protocol != "UDP" || snapshot.Connections[3].State != "Bound" {
 		t.Fatalf("network endpoints were not mapped: %#v", snapshot.Connections)
 	}
 	if snapshot.LinuxBaseline.Services == nil || len(snapshot.LinuxBaseline.Services.FailedUnits) != 1 || snapshot.LinuxBaseline.Services.FailedUnits[0] != "certbot.service" {
@@ -132,7 +132,7 @@ func TestParseSystemdUnitFromSocketCgroup(t *testing.T) {
 		want  string
 	}{
 		{"ino:11956 cgroup:/system.slice/glances.service <->", "glances.service"},
-		{"cgroup:/user.slice/user-1000.slice/user@1000.service/app.slice/binderledger-localhost-proxy@8081.service", "binderledger-localhost-proxy@8081.service"},
+		{"cgroup:/user.slice/user-1000.slice/user@1000.service/app.slice/example-localhost-proxy@8081.service", "example-localhost-proxy@8081.service"},
 		{"cgroup:/user.slice/user-1000.slice/user@1000.service/init.scope", ""},
 		{"cgroup:/system.slice/docker-example.scope", ""},
 	} {
@@ -143,8 +143,8 @@ func TestParseSystemdUnitFromSocketCgroup(t *testing.T) {
 }
 
 func TestParseSystemdUnitFromProcCgroup(t *testing.T) {
-	value := "0::/user.slice/user-1000.slice/user@1000.service/app.slice/binderledger-localhost-proxy@8081.service\n"
-	if got := parseProcSystemdUnit(value); got != "binderledger-localhost-proxy@8081.service" {
+	value := "0::/user.slice/user-1000.slice/user@1000.service/app.slice/example-localhost-proxy@8081.service\n"
+	if got := parseProcSystemdUnit(value); got != "example-localhost-proxy@8081.service" {
 		t.Fatalf("unexpected process cgroup unit: %q", got)
 	}
 }

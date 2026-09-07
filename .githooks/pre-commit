@@ -1,3 +1,12 @@
 #!/bin/sh
 
-pwsh -NoLogo -NoProfile -File scripts/Test-PublicRepository.ps1 -Staged
+set -eu
+
+if ! command -v pwsh >/dev/null 2>&1; then
+	printf '%s\n' \
+		"HAVEN's pre-commit privacy guard requires PowerShell 7 (pwsh)." \
+		"Install PowerShell 7, then retry the commit. CI runs the same guard as a backstop." >&2
+	exit 1
+fi
+
+exec pwsh -NoLogo -NoProfile -File scripts/Test-PublicRepository.ps1 -Staged

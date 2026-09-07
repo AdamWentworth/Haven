@@ -29,8 +29,8 @@ try {
 
     $textExtensions = @(
         '', '.cjs', '.css', '.dockerignore', '.go', '.gitignore', '.html', '.js',
-        '.json', '.md', '.ps1', '.sh', '.toml', '.ts', '.tsx', '.txt',
-        '.xml', '.yaml', '.yml'
+        '.json', '.md', '.mjs', '.ps1', '.sh', '.sql', '.svg', '.toml', '.ts',
+        '.tsx', '.txt', '.xml', '.yaml', '.yml'
     )
 
     $checks = @(
@@ -65,10 +65,25 @@ try {
     )
 
     $findings = [System.Collections.Generic.List[string]]::new()
+	$gitDirectory = (& git rev-parse --git-dir).Trim()
+	$privateIdentifierPath = Join-Path -Path $gitDirectory -ChildPath 'info/haven-private-identifiers'
+	$privateIdentifiers = if (Test-Path -LiteralPath $privateIdentifierPath -PathType Leaf) {
+		@([System.IO.File]::ReadLines($privateIdentifierPath) |
+			ForEach-Object { $_.Trim() } |
+			Where-Object { $_.Length -ge 4 -and -not $_.StartsWith('#') })
+	}
+	else {
+		@()
+	}
+
+    $hookEntry = @(git ls-files --stage -- .githooks/pre-commit)
+    if ($hookEntry.Count -ne 1 -or $hookEntry[0] -notmatch '^100755\s') {
+        $findings.Add('.githooks/pre-commit: tracked hook must use executable mode 100755')
+    }
 
     foreach ($relativePath in $candidateFiles) {
         $fullPath = Join-Path -Path $repositoryRoot -ChildPath $relativePath
-        if (-not (Test-Path -LiteralPath $fullPath -PathType Leaf)) {
+        if (-not $Staged -and -not (Test-Path -LiteralPath $fullPath -PathType Leaf)) {
             continue
         }
 
@@ -78,12 +93,25 @@ try {
             continue
         }
 
-        if ($textExtensions -notcontains $extension) {
+        $isEnvironmentTemplate = [System.IO.Path]::GetFileName($relativePath) -match '^\.env(?:\.|$)'
+        if ($textExtensions -notcontains $extension -and -not $isEnvironmentTemplate) {
             continue
         }
 
+        $lines = if ($Staged) {
+            $stagedContents = & git show --no-textconv ":$relativePath"
+            if ($LASTEXITCODE -ne 0) {
+                $findings.Add("$relativePath`: staged contents could not be inspected")
+                continue
+            }
+            @($stagedContents)
+        }
+        else {
+            [System.IO.File]::ReadLines($fullPath)
+        }
+
         $lineNumber = 0
-        foreach ($line in [System.IO.File]::ReadLines($fullPath)) {
+        foreach ($line in $lines) {
             $lineNumber++
             if ($relativePath -eq 'scripts/Test-PublicRepository.ps1' -and $line -match '^\s*Pattern\s*=') {
                 continue
@@ -98,6 +126,12 @@ try {
 			# containing maintainer addresses. Continue every credential, token, IP,
 			# and path check, but do not treat upstream metadata as HAVEN user data.
 			$isDependencyLock = $relativePath -match '(?i)(?:^|/)package-lock\.json$'
+
+			foreach ($privateIdentifier in $privateIdentifiers) {
+				if ($line.Contains($privateIdentifier, [System.StringComparison]::OrdinalIgnoreCase)) {
+					$findings.Add("$relativePath`:$lineNumber`: owner-defined private identifier")
+				}
+			}
 
             foreach ($check in $checks) {
 				if ($isDependencyLock -and $check.Name -eq 'non-example email address') { continue }

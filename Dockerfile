@@ -34,7 +34,7 @@ COPY --from=go-build /out/haven-nas-probe-arm64 /haven-nas-probe-arm64
 COPY --from=go-build --chown=65532:65532 /out/data/ /var/lib/haven/
 USER 65532:65532
 VOLUME ["/var/lib/haven"]
-EXPOSE 8080
+EXPOSE 8080 5443
 ENV HAVEN_LISTEN_ADDRESS=0.0.0.0:8080 \
     HAVEN_DATA_PATH=/var/lib/haven/haven.db \
     HAVEN_STATE_DIRECTORY=/var/lib/haven \

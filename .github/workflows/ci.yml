@@ -74,7 +74,18 @@ jobs:
 
       - name: Check repository for private material
         shell: pwsh
-        run: ./scripts/Test-PublicRepository.ps1
+        run: |
+          ./scripts/Test-PublicRepository.Tests.ps1
+          ./scripts/Test-PublicRepository.ps1
+
+      - name: Validate versioned Git hook
+        shell: bash
+        run: |
+          test "$(git ls-files -s -- .githooks/pre-commit | awk '{print $1}')" = "100755"
+          sh -n .githooks/pre-commit
+
+      - name: Validate loopback-only Compose defaults
+        run: docker compose --env-file .env.example config --quiet
 
       - name: Build checksummed endpoint-agent artifacts
         shell: pwsh
@@ -221,9 +232,8 @@ jobs:
         run: echo "${{ github.token }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
 
       - name: Build CI-approved image
-        env:
-          IMAGE: ghcr.io/adamwentworth/haven-hub
         run: |
+          IMAGE="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/haven-hub"
           docker build --pull \
             --build-arg "HAVEN_BUILD_SHA=${GITHUB_SHA}" \
             --tag "${IMAGE}:sha-${GITHUB_SHA}" \
@@ -231,9 +241,8 @@ jobs:
             .
 
       - name: Publish CI-approved image
-        env:
-          IMAGE: ghcr.io/adamwentworth/haven-hub
         run: |
+          IMAGE="ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/haven-hub"
           docker push "${IMAGE}:sha-${GITHUB_SHA}"
           docker push "${IMAGE}:main"
 
@@ -254,9 +263,15 @@ jobs:
       - name: Dispatch approved revision to HomeOps
         env:
           HOMEOPS_DISPATCH_TOKEN: ${{ secrets.HOMEOPS_DISPATCH_TOKEN }}
+          CONFIGURED_HOMEOPS_REPOSITORY: ${{ vars.HOMEOPS_REPOSITORY }}
         run: |
           if [[ -z "${HOMEOPS_DISPATCH_TOKEN}" ]]; then
             echo "HOMEOPS_DISPATCH_TOKEN is not configured." >&2
+            exit 1
+          fi
+          homeops_repository="${CONFIGURED_HOMEOPS_REPOSITORY:-${GITHUB_REPOSITORY_OWNER}/HomeOps}"
+          if [[ ! "${homeops_repository}" =~ ^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$ ]]; then
+            echo "HOMEOPS_REPOSITORY must use the owner/repository form." >&2
             exit 1
           fi
           payload=$(jq -n \
@@ -268,5 +283,5 @@ jobs:
             --header "Accept: application/vnd.github+json" \
             --header "Authorization: Bearer ${HOMEOPS_DISPATCH_TOKEN}" \
             --header "X-GitHub-Api-Version: 2022-11-28" \
-            https://api.github.com/repos/AdamWentworth/HomeOps/dispatches \
+            "https://api.github.com/repos/${homeops_repository}/dispatches" \
             --data "${payload}"

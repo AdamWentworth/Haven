@@ -85,6 +85,13 @@ HAVEN treats security statements as testable claims. A green test does not prove
 
 ## Required local gates
 
+The publication guard has its own regression test. It proves that staged mode reads the Git index rather than a clean working-tree replacement, scans `.env` templates, and honors the clone-local private-identifier denylist:
+
+```powershell
+pwsh -NoProfile -File .\scripts\Test-PublicRepository.Tests.ps1
+pwsh -NoProfile -File .\scripts\Test-PublicRepository.ps1
+```
+
 ```powershell
 go test .\...
 go vet .\...

@@ -119,7 +119,7 @@ func TestLocalSnapshotsTreatHostnameCaseAsOneDevice(t *testing.T) {
 	first := model.SecuritySnapshot{
 		CollectedAt: firstCollectedAt,
 		Device: model.DeviceSummary{
-			HostName:        "adam-pc",
+			HostName:        "desk-workstation",
 			OperatingSystem: "windows",
 		},
 		FirewallProfiles: []model.FirewallProfileStatus{},
@@ -132,7 +132,7 @@ func TestLocalSnapshotsTreatHostnameCaseAsOneDevice(t *testing.T) {
 
 	second := first
 	second.CollectedAt = firstCollectedAt.Add(time.Minute)
-	second.Device.HostName = "ADAM-PC"
+	second.Device.HostName = "DESK-WORKSTATION"
 	second.Device.OperatingSystem = "Microsoft Windows 10 Pro"
 	if err := store.SaveSnapshot(ctx, second); err != nil {
 		t.Fatal(err)
@@ -145,10 +145,10 @@ func TestLocalSnapshotsTreatHostnameCaseAsOneDevice(t *testing.T) {
 	if len(devices) != 1 {
 		t.Fatalf("expected one case-insensitive local device, got %#v", devices)
 	}
-	if devices[0].HostName != "ADAM-PC" || devices[0].OperatingSystem != "Microsoft Windows 10 Pro" {
+	if devices[0].HostName != "DESK-WORKSTATION" || devices[0].OperatingSystem != "Microsoft Windows 10 Pro" {
 		t.Fatalf("expected the latest device metadata, got %#v", devices[0])
 	}
-	if localDeviceID("adam-pc") != localDeviceID(" ADAM-PC ") {
+	if localDeviceID("desk-workstation") != localDeviceID(" DESK-WORKSTATION ") {
 		t.Fatal("local device identity must ignore hostname case and surrounding whitespace")
 	}
 }
@@ -206,8 +206,8 @@ func TestMigrationRemovesOlderCaseOnlyLocalDuplicate(t *testing.T) {
 			id, display_name, host_name, operating_system, architecture,
 			trust_state, enrolled_at, last_seen_at, last_collected_at
 		 ) VALUES
-			('local_old', 'adam-pc', 'adam-pc', 'windows', 'amd64', 'local', ?, ?, ?),
-			('local_new', 'ADAM-PC', 'ADAM-PC', 'Microsoft Windows 10 Pro', 'amd64', 'local', ?, ?, ?)`,
+			('local_old', 'desk-workstation', 'desk-workstation', 'windows', 'amd64', 'local', ?, ?, ?),
+			('local_new', 'DESK-WORKSTATION', 'DESK-WORKSTATION', 'Microsoft Windows 10 Pro', 'amd64', 'local', ?, ?, ?)`,
 		older, older, older,
 		older, newer, newer,
 	)

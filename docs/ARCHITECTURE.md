@@ -6,8 +6,7 @@ HAVEN is a browser-first, agent-based personal security observatory.
 
 ```text
 Windows agent ─┐
-Linux agent ───┼── outbound mutually authenticated observations ──> HAVEN Hub
-macOS agent ───┘                                                        │
+Ubuntu agent ──┴── outbound mutually authenticated observations ──> HAVEN Hub
                                                                         ├── SQLite
 Private browser clients ─────────── private HTTPS ──────────────────────┘
         ▲                                                               │
@@ -15,6 +14,8 @@ Private browser clients ─────────── private HTTPS ──�
 ```
 
 The hub owns persistence, policy, presentation, and future audit history. Native agents own platform collection. Agents initiate outbound communication; the hub never opens a management port on an endpoint.
+
+Windows and Ubuntu are the currently supported endpoint platforms. Other Linux distributions may return partial evidence because the Linux collector expects Ubuntu facilities such as `apt`, UFW, AppArmor, and systemd. macOS has no native collector or installer yet; a Go binary can return an explicit unsupported-platform notice, but that is not macOS security monitoring.
 
 The hub must not provide a general-purpose remote shell. Future actions are fixed, named capabilities with separate authorization, confirmation, audit, and rollback behavior.
 

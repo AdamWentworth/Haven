@@ -25,7 +25,7 @@
   <a href="LICENSE"><img alt="MIT license" src="https://img.shields.io/badge/license-MIT-6ee7ad"></a>
 </p>
 
-HAVEN turns native security evidence into one explainable household view without replacing Microsoft Defender, Linux firewalls, browser protections, or other trusted controls. A Go hub receives mutually authenticated reports from unprivileged Windows and Linux agents, while the React console and hardened Electron client keep observation, review, and deliberately narrow actions understandable.
+HAVEN turns native security evidence into one explainable household view without replacing Microsoft Defender, Linux firewalls, browser protections, or other trusted controls. A Go hub receives mutually authenticated reports from native Windows and Ubuntu agents, while the React console and hardened Electron client keep observation, review, and deliberately narrow actions understandable. Collection remains read-only, but the packaged Windows reporter runs elevated so protected posture signals are not silently omitted.
 
 > [!IMPORTANT]
 > HAVEN is pre-release personal infrastructure, not an antivirus, password manager, SIEM, or provider-session authority. It never stores passwords, cookie values, recovery codes, authenticator seeds, packet payloads, or arbitrary remote commands. Public demos must use synthetic data.
@@ -44,12 +44,20 @@ HAVEN turns native security evidence into one explainable household view without
 - **Portable by design** — reusable public product code remains separate from private network configuration and recoverable local state.
 - **Operationally explainable** — authenticated system diagnostics, redacted recovery guidance, and read-only hub/agent doctor commands distinguish repair from re-enrollment.
 
-Read the [architecture](docs/ARCHITECTURE.md), [threat model](docs/THREAT_MODEL.md), [verification map](docs/VERIFICATION.md), and [portability guide](docs/PORTABILITY.md) for the evidence and boundaries behind those claims.
+Start with the [installation and support guide](docs/GETTING_STARTED.md). The [architecture](docs/ARCHITECTURE.md), [threat model](docs/THREAT_MODEL.md), [verification map](docs/VERIFICATION.md), and [portability guide](docs/PORTABILITY.md) document the evidence and boundaries behind those claims.
+
+| Component | Supported now | Not yet supported |
+| --- | --- | --- |
+| Hub | Source execution on Windows and Ubuntu; hardened Linux container | Turnkey production DNS/TLS/firewall provisioning |
+| Endpoint agent | Windows and Ubuntu | macOS; fully generic Linux-distribution parity |
+| Owner client | Modern browser; Windows Electron installer | Signed Linux or macOS desktop packages |
+
+The public clone is a complete product source tree, not a copy of one household. It can run a loopback development hub immediately; a multi-device production installation still requires an owner-supplied private deployment layer and deliberate enrollment of every endpoint.
 
 <details>
-<summary><strong>Complete implemented capability inventory for milestone 0.25</strong></summary>
+<summary><strong>Implemented capability inventory through milestone 0.26</strong></summary>
 
-### Milestone 0.25 — Brand and Packaging Polish
+### Current pre-release scope
 
 The current implementation provides:
 
@@ -232,6 +240,8 @@ The hub is centralized; collection is not. Each enrolled machine observes itself
 
 ## 🚀 Run locally on Windows
 
+For the complete cross-platform support matrix, production boundary, and endpoint enrollment sequence, use [Getting started](docs/GETTING_STARTED.md). This section is the shortest Windows source-development path.
+
 Requirements:
 
 - Go 1.26.6 or later
@@ -361,6 +371,14 @@ Set-Location ..
 
 pwsh -NoProfile -File .\scripts\Test-PublicRepository.ps1
 ```
+
+Enable the versioned pre-commit privacy guard once per clone:
+
+```powershell
+pwsh -NoProfile -File .\scripts\Enable-GitHooks.ps1
+```
+
+Git does not activate repository-owned hooks when cloning. This command sets this clone's local `core.hooksPath`; the hook requires PowerShell 7 and scans the actual staged blobs. GitHub Actions repeats the full-tree check, validates the hook's executable mode and shell syntax, and remains the authoritative backstop. Owners may add literal private labels to `.git/info/haven-private-identifiers`, one per line, for a local-only publication denylist that Git cannot commit.
 
 ## ♻️ Portability and recovery
 
