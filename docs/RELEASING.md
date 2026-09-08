@@ -4,7 +4,7 @@ HAVEN uses one semantic release number across the Go hub and agents, web package
 
 ## Prepare a release
 
-1. Work on a short-lived, purpose-named branch following the [contributor workflow](../CONTRIBUTING.md); do not add an agent or tool prefix unless the owner requests one. Keep product behavior, migrations, privacy boundaries, and deployment implications explicit.
+1. Work on a short-lived, purpose-named branch following the [owner’s development workflow](DEVELOPMENT.md); do not add an agent or tool prefix unless the owner requests one. Keep product behavior, migrations, privacy boundaries, and deployment implications explicit.
 2. Update the release version in `internal/buildinfo/buildinfo.go`, `web/package.json`, both npm lockfiles, and `desktop/package.json`.
 3. Add one concise entry to `CHANGELOG.md`. Record user-visible behavior and operational compatibility, not a commit diary.
 4. Run the required local gates in `VERIFICATION.md`, including the version and public-repository checks.

@@ -44,7 +44,7 @@ HAVEN turns native security evidence into one explainable household view without
 - **Portable by design** — reusable public product code remains separate from private network configuration and recoverable local state.
 - **Operationally explainable** — authenticated system diagnostics, redacted recovery guidance, and read-only hub/agent doctor commands distinguish repair from re-enrollment.
 
-Start with the [installation and support guide](docs/GETTING_STARTED.md). The [architecture](docs/ARCHITECTURE.md), [threat model](docs/THREAT_MODEL.md), [verification map](docs/VERIFICATION.md), and [portability guide](docs/PORTABILITY.md) document the evidence and boundaries behind those claims. The [contributor workflow](CONTRIBUTING.md) and [product direction](docs/ROADMAP.md) explain how work is selected and carried out.
+Start with the [installation and support guide](docs/GETTING_STARTED.md). The [architecture](docs/ARCHITECTURE.md), [threat model](docs/THREAT_MODEL.md), [verification map](docs/VERIFICATION.md), and [portability guide](docs/PORTABILITY.md) document the evidence and boundaries behind those claims. The [owner’s development workflow](docs/DEVELOPMENT.md) and [product direction](docs/ROADMAP.md) explain how work is selected and carried out.
 
 | Component | Supported now | Not yet supported |
 | --- | --- | --- |
