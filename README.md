@@ -44,7 +44,7 @@ HAVEN turns native security evidence into one explainable household view without
 - **Portable by design** — reusable public product code remains separate from private network configuration and recoverable local state.
 - **Operationally explainable** — authenticated system diagnostics, redacted recovery guidance, and read-only hub/agent doctor commands distinguish repair from re-enrollment.
 
-Start with the [installation and support guide](docs/GETTING_STARTED.md). The [architecture](docs/ARCHITECTURE.md), [threat model](docs/THREAT_MODEL.md), [verification map](docs/VERIFICATION.md), and [portability guide](docs/PORTABILITY.md) document the evidence and boundaries behind those claims.
+Start with the [installation and support guide](docs/GETTING_STARTED.md). The [architecture](docs/ARCHITECTURE.md), [threat model](docs/THREAT_MODEL.md), [verification map](docs/VERIFICATION.md), and [portability guide](docs/PORTABILITY.md) document the evidence and boundaries behind those claims. The [contributor workflow](CONTRIBUTING.md) and [product direction](docs/ROADMAP.md) explain how work is selected and carried out.
 
 | Component | Supported now | Not yet supported |
 | --- | --- | --- |
@@ -279,6 +279,6 @@ Haven/
 
 ## 📍 Project status
 
-HAVEN remains pre-release. Version 0.27 focuses on smaller code boundaries, stronger regression coverage, isolated clean-start and recovery exercises, and a repeatable release process. See the [project roadmap](docs/ROADMAP.md) for active workstreams and deliberately deferred decisions, the [changelog](CHANGELOG.md) for concise release notes, and the [release guide](docs/RELEASING.md) for the verified distribution path.
+HAVEN remains pre-release. Version 0.27 completed the immediate stabilization work; the project is now in an operate-and-observe phase with no feature milestone scheduled merely for momentum. See the [product direction](docs/ROADMAP.md) for considered work and the evidence required to resume it, the [changelog](CHANGELOG.md) for concise release notes, and the [release guide](docs/RELEASING.md) for the verified distribution path.
 
 Completed behavior is documented where it can stay accurate: security guarantees in the [threat model](docs/THREAT_MODEL.md), implementation boundaries in the [architecture](docs/ARCHITECTURE.md), and claim-to-test evidence in the [verification map](docs/VERIFICATION.md). The README intentionally does not maintain a milestone diary.
