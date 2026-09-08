@@ -54,163 +54,9 @@ Start with the [installation and support guide](docs/GETTING_STARTED.md). The [a
 
 The public clone is a complete product source tree, not a copy of one household. It can run a loopback development hub immediately; a multi-device production installation still requires an owner-supplied private deployment layer and deliberate enrollment of every endpoint.
 
-<details>
-<summary><strong>Implemented capability inventory through milestone 0.26</strong></summary>
+## Current scope
 
-### Current pre-release scope
-
-The current implementation provides:
-
-- One canonical transparent sharp-crowned gradient shield-and-H mark shared by the dashboard, repository presentation, favicon, and native desktop package
-- Purpose-specific local icon assets: transparent standard marks, an opaque maskable application tile with safe cropping space, and a monochrome platform mark
-- Deterministic standard-library asset generation plus tests for transparency, maskability, manifest purpose, local-only delivery, and Windows-specific optical sizing
-- A native Windows icon containing dedicated 16–256px entries so the title bar remains legible while the taskbar mark uses its available canvas
-- A dedicated System & Recovery workspace with live hub checks, release and compatibility evidence, a redacted recovery map, and platform-specific install/repair/re-enrollment guidance
-- An authenticated, non-cacheable diagnostics API that returns only bounded conclusions—never filesystem paths, hostnames, addresses, device identities, certificate contents, account details, or secret values
-- Read-only `haven-hub doctor` and `haven-agent doctor` commands with optional JSON output, useful exit status, and explicit guarantees that they do not initialize state, migrate databases, repair services, enroll devices, rotate trust, or contact providers
-- Structural validation of SQLite state, protected key manifests, HTTPS owner origin, listener configuration, hub mutual-TLS certificate chains, agent identity chains, packaged background-installation evidence, and locally recorded accepted-report state
-- A generated recovery checklist that separates complete-state continuity from a clean initialization and makes private deployment choices explicit without exporting them
-- A Go hub with a responsive React and TypeScript dashboard embedded in its executable
-- A dedicated Electron desktop client that uses its bundled Chromium renderer for consistent WebAuthn/passkey support while loading only the exact private HAVEN HTTPS origin
-- A sandboxed remote-content boundary with Node.js integration, preload scripts, IPC bridges, webviews, downloads, popups, external navigation, developer tools, and unsolicited permissions disabled
-- A persistent application-specific session with encrypted cookies in packaged builds, plus executable fuses that reject Node launch modes, Node environment/inspection injection, modified embedded application code, and unpackaged application loading
-- A reproducible current-user Windows installer; the shell remains cross-platform source, while signed Windows and platform-specific Linux/macOS distribution are separate release-engineering work
-- An installable application manifest and dedicated-window experience for compatible desktop browsers, using the same private HTTPS origin, passkeys, Web Push subscription, and hub-delivered updates
-- A System & Recovery installation panel that reports whether HAVEN is already installed, ready for the browser install prompt, or available through the browser's app menu
-- A deliberately unprivileged application boundary: no native command bridge, local database, duplicated credentials, authenticated-page cache, or silent notification permission request
-- Per-device browser inventory for Chrome, Edge, Brave, Chromium, and Firefox user profiles on Windows and Linux, with locally bundled browser branding and a dedicated routed workspace
-- A Chrome-only, per-profile site-data review that groups current cookies by domain; automatically separates stronger, possible, and limited session evidence; shows aggregate totals, session/persistent scope, Secure and HTTP-only coverage, last access, and latest persistent expiry; and provides a separate cleanup review
-- Four explicit domain-level decisions per Chrome profile: `Signed in — keep`, `Recognized — ordinary`, `Clear candidate`, and `Review later`, plus a reset to `Unreviewed`
-- A searchable, profile-first cleanup queue that prioritizes deliberate clear candidates, suggests unprotected sites unused for at least 90 days—or sites without a usable access date—and excludes protected or deferred sites
-- Guided cleanup that sends the owner back to Chrome to verify and remove selected site data; HAVEN does not delete cookies, log out sessions, or modify the browser
-- A finite browser-hardening workspace that separates concrete protection failures and meaningful extension changes from ordinary logged-in state, summarizes declared extension exposure without a malware verdict, and preserves a bounded incident-response plan for use only after a concrete trigger
-- Privacy-reduced extension review showing friendly name, version, active/installed state where the browser exposes it, profile count, broad/specific/no declared site access, and an explicit allowlist of security-relevant capabilities
-- Cookie database queries select only domain and aggregate count/date/flag columns; cookie names, values, encrypted values, paths, passwords, tokens, page contents, form data, browsing-history entries, raw extension IDs, raw site-match patterns, and raw profile paths have no reporting field
-- Routine Chrome profile labels and grouped domains remain live-only in the latest authenticated observation, are removed from historical persistence, and never enter findings, activity history, or push notifications
-- Deliberate owner classifications persist separately as AES-GCM-encrypted profile fingerprint, domain, and fixed decision state; domains are omitted from audit history, and cookie names, values, tokens, and profile labels are never stored in this record
-- Read-only Windows visibility for Defender potentially unwanted app protection, Defender Network Protection, and Microsoft Defender SmartScreen, with disabled/audit/unknown states presented as evidence rather than invented compromise claims
-- An endpoint-local, privacy-reduced extension baseline that stays quiet on its first accepted observation and ignores routine version updates, removals, and permission reductions
-- Review findings when a browser extension is newly installed, re-enabled, gains a sensitive declared permission, or expands its declared/optional site-access category; only the friendly name, browser, coarse access, allowlisted added capabilities, and one-way fingerprints are reported
-- Read-only Windows evidence for Chrome App-Bound Encryption policy, Device Bound Session Credentials policy, and a bounded count of Chrome-source Application-log event 257 verification failures from the last seven days
-- Explicit interpretation limits: an unset App-Bound Encryption policy follows Chrome's enabled-by-default behavior when possible, an unset device-bound-session policy follows Google's gradual rollout, and a verification failure is a review signal rather than proof of malware
-- A dedicated Accounts workspace for owner-reported email, social, developer, finance, gaming, shopping, work, and other profiles
-- Manual status tracking for two-step verification, factor types, password uniqueness/passwordless use, recovery methods, backup-code readiness, review dates, structured review facts, and exceptional context notes
-- Encrypted provider-session review status, review date, and four structured checks for signed-in devices, recent security activity, third-party access, and unused or unfamiliar sessions
-- Direct shortcuts to known providers' official session/security pages; HAVEN records the owner's result but never signs in to a provider, receives an OAuth grant, or enumerates provider sessions. Local Chrome cookie metadata is only a review hint—not provider authentication evidence.
-- Fresh passkey confirmation before account records are returned to a browser, followed by a session-bound grant held only in browser memory with a 15-minute inactivity timeout and an eight-hour absolute limit
-- Explicit account-workspace locking that immediately removes decrypted profiles from browser state without signing out of the rest of HAVEN
-- Locally bundled, recognizable platform marks with a clear monogram fallback for custom providers; no remote logo request or provider tracking is introduced
-- Fact-derived suggestions for disabled two-step verification, reused passwords, missing recovery methods or backup codes, SMS/email-only factors, unknown checklist fields, and reviews older than six months
-- Clear separation between account-notebook suggestions and threat alerts: notebook gaps never create push notifications or claim that an account was compromised
-- AES-256-GCM encryption of every account profile using a dedicated random key outside SQLite, with ciphertext bound to its opaque profile identity
-- Strict account APIs with no password, cookie, authenticator seed, recovery-code, OAuth-token, or provider-credential fields; recognizable secret formats are rejected and free-form notes carry an explicit warning
-- Privacy-bounded account audit events that retain only an opaque profile identity and operation, never provider names, identifiers, posture choices, or notes
-- Read-only Windows collection for Microsoft Defender, Windows Firewall, device posture, and up to 250 established or listening TCP endpoints
-- SQLite posture history with migrations, consistent online backups, a 90-day default retention window, and no historical storage of connection or workload details
-- A native Go agent with one-time enrollment, a unique ECDSA certificate, and TLS 1.3 mutual authentication
-- Authenticated, privacy-bounded agent build evidence containing the public release, immutable revision, platform, installation kind, observed capability manifest, and collection-notice count
-- A fleet lifecycle view that keeps report freshness, build maintenance, collection limitations, and endpoint security posture as separate facts
-- Backward-compatible acceptance of pre-0.14 enrolled reporters, which remain visible as legacy until deliberately updated
-- Exact-version and exact-revision comparison performed by the hub, without creating security alerts or remotely executing endpoint updates
-- Checksummed Windows amd64, Linux amd64, and Linux arm64 agent artifacts produced from an explicit full source revision by CI
-- Idempotent Windows and Linux install/repair workflows plus read-only status commands and identity-preserving uninstall procedures
-- Reproducible Windows Task Scheduler packaging that runs a GUI-subsystem reporter and suppresses console allocation for child collectors, preventing periodic focus theft or window flashes
-- Stable, browser-native routes for Overview, Devices, Network, Appliances, Accounts, Activity, System & Recovery, and per-device posture, browser, services, and history views
-- A concise network-wide landing page instead of forcing every control and observation into one scrolling dashboard
-- Bounded transient report retries that reuse a single observation identity, with idempotent hub acceptance when a successful response is lost
-- A 35-minute server-owned freshness allowance so one missed 15-minute agent run does not create a noisy false alarm
-- Database-backed readiness checks and a shared release version plus immutable build revision in health, runtime, Settings, and the footer
-- Expanded rendered-component, routing, API-contract, accessibility, security-projection, and cross-platform Go tests with honest whole-frontend coverage gates
-- Commit-pinned GitHub Actions, digest-pinned container build inputs, and CodeQL analysis for Go and TypeScript
-- Native Ubuntu posture collection for updates, restart state, UFW policy, SSH, AppArmor, time synchronization, bounded failed-unit names, root-filesystem capacity, and live TCP/UDP endpoints
-- Live Linux systemd service/socket attribution from bounded socket, process-cgroup, and unprivileged user-socket metadata, without retaining command lines or full cgroup paths
-- A logical listener inventory that groups duplicate IPv4/IPv6 sockets and separates non-local services needing review, expected services, host-only services, and active connections
-- A short-lived, isolated Docker inventory exporter that supplies only running workload names, image references, Compose identity, health, and published/container-only port mappings to the normal socket-blocked Linux agent
-- Live Docker-to-listener attribution without collecting environment variables, commands, mounts, arbitrary labels, logs, container IDs, or container network addresses
-- A one-time suggested-baseline review that derives high-confidence candidates from platform roles, live process ownership, sanitized Docker workload mappings, and owner-constrained Linux dynamic-service ranges without silently trusting the first observation
-- Per-device expected-service labels for exact ports or bounded ranges, bind scope, and optional approved process/workload/systemd owners, with atomic bulk approval, an auditable owner decision, and no firewall or service side effects
-- Optional server-enforced temporary service expectations from one hour to 30 days; they survive hub restarts, expire with the browser closed, and create a distinct review and notification lifecycle when a still-active listener needs approval again
-- Process-constrained grouping for Windows dynamic RPC listeners so ordinary port rotation does not create dozens of permanent exceptions or conceal unrelated high-port services
-- Privacy-bounded listener appearance history containing only protocol, port, bind scope, and timestamps—never payloads or historical remote connections
-- Strictly increasing report sequences, timestamp checks, payload limits, rate limits, device revocation, and versioned messages
-- A device inventory and detail view with explicitly synthetic demo fixtures for portfolio work
-- A network-wide coverage view that summarizes report freshness, verified host firewalls, current findings, and unreviewed service exposure across enrolled devices
-- Credential-free TCP/TLS reachability for explicitly configured private network appliances, plus optional SNMP and forced-command SSH health collection from file-backed credentials
-- NAS disk inventory and SMART status without serial numbers, Linux storage-set member/state monitoring (including multi-disk RAID), volume capacity, non-waking disk temperature checks, system thermal sensors, uptime, kernel, and firmware metadata when safely exposed
-- Explicit verified, partial, unsupported, and unavailable coverage so missing NAS telemetry is never presented as healthy
-- Live relationship grouping that distinguishes explicitly enrolled peers, observed-only private endpoints, and Internet destinations grouped by source owner and destination service
-- Cross-device finding lifecycle context without retaining raw remote endpoints, connection history, packet contents, or inferred device trust
-- A hub-owned current-alert view derived only from server-classified report freshness, evaluated posture findings, and owner-reviewed service expectations
-- Service-drift alerts when a known protocol/port/scope is still present but its live process, systemd-unit, or Docker-workload attribution no longer matches the approved baseline
-- Opt-in Web Push delivery evaluated by the Ubuntu hub every minute, including when the dashboard is closed
-- Encrypted-at-rest push capability endpoints, encrypted Web Push payloads, public-destination validation, redirect refusal, bounded retries, automatic expiry handling, and durable per-destination recurrence receipts
-- Generic lock-screen messages containing only device name and severity; finding details remain inside the authenticated HAVEN dashboard
-- Silent baselining when a destination is first enabled, recurrence-aware deduplication for medium/high alerts, and no interruption for low-severity review items
-- A server-published freshness allowance so browser wording and stale timestamps cannot silently drift from the server's policy
-- Frontend and Go invariant tests for address scope, listener grouping, expectation matching, relationship direction, mirrored-flow deduplication, external-address privacy, server-owned alert derivation, subscription validation, delivery baselining, retry timing, recurrence, and generic payload privacy
-- Enforced coverage thresholds for security projection modules plus Go race detection in CI
-- Clear language that observed-only assets are neither enrolled nor trusted and that the overview does not actively scan the LAN
-- Explainable Windows baseline checks for servicing, BitLocker, Secure Boot, TPM, remote access, local administrator count, and Defender threat counts
-- Consistent remote-access policy across Windows and Linux: a running SSH service is inventory, while unsafe authentication or network boundaries—not service presence alone—are actionable
-- Non-elevated TPM verification through Windows TPM Tool when the administrative PowerShell provider is unavailable
-- RDP context that distinguishes NLA-protected, firewall-restricted access from unrestricted or unverifiable exposure
-- Separate healthy, intentionally configured, review, and unverified states with per-check observation timestamps
-- Prioritized findings with evidence and conservative next steps instead of an opaque security score
-- Continuous local collection every 15 minutes by default, with serialized manual refreshes
-- A privacy-bounded activity ledger that records only when a finding opens or resolves
-- An activity-first dashboard with status for every enrolled background-alert destination
-- Passwordless owner authentication using the cross-platform WebAuthn passkey standard (Windows Hello is one supported provider)
-- Multiple labeled owner passkeys for trusted computers, phones, and hardware security keys, with local terminal recovery
-- Expiring server-side sessions, strict same-origin checks, anti-forgery tokens, and rate-limited authentication ceremonies
-- Finding acknowledgement, 24-hour snooze, accepted-risk notes, immediate alert refresh, and a privacy-bounded audit trail; accepted risks and active snoozes leave alert, reminder, and review-count surfaces without erasing collected facts
-- Provider-advertised action capabilities with fresh passkey confirmation; the first Windows provider offers a Defender quick scan and security-intelligence update
-- No browser endpoint for arbitrary commands, scripts, paths, process launches, firewall changes, or Defender exclusions
-- Privacy-bounded collection: administrator names, update titles, threat names, and detected resource paths are not collected
-- A private HomeOps deployment boundary for a resource-bounded Ubuntu hub with private HTTPS, local DNS, and consistent backups
-- Visible collector failures instead of silently treating unavailable information as healthy
-
-The dashboard and agent endpoint both bind to loopback during development. No Docker runtime or deployment is needed for local iteration. A native development hub can collect from its own host; every containerized hub runs in hub-only mode and accepts observations only from explicitly enrolled native agents. Production uses separate, explicitly private listeners. Background alerts require explicit browser permission and a one-time destination enrollment. They use the browser vendor's push service, so delivery metadata leaves the home network; message content is encrypted and intentionally generic. HAVEN installs no privileged tray process or browser extension.
-
-Chrome session-defense interpretation follows Google's official [Application-Bound Encryption policy](https://chromeenterprise.google/policies/application-bound-encryption-enabled/), [Device Bound Session Credentials policy](https://chromeenterprise.google/policies/bound-session-credentials-enabled/), and [App-Bound Encryption event guidance](https://security.googleblog.com/2024/07/improving-security-of-chrome-cookies-on.html). HAVEN reports the bounded local evidence those sources define; it does not claim stronger coverage than Chrome or the provider can establish.
-
-Managed appliances are configured separately from endpoint enrollment. Set `HAVEN_MANAGED_APPLIANCES_FILE` to a private JSON file owned by the deployment system. HAVEN accepts only literal private unicast addresses and explicit TCP ports; hostnames, address ranges, UDP probes, unknown fields, and discovery directives are rejected. A definition resembles the following, with the placeholder replaced only in private deployment configuration:
-
-```json
-{
-  "appliances": [{
-    "id": "home-nas",
-    "displayName": "Home NAS",
-    "kind": "nas",
-    "address": "<private IPv4 address>",
-    "health": {
-      "provider": "terramaster-tos5",
-      "deepCheckMode": "manual",
-      "snmpPort": 161,
-      "communityFile": "/run/secrets/nas-snmp-community",
-      "sshPort": 9222,
-      "sshUsername": "<dedicated or administrator account>",
-      "sshPrivateKeyFile": "/run/secrets/nas-monitor-key",
-      "sshHostKeySHA256": "SHA256:<pinned ED25519 fingerprint>"
-    },
-    "services": [
-      { "id": "smb", "name": "SMB file service", "protocol": "TCP", "port": 445, "tls": false, "required": true },
-      { "id": "management", "name": "Management HTTPS", "protocol": "TCP", "port": 5443, "tls": true, "required": true }
-    ]
-  }]
-}
-```
-
-The health block is optional. Set `deepCheckMode` to `manual` when the appliance emits login notifications: scheduled checks then use SNMP only, while the owner can request one SSH-backed disk, SMART, temperature, storage-set, and firmware refresh from the Appliances page. The last deep evidence and its timestamp remain visible between requests. Omitting the field preserves the earlier `automatic` behavior for deployments that intentionally want SSH on every monitoring cycle.
-
-Community and private-key values must live in owner-readable files mounted by private deployment configuration; inline credentials and relative secret paths are rejected. The SSH key must be pinned to the appliance's ED25519 host fingerprint and constrained appliance-side to the fixed `haven-nas-probe` command, with forwarding and PTY allocation disabled. SNMP v2c is not encrypted, so it belongs only on a trusted private segment with a unique random community—not the default `public` value.
-
-The helper emits a bounded JSON schema containing only current health facts. It excludes accounts, shares, filenames, disk serial numbers, network configuration, commands, and arbitrary vendor responses. SMART is invoked with `-n standby,3`, which leaves a sleeping disk asleep and reports that limitation instead of waking it for a check. Capacity warnings begin at 85% used and become critical at 95%; disk temperature warnings begin at 50°C and become critical at 60°C; system temperature boundaries are 75°C and 90°C. Degraded, failed, and rebuilding multi-member storage sets remain visible and actionable. A one-member Linux `md` set is presented as single-disk storage with no drive redundancy rather than as configured RAID. Vendor firmware may remain partially verified when the installed TOS release is not available through these bounded sources. Future owner-confirmed device metadata will distinguish a manually recorded TOS version from automatic verification without turning missing firmware telemetry into an alert.
-
-The hub records only current reachability, normalized health evidence, bounded error classes, check timestamps, and the public metadata of a presented TLS certificate. It never stores appliance credentials, raw responses, packet payloads, or newly discovered services. A required endpoint or complete health source must fail two consecutive checks before HAVEN creates an availability alert; visibility-only endpoints and incomplete-but-non-actionable health coverage remain quiet.
-
-Because HAVEN is pre-release and observation schema 2 is still evolving, hubs and agents should use a schema accepted by the hub. Exact build alignment remains useful provenance, but a release-number difference alone is not an update requirement when the authenticated report is protocol compatible.
-
-</details>
+HAVEN is currently a pre-release project. Its supported surfaces are summarized above; precise security claims and their automated evidence live in the [verification map](docs/VERIFICATION.md). Operational boundaries belong in the [architecture](docs/ARCHITECTURE.md), [threat model](docs/THREAT_MODEL.md), and focused setup guides instead of a duplicated feature ledger in this README.
 
 ---
 
@@ -361,6 +207,7 @@ go test .\...
 go vet .\...
 go mod verify
 go run golang.org/x/vuln/cmd/govulncheck@v1.7.0 .\...
+pwsh -NoProfile -File .\scripts\Test-VersionConsistency.ps1
 
 Set-Location .\web
 npm ci
@@ -430,12 +277,8 @@ Haven/
 6. **Collect proportionately.** Connection, workload, and browser/extension inventory details are live-only by default; packet payloads and browsing content are outside HAVEN's scope.
 7. **Respect every household member.** Monitoring another person's device requires visible opt-in and transparent collection.
 
-## 🛣️ Milestone history and direction
+## 📍 Project status
 
-Milestone 0.26 separates quiet routine NAS observation from owner-requested deep evidence. Private deployments can keep SNMP and service reachability on the normal interval while running the pinned, forced-command SSH helper only from an authenticated dashboard action; HAVEN retains the last deep-check timestamp and evidence, rate-limits duplicate requests, warns that the appliance may emit one login notification, and audits the bounded action without remote response data.
+HAVEN remains pre-release. Version 0.27 focuses on smaller code boundaries, stronger regression coverage, isolated clean-start and recovery exercises, and a repeatable release process. See the [project roadmap](docs/ROADMAP.md) for active workstreams and deliberately deferred decisions, the [changelog](CHANGELOG.md) for concise release notes, and the [release guide](docs/RELEASING.md) for the verified distribution path.
 
-Milestone 0.25 consolidates HAVEN's visual identity into one transparent canonical mark with separate standard, maskable, monochrome, and native-desktop outputs. Patch 0.25.1 adds a fuller Windows-specific transparent mark and a true multi-resolution icon with optically strengthened small sizes for title-bar and taskbar rendering. Patch 0.25.2 replaces the generic thin-line monogram with a stronger architectural form; patch 0.25.3 removes its center accent and smooths the protective contour. Patch 0.25.4 adopts the final sharp-crowned, balanced shield with a restrained emerald-to-cyan architectural H across the console, browser metadata, repository presentation, and desktop package; patch 0.25.5 corrects the H's lower reach so the monogram remains optically centered inside that shield. Deterministic generation and packaging tests keep those assets consistent without introducing remote image requests or tracking. Milestone 0.24 turns the portability model into a structured operational workspace: authenticated hub diagnostics, read-only hub and agent doctor commands, certificate and state validation, a redacted recovery map, and explicit install/repair/re-enrollment guidance. It neither adds a repair control nor exports private configuration. Milestone 0.23 removes household-specific runtime guesses, records the complete portability boundary, makes the Electron origin safely selectable at build time, treats schema-compatible agents as healthy across release-number changes, and refines the product's visual hierarchy and repository presentation. It favors a documented clean reinitialization over an unsafe destructive restore rehearsal against the live hub. Milestone 0.22 adds a deterministic browser-hardening review that treats only explicit disabled or non-enforcing defenses, cookie-verification evidence, and meaningful extension changes as concrete review items. Cookie volume and ordinary logged-in sites cannot alter its result. Milestone 0.21 adds encrypted, persistent owner classifications for each currently observed Chrome profile/domain pair and a guided cleanup queue. Milestones 0.18–0.20 add privacy-bounded browser, extension, cookie-domain, session-protection, and provider-review evidence. Milestone 0.17 adds the constrained Electron client, and milestone 0.16 remains the browser-installed fallback.
-
-Milestone 0.7 adds native Linux monitoring and boot-persistent endpoint-agent scheduling. Milestone 0.7.1 makes its network results explainable, 0.7.2 makes report freshness and finding lifecycles explicit, and 0.7.3 correlates host listeners with sanitized Docker port mappings. Milestone 0.7.4 adds deliberate suggested-baseline review; 0.7.5 adds live systemd ownership and service-constrained expectations for Linux listeners. Milestone 0.8 combines the latest authenticated reports into a network-wide coverage, change, and live-relationship view while keeping merely observed private endpoints separate from explicitly enrolled devices. Milestone 0.9 turns current findings, server-classified stale agents, incomplete enrollments, new non-local listeners, and changed service attribution into explainable active alerts. Milestone 0.10 moves that derivation to the hub and adds opt-in, encrypted, durable Web Push delivery with bounded retries and per-destination receipts; its expectation model also supports owner-constrained dynamic ranges and expiring development approvals. Milestone 0.11 adds reproducible console-free Windows scheduled-task packaging and credential-free monitoring of explicitly configured private network appliances. Milestone 0.12 adds optional read-only NAS health through bounded SNMP plus a host-key-pinned, forced-command SSH helper. Milestone 0.13 reorganizes the console around stable routes and strengthens report delivery, freshness semantics, readiness, version evidence, rendered UI tests, and the public release pipeline. Milestone 0.14 adds authenticated reporter provenance, capability evidence, fleet lifecycle presentation, checksummed cross-platform artifacts, and safe install/repair/status/uninstall workflows while preserving older enrolled reporters. Milestone 0.15 adds an encrypted owner-reported account-security notebook with evidence-derived authentication and recovery suggestions while explicitly excluding provider access and secret storage; 0.15.2 adds a separately reauthenticated private workspace, structured review facts, and local platform branding. A later event-driven Windows sensor may move under Service Control Manager only when real-time Defender and Windows Event Log monitoring justify an always-running process; it must remain outbound-only and use the least privilege its collectors require. HAVEN does not scan the LAN, retain remote endpoints, or claim that an alert proves compromise. See [verification](docs/VERIFICATION.md) for the claim-to-test map. The Ubuntu hub does not execute Windows actions on another machine. GitHub Actions verifies the Go, frontend, desktop, dependency, concurrency, vulnerability, Windows process isolation, agent artifacts, image, static analysis, and public-repository safety checks on each proposed change.
-
-Read the [architecture](docs/ARCHITECTURE.md), [threat model](docs/THREAT_MODEL.md), and [public repository policy](docs/PUBLIC_REPOSITORY.md) before expanding the trust boundary.
+Completed behavior is documented where it can stay accurate: security guarantees in the [threat model](docs/THREAT_MODEL.md), implementation boundaries in the [architecture](docs/ARCHITECTURE.md), and claim-to-test evidence in the [verification map](docs/VERIFICATION.md). The README intentionally does not maintain a milestone diary.

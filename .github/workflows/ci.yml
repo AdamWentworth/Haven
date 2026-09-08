@@ -50,6 +50,10 @@ jobs:
       - name: Verify Go module checksums
         run: go mod verify
 
+      - name: Verify release version consistency
+        shell: pwsh
+        run: ./scripts/Test-VersionConsistency.ps1
+
       - name: Verify deterministic brand assets
         run: go run ./scripts/generate-app-icons.go -check
 
@@ -61,7 +65,7 @@ jobs:
           go test -coverprofile="${coverage_file}" ./internal/...
           coverage="$(go tool cover -func="${coverage_file}" | awk '/^total:/ { gsub(/%/, "", $3); print $3 }')"
           echo "Internal Go statement coverage: ${coverage}%"
-          awk -v coverage="${coverage}" 'BEGIN { if (coverage + 0 < 55) exit 1 }'
+          awk -v coverage="${coverage}" 'BEGIN { if (coverage + 0 < 58) exit 1 }'
 
       - name: Run Go race detector
         run: go test -race ./...

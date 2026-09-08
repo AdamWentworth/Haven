@@ -24,6 +24,33 @@ Web Push is disabled until an owner enrolls a browser. Once enabled, the hub nee
 
 Basic appliance reachability needs no credentials. Full NAS health is an explicit private deployment choice. Store a unique random SNMP community and a dedicated unencrypted Ed25519 private key as owner-readable files outside Git, mount them read-only into the hub, and reference only their container paths from the private managed-appliance configuration. SNMP v2c must remain restricted to the trusted LAN because it does not encrypt its community or response.
 
+Set `HAVEN_MANAGED_APPLIANCES_FILE` to the private configuration file owned by the deployment system. HAVEN accepts literal private unicast addresses and explicit TCP ports; it rejects hostnames, ranges, UDP probes, unknown fields, inline credentials, and relative secret paths. For example:
+
+```json
+{
+  "appliances": [{
+    "id": "home-nas",
+    "displayName": "Home NAS",
+    "kind": "nas",
+    "address": "<private IPv4 address>",
+    "health": {
+      "provider": "terramaster-tos5",
+      "deepCheckMode": "manual",
+      "snmpPort": 161,
+      "communityFile": "/run/secrets/nas-snmp-community",
+      "sshPort": 9222,
+      "sshUsername": "<dedicated or administrator account>",
+      "sshPrivateKeyFile": "/run/secrets/nas-monitor-key",
+      "sshHostKeySHA256": "SHA256:<pinned ED25519 fingerprint>"
+    },
+    "services": [
+      { "id": "smb", "name": "SMB file service", "protocol": "TCP", "port": 445, "tls": false, "required": true },
+      { "id": "management", "name": "Management HTTPS", "protocol": "TCP", "port": 5443, "tls": true, "required": true }
+    ]
+  }]
+}
+```
+
 Use `"deepCheckMode": "manual"` for appliances that notify on every SSH login. Routine collection then uses SNMP and credential-free service reachability only. An authenticated owner can run one pinned SSH health check from the Appliances page when fresh SMART, disk, temperature, storage-set, and firmware evidence is wanted. The dashboard retains and dates the last deep evidence between checks, and duplicate requests are rate-limited. Omitting the setting retains `automatic` SSH checks for compatibility.
 
 Install the matching architecture's `haven-nas-probe` binary on the appliance as a root-owned mode-0755 file. The corresponding `authorized_keys` entry must be limited to the hub host and use `command="/usr/local/sbin/haven-nas-probe",no-agent-forwarding,no-port-forwarding,no-X11-forwarding,no-pty`. Verify that requesting an unrelated SSH command still returns only the health JSON before enabling the provider. Password-based administrator access is separate from this key and is not used or stored by HAVEN.
@@ -66,21 +93,15 @@ Backup archives contain security-sensitive private keys and are created with own
 
 Endpoint agents run natively with the smallest privileges their collectors require. The current Windows collector is a one-shot GUI-subsystem executable launched directly by a per-user Task Scheduler task; every PowerShell child is created with Windows' no-console flag. The separate interactive executable remains available for enrollment and diagnostics. Linux uses systemd, and future macOS packaging will use launchd. A future event-driven Windows sensor may use Service Control Manager only when continuous Defender or Windows Event Log monitoring justifies a persistent process. The current remote protocol accepts read-only observations through per-device mutual TLS. Remote action execution is not implemented and must not be simulated with a shell or Docker access.
 
-Every current report carries the reporter's public release, immutable source revision, platform, bounded installation kind, observed capabilities, and current collection-notice count. The hub first validates the observation schema. An accepted report from a different release is displayed as protocol compatible rather than as an update requirement; an exact build match remains stronger provenance. Milestone 0.18 reporters add an optional privacy-bounded browser-security object under observation schema 2; milestone 0.19 extends that object with fixed Chrome session-protection evidence and optional meaningful extension changes; milestone 0.20 adds bounded live-only Chrome profile and domain-level cookie metadata. Deploy the 0.20 hub before updating agents because older strict decoders do not recognize the profile field. The console-free Windows artifact embeds `windows-task` so an older scheduled task that still invokes plain `report` remains truthful after an in-place binary update; systemd invocations are recognized from systemd's own execution environment. Older reporters remain visible without newer optional evidence until deliberately updated; no hub process pushes or installs binaries on an endpoint.
+Every current report carries the reporter's public release, immutable source revision, platform, bounded installation kind, observed capabilities, and current collection-notice count. The hub validates the observation schema before accepting it. A report from a different release is displayed as protocol compatible rather than as an update requirement when its schema is accepted; an exact build match remains stronger provenance. The console-free Windows artifact embeds `windows-task` so an older scheduled task that still invokes plain `report` remains truthful after an in-place binary update; systemd invocations are recognized from systemd's own execution environment. Older compatible reporters remain visible without newer optional evidence until deliberately updated, and no hub process pushes or installs binaries on an endpoint.
 
 GitHub-hosted CI attaches a checksummed agent bundle to each verified commit for 30 days. The public Windows installer builds and stamps the current checkout, repairs an existing task in place, and preserves enrollment. Its status companion is read-only; its high-confirmation uninstaller preserves identity unless identity removal is separately requested. The Linux lifecycle script provides the corresponding source-based user-systemd workflow. A private deployment workflow may instead extract the revision-matched Linux binary from the approved hub image, but it must retain the same systemd sandbox and verify the embedded revision before activation.
 
-Deploy the 0.20 hub before updating an endpoint binary. The newer hub accepts older reports without Chrome profile metadata, while an older strict decoder rejects the new profile field. No database migration is required because Chrome profile metadata exists only in the latest in-memory observation and is removed before historical persistence. After the hub readiness check succeeds, update reporters one endpoint at a time and require a current report before proceeding to the next device.
+When a release adds an observation field, deploy its hub before updating endpoint binaries because an older strict decoder may reject the newer report. After hub readiness succeeds, update reporters one endpoint at a time and require a current authenticated report before proceeding. Live Chrome profile metadata requires no database migration because it is removed before historical persistence. Encrypted browser-site classifications use `browser-site-reviews.key` in the private state directory; back up that key with the database or the classifications become unreadable. See the [release process](RELEASING.md) for release-specific compatibility notes and [Portability and reinitialization](PORTABILITY.md) before moving the hub or rebuilding a network.
 
-Milestone 0.21 does not change the agent observation schema. The hub applies one additive SQLite migration for encrypted browser-site classifications and creates a dedicated `browser-site-reviews.key` in its private state directory. Back up that key with the database: losing it makes the classifications unreadable. Existing agents remain protocol-compatible, although updating them keeps fleet release/revision evidence aligned.
+The authenticated System & Recovery workspace consumes a non-cacheable redacted diagnostic projection. `haven-hub doctor [--json]` inspects existing state without opening SQLite through the migrating application store, while `haven-agent doctor [--json]` validates existing local enrollment evidence without contacting the hub. A failed doctor exits unsuccessfully after printing all checks; advisory and passing reports exit successfully.
 
-Milestone 0.22 changes only the web projection and documentation. It adds no observation fields, database migration, secret, collector permission, endpoint command, or notification policy. Existing 0.21 agents remain fully protocol-compatible; updating their displayed build version is optional and only keeps fleet release evidence aligned.
-
-Milestone 0.23 adds no observation field, database migration, endpoint permission, or remote action. It records the public/private/state portability boundary, removes household-specific service guesses from reusable code, makes the Electron origin a validated build-time choice, and presents every accepted current-schema agent as protocol compatible even when release numbers differ. See [Portability and reinitialization](PORTABILITY.md) before moving the hub or rebuilding a network.
-
-Milestone 0.24 adds no observation field, database migration, endpoint permission, repair route, or deployment secret. The authenticated System & Recovery workspace consumes a non-cacheable redacted diagnostic projection. `haven-hub doctor [--json]` inspects existing state without opening SQLite through the migrating application store, while `haven-agent doctor [--json]` validates existing local enrollment evidence without contacting the hub. A failed doctor exits unsuccessfully after printing all checks; advisory and passing reports exit successfully.
-
-Each updated agent creates `browser-extension-baseline.json` inside its existing private state directory after the hub accepts its first 0.19 report. That first baseline is intentionally quiet. Preserve this file with the agent identity when repairing or moving an installation; deleting it safely causes another silent baseline rather than a flood of historical extension alerts. The file contains friendly extension names and coarse capability state, so protect and back it up with the same owner-only permissions as the rest of the endpoint identity directory.
+Each browser-capable agent creates `browser-extension-baseline.json` inside its existing private state directory after the hub accepts its first compatible report. That first baseline is intentionally quiet. Preserve this file with the agent identity when repairing or moving an installation; deleting it safely causes another silent baseline rather than a flood of historical extension alerts. The file contains friendly extension names and coarse capability state, so protect and back it up with the same owner-only permissions as the rest of the endpoint identity directory.
 
 The public `packaging/systemd` definitions provide a generic, unprivileged Linux timer and a hardened one-shot reporting service. They contain no endpoint address, enrollment token, certificate, device identity, username, or private deployment path. Installers must create the per-user state directory before activation and enable lingering deliberately when reporting must continue without an interactive login.
 

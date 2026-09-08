@@ -57,7 +57,7 @@ For a personal pre-release deployment, the clean-start drill above is the more u
 
 ## Read-only diagnostics
 
-Milestone 0.24 makes the recovery model inspectable without adding an automated repair surface:
+HAVEN makes the recovery model inspectable without adding an automated repair surface:
 
 ```powershell
 haven-hub doctor

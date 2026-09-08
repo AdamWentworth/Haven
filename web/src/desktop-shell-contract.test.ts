@@ -2,14 +2,17 @@ import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 
 const manifest = JSON.parse(readFileSync(new URL("../../desktop/package.json", import.meta.url), "utf8")) as {
-		version: string;
+	version: string;
 		devDependencies: Record<string, string>;
 	build: { asar: boolean; files: string[]; electronFuses: Record<string, boolean> };
 };
 const shell = readFileSync(new URL("../../desktop/main.cjs", import.meta.url), "utf8");
 const security = readFileSync(new URL("../../desktop/security.cjs", import.meta.url), "utf8");
 const originConfiguration = readFileSync(new URL("../../desktop/configure-origin.cjs", import.meta.url), "utf8");
-const application = readFileSync(new URL("./App.tsx", import.meta.url), "utf8");
+const application = [
+	readFileSync(new URL("./application-view.tsx", import.meta.url), "utf8"),
+	readFileSync(new URL("./system-recovery.tsx", import.meta.url), "utf8"),
+].join("\n");
 const styles = readFileSync(new URL("./styles.css", import.meta.url), "utf8");
 
 describe("native desktop shell contract", () => {
@@ -25,7 +28,7 @@ describe("native desktop shell contract", () => {
 	});
 
 	it("pins dependencies and hardens the packaged desktop boundary", () => {
-		expect(manifest.version).toBe("0.26.0");
+		expect(manifest.version).toMatch(/^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/);
 		expect(manifest.build.files).toContain("build/origin.cjs");
 		expect(manifest.build.files).toContain("build/icon.ico");
 		expect(shell).toContain('path.join(__dirname, "build", "icon.ico")');

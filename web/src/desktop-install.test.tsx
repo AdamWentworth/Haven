@@ -23,11 +23,11 @@ describe("desktop installation", () => {
 	});
 
 	it("recognizes the bounded native desktop user-agent marker", () => {
-		userAgent.mockReturnValue("Mozilla/5.0 HAVEN-Desktop/0.26.0 Electron");
-		expect(nativeDesktopVersion()).toBe("0.26.0");
+		userAgent.mockReturnValue("Mozilla/5.0 HAVEN-Desktop/0.27.0 Electron");
+		expect(nativeDesktopVersion()).toBe("0.27.0");
 		expect(isStandaloneApp()).toBe(true);
 		const { result } = renderHook(() => useDesktopInstall());
-		expect(result.current).toMatchObject({ status: "native", nativeVersion: "0.26.0" });
+		expect(result.current).toMatchObject({ status: "native", nativeVersion: "0.27.0" });
 	});
 
 	it("captures one browser install prompt and records acceptance", async () => {
