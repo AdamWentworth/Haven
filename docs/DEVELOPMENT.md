@@ -1,16 +1,20 @@
-# Contributing to HAVEN
+# HAVEN development workflow
 
-HAVEN is public product source for private personal-security infrastructure. Changes must preserve the separation between reusable code, private deployment configuration, and private runtime state.
+HAVEN is Adam Wentworth’s owner-maintained project. The repository is public for transparency, portfolio presentation, and source availability; it is not operated as a collaborative project, and public visibility does not grant or imply repository write access.
+
+This workflow protects a single owner’s project while preserving the separation between reusable product code, private deployment configuration, and private runtime state.
 
 ## Decide before building
 
 Start with a concrete observed need. State what should improve, which evidence supports it, what data and privileges it requires, how failure remains visible, and how it will be tested. Changes that expand collection, persistence, remote actions, authentication, deployment authority, or provider access require corresponding architecture and threat-model review.
 
-The [product direction](docs/ROADMAP.md) records ideas already considered and the trigger required before pursuing them. It is acceptable—and often preferable—to leave a plausible feature deferred.
+The [product direction](ROADMAP.md) records ideas already considered and the trigger required before pursuing them. It is acceptable—and often preferable—to leave a plausible feature deferred.
 
 ## Git workflow
 
-`main` is protected and represents the latest reviewed, CI-verified source. Required checks are enforced for administrators, so normal work uses a short-lived branch and pull request even in a single-owner repository.
+`main` is protected and represents the latest reviewed, CI-verified source. Required checks are enforced for the owner, so normal work uses a short-lived branch and pull request.
+
+The pull request is an automated verification boundary for the owner’s own changes. It is not a request for outside participation or approval.
 
 Use purpose-based branch names:
 
@@ -26,7 +30,7 @@ Branching is a verification boundary, not a second product line: accepted change
 
 ## Local development
 
-Local iteration does not require Docker. Build the web client, then run the Go hub against loopback as described in the README and [Getting started](docs/GETTING_STARTED.md). Development state belongs in the operating system’s application-data location, never inside the checkout.
+Local iteration does not require Docker. Build the web client, then run the Go hub against loopback as described in the README and [Getting started](GETTING_STARTED.md). Development state belongs in the operating system’s application-data location, never inside the checkout.
 
 Docker is a deployment artifact for the Linux hub. Endpoint agents remain native because a container cannot truthfully inspect its host without weakening isolation.
 
@@ -37,7 +41,7 @@ Docker is a deployment artifact for the Linux hub. Endpoint agents remain native
 - The private operations repository owns real DNS, addresses, interfaces, reverse-proxy and firewall policy, secret mounts, appliance definitions, deployment approval, health checks, and rollback.
 - Runtime databases, keys, certificates, enrolled identities, account notes, browser-site decisions, notification subscriptions, and observations remain outside both repositories.
 
-Never change or deploy the private operations repository merely because a HAVEN source change is complete. Production deployment is a separate owner-authorized action using the exact verified commit image. See [Deployment](docs/DEPLOYMENT.md) and [Portability](docs/PORTABILITY.md).
+Never change or deploy the private operations repository merely because a HAVEN source change is complete. Production deployment is a separate owner-authorized action using the exact verified commit image. See [Deployment](DEPLOYMENT.md) and [Portability](PORTABILITY.md).
 
 ## Privacy guard
 
@@ -54,11 +58,11 @@ pwsh -NoProfile -File .\scripts\Test-PublicRepository.Tests.ps1
 pwsh -NoProfile -File .\scripts\Test-PublicRepository.ps1
 ```
 
-The local hook provides early feedback; CI is the authoritative backstop. The complete denylist and incident procedure are in [Public repository and portfolio policy](docs/PUBLIC_REPOSITORY.md).
+The local hook provides early feedback; CI is the authoritative backstop. The complete denylist and incident procedure are in [Public repository and portfolio policy](PUBLIC_REPOSITORY.md).
 
 ## Verification
 
-Run tests in proportion to the change, then run the complete gates before merge. The authoritative command list and claim-to-test map live in [Verification](docs/VERIFICATION.md).
+Run tests in proportion to the change, then run the complete gates before merge. The authoritative command list and claim-to-test map live in [Verification](VERIFICATION.md).
 
 Tests should prove externally meaningful behavior, privacy limits, failure handling, migration compatibility, and security claims. Do not increase coverage by executing incidental lines without assertions. Use synthetic identifiers and temporary state; automated tests must never contact or modify the live hub, enrolled endpoints, managed appliances, or private operations repository.
 
@@ -70,4 +74,4 @@ Tests should prove externally meaningful behavior, privacy limits, failure handl
 - The roadmap records current direction, considered ideas, and decision triggers.
 - The changelog contains concise release-level outcomes, not a commit or milestone diary.
 
-Use one semantic version across Go, web, and Electron; the consistency script and CI enforce agreement. Follow [Releasing](docs/RELEASING.md) for versioning, artifacts, tags, deployment identity, and rollback.
+Use one semantic version across Go, web, and Electron; the consistency script and CI enforce agreement. Follow [Releasing](RELEASING.md) for versioning, artifacts, tags, deployment identity, and rollback.

@@ -70,7 +70,7 @@ When development resumes:
 2. Check the live hub version and diagnostics instead of assuming production matches `main`.
 3. Review recent real alerts and owner friction; do not create scope from an unused version number.
 4. Select one coherent outcome, record its boundaries and exit criteria, and identify affected private deployment assumptions.
-5. Use the [contributor workflow](../CONTRIBUTING.md), including a purpose-named temporary branch and required CI.
+5. Use the [owner’s development workflow](DEVELOPMENT.md), including a purpose-named temporary branch and required CI.
 6. Update maintained behavior and compatibility documentation when the implementation changes.
 
 Completed behavior belongs in architecture, threat-model, setup, and verification documentation. Concise user-visible changes belong in the changelog. Neither the README nor this roadmap should accumulate a chronological implementation ledger.
