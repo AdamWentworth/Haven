@@ -46,6 +46,7 @@ HAVEN treats security statements as testable claims. A green test does not prove
 | IPv4 and IPv6 wildcard sockets represent one logical service when protocol, port, and scope match | Current endpoint report | Frontend listener-grouping tests require one logical listener with two raw sockets |
 | An owner-constrained expectation cannot hide a differently owned service | Current process, systemd-unit, and sanitized workload attribution plus owner-approved configuration | Go and TypeScript consume the same contract fixtures and require every observed owner category to be approved, including mixed-owner listeners; Docker's own service unit is accepted as runtime support evidence for legacy Docker-workload rules, while unrelated services still drift; only an explicitly owner-free port rule is unconstrained |
 | A mirrored enrolled-device connection is one relationship | Latest authenticated reports from both endpoints | Frontend relationship tests require correct inbound SSH direction and one canonical socket identity |
+| Recovery guidance can be exercised without touching a live installation | Temporary synthetic state only | An integration test creates owner bootstrap and agent enrollment state, accepts a mutually authenticated report, restores the SQLite database plus trust and authentication keys, proves the enrolled identity still reports, then proves a clean state uses a new trust root and deliberate re-enrollment |
 | Public remote addresses are not exposed by the network summary | Live connection report | Frontend privacy test requires the relationship projection to say `Internet` and contain no destination address |
 | A private peer seen in traffic is not automatically trusted | Current private destination and explicit enrolled inventory | Frontend test requires `observed` rather than `enrolled` |
 | The browser and background delivery use the same alert policy | Authenticated `/api/alerts` response from the hub-owned projector | Go projector and API contract tests require current findings, lifecycle start time, freshness, and listener state to appear through the server projection |
@@ -90,6 +91,7 @@ The publication guard has its own regression test. It proves that staged mode re
 ```powershell
 pwsh -NoProfile -File .\scripts\Test-PublicRepository.Tests.ps1
 pwsh -NoProfile -File .\scripts\Test-PublicRepository.ps1
+pwsh -NoProfile -File .\scripts\Test-VersionConsistency.ps1
 ```
 
 ```powershell
