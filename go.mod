@@ -1,6 +1,6 @@
 module github.com/AdamWentworth/haven
 
-go 1.26.6
+go 1.26.9
 
 require (
 	github.com/SherClockHolmes/webpush-go v1.4.0
