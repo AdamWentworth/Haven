@@ -16,6 +16,8 @@ The [product direction](ROADMAP.md) records ideas already considered and the tri
 
 The pull request is an automated verification boundary for the owner’s own changes. It is not a request for outside participation or approval.
 
+Keep Dependabot security updates and version updates disabled. Dependabot alerts may remain enabled; the owner reviews vulnerabilities and makes dependency fixes through owner-authored branches and pull requests. Do not enable automatic dependency pull requests or merge a Dependabot-authored pull request.
+
 Use purpose-based branch names:
 
 - `feature/<outcome>` for user-visible capability;

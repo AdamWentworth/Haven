@@ -90,7 +90,7 @@ For the complete cross-platform support matrix, production boundary, and endpoin
 
 Requirements:
 
-- Go 1.26.6 or later
+- Go 1.26.9 or later
 - Node.js 24 or another version supported by the pinned frontend toolchain
 - Windows PowerShell with the built-in Defender and NetSecurity modules
 
