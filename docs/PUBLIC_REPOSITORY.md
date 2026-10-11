@@ -24,7 +24,7 @@ Use `example.com`, generic device names, and the documentation-only address rang
 - `.git/info/haven-private-identifiers` may contain local hostnames, project labels, or other literal strings that this clone must reject. Git metadata cannot be committed; the file is intentionally owner-maintained and absent from CI.
 - Go modules and npm dependencies have committed checksums or lock files.
 - Tests and demo mode use synthetic fixtures. `HAVEN_DEMO_MODE=true` filters every non-synthetic device and never invokes the live collector.
-- The upstream repository enables GitHub secret scanning, push protection, Dependabot security updates, private vulnerability reporting, and CodeQL. Fork owners should enable the equivalent controls for their own namespace.
+- The upstream repository enables GitHub secret scanning, push protection, Dependabot alerts, private vulnerability reporting, and CodeQL. Dependabot security updates and version updates remain disabled; dependency fixes follow the [owner’s development workflow](DEVELOPMENT.md). Fork owners should enable the equivalent safeguards for their own namespace.
 
 Run the check manually with:
 
