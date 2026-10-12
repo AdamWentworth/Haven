@@ -400,4 +400,11 @@ var migrations = []migration{
 				ON browser_site_reviews (device_id, updated_at DESC, id)`,
 		},
 	},
+	{
+		version: 17,
+		statements: []string{
+			`ALTER TABLE devices ADD COLUMN reporting_expectation TEXT NOT NULL DEFAULT 'always-on'
+			 CHECK (reporting_expectation IN ('always-on', 'intermittent'))`,
+		},
+	},
 }

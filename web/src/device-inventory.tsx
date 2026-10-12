@@ -4,7 +4,7 @@ import { fleetPresentation } from "./fleet";
 import type { DeviceRecord } from "./types";
 import { StatusChip, type Tone } from "./ui";
 
-export function DeviceInventory({ devices, selectedId, select, demoMode }: { devices: DeviceRecord[]; selectedId: string; select: (id: string) => void; demoMode: boolean }) {
+export function DeviceInventory({ devices, selectedId, select, demoMode, saveReportingExpectation, busy }: { devices: DeviceRecord[]; selectedId: string; select: (id: string) => void; demoMode: boolean; saveReportingExpectation?: (id: string, expectation: "always-on" | "intermittent") => void; busy?: boolean }) {
 	return (
 		<section className="device-inventory" aria-labelledby="devices-title">
 			<div className="inventory-heading">
@@ -16,10 +16,16 @@ export function DeviceInventory({ devices, selectedId, select, demoMode }: { dev
 					const lifecycle = fleetPresentation(device);
 					const tone: Tone = lifecycle.tone;
 					return (
-						<button className={`device-button ${selectedId === device.id ? "selected" : ""}`} type="button" key={device.id} onClick={() => select(device.id)} aria-pressed={selectedId === device.id}>
+						<div className="device-inventory-entry" key={device.id}>
+						<button className={`device-button ${selectedId === device.id ? "selected" : ""}`} type="button" onClick={() => select(device.id)} aria-pressed={selectedId === device.id}>
 							<span className="device-identity"><span className="device-icon">{device.operatingSystem.toLowerCase().includes("server") ? <ServerIcon /> : device.displayName.toLowerCase().includes("laptop") ? <LaptopIcon /> : <MonitorIcon />}</span><span><strong>{device.displayName}</strong><small>{device.operatingSystem || "Awaiting first report"}{device.lastCollectedAt ? ` · reported ${formatRelativeTime(device.lastCollectedAt)}` : ""}</small></span></span>
 							<span className="device-fleet-state"><StatusChip label={lifecycle.label} tone={tone} />{device.agent && <small>Agent {device.agent.version}</small>}</span>
 						</button>
+						{!demoMode && device.trustState === "enrolled" && device.status !== "revoked" && saveReportingExpectation && <label className="reporting-setting">
+							<span>Reporting expectation<small>{device.reportingExpectation === "intermittent" ? "A gentle reminder after a week away; last observed evidence stays visible." : "An overdue alert after the hub's freshness allowance."}</small></span>
+							<select aria-label={`Reporting expectation for ${device.displayName}`} value={device.reportingExpectation ?? "always-on"} disabled={busy} onChange={(event) => saveReportingExpectation(device.id, event.target.value as "always-on" | "intermittent")}><option value="always-on">Always on</option><option value="intermittent">Used intermittently</option></select>
+						</label>}
+						</div>
 					);
 				})}
 			</div>

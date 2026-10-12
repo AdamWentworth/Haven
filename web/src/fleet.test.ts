@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { capabilityLabel, fleetPresentation, fleetSummary } from "./fleet";
+import { capabilityLabel, fleetPresentation, fleetSummary, reportingPresentation } from "./fleet";
 import type { DeviceRecord } from "./types";
 
 function device(overrides: Partial<DeviceRecord> = {}): DeviceRecord {
@@ -11,6 +11,15 @@ function device(overrides: Partial<DeviceRecord> = {}): DeviceRecord {
 }
 
 describe("fleet lifecycle", () => {
+	it("presents server-classified intermittent absence neutrally without marking it fresh", () => {
+		const away = device({ status: "stale", reportingExpectation: "intermittent", reportingStatus: "away" });
+		expect(reportingPresentation(away)).toMatchObject({ state: "away", label: "Not currently reporting", tone: "configured" });
+		expect(fleetPresentation(away).state).toBe("away");
+		expect(fleetSummary([away]).reporting).toBe(0);
+		expect(fleetPresentation({ ...away, reportingStatus: "check-in-due" })).toMatchObject({ label: "Check-in reminder", tone: "configured" });
+		expect(fleetPresentation(device({ status: "awaiting-first-report" })).state).toBe("pending");
+		expect(fleetPresentation(device({ status: "revoked" })).state).toBe("revoked");
+	});
 	it("keeps report freshness ahead of build maintenance", () => {
 		expect(fleetPresentation(device({ status: "stale" })).state).toBe("overdue");
 		expect(fleetPresentation(device({ agent: null })).state).toBe("legacy");

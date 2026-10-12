@@ -272,6 +272,7 @@ func scanDevice(row rowScanner, now time.Time) (model.DeviceRecord, error) {
 		&agentInstallation,
 		&agentCapabilities,
 		&agentCollectionNotices,
+		&device.ReportingExpectation,
 	)
 	if err != nil {
 		return model.DeviceRecord{}, fmt.Errorf("read device: %w", err)
@@ -310,6 +311,7 @@ func scanDevice(row rowScanner, now time.Time) (model.DeviceRecord, error) {
 		device.Agent = &metadata
 	}
 	device.Status = deviceStatus(device, now)
+	device.ReportingStatus = deviceReportingStatus(device, now)
 	return device, nil
 }
 

@@ -2,6 +2,14 @@
 
 HAVEN's notable user-facing and operational changes are recorded here. The README describes the product as it exists today; it does not duplicate this history.
 
+## 0.27.1 - 2026-10-11
+
+### Changed
+
+- Added owner-selectable reporting expectations: always-on devices retain overdue alerts; intermittently used devices show neutral absence and a quiet weekly check-in reminder.
+- Label older endpoint evidence as last observed, and keep expected absence separate from security findings and current coverage.
+- Preserve the observation protocol and collection permissions. An additive database migration defaults existing devices to their previous always-on behavior.
+
 ## 0.27.0 - 2026-09-07
 
 ### Changed

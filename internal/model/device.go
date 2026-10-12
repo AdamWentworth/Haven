@@ -10,6 +10,8 @@ type DeviceRecord struct {
 	Architecture         string         `json:"architecture"`
 	TrustState           string         `json:"trustState"`
 	Status               string         `json:"status"`
+	ReportingExpectation string         `json:"reportingExpectation"`
+	ReportingStatus      string         `json:"reportingStatus"`
 	EnrolledAt           time.Time      `json:"enrolledAt"`
 	LastSeenAt           *time.Time     `json:"lastSeenAt"`
 	LastCollectedAt      *time.Time     `json:"lastCollectedAt"`

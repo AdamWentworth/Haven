@@ -78,6 +78,13 @@ main, footer { width: min(1180px, 92vw); margin-inline: auto; }
 .device-list { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: .55rem; }
 .device-button { display: flex; align-items: center; justify-content: space-between; gap: .75rem; min-width: 0; padding: .85rem; border: 1px solid var(--line); border-radius: .8rem; color: inherit; background: rgba(255, 255, 255, .018); text-align: left; cursor: pointer; }
 .device-button:hover, .device-button.selected { border-color: rgba(111, 216, 229, .42); background: rgba(111, 216, 229, .055); }
+.device-inventory-entry { min-width: 0; }
+.device-inventory-entry .device-button { width: 100%; }
+.reporting-setting { display: flex; flex-wrap: wrap; align-items: center; gap: .6rem; padding: .75rem; font-size: .75rem; }
+.reporting-setting > span { flex: 1 1 140px; }
+.reporting-setting small { display: block; margin-top: .25rem; color: var(--muted); }
+.reporting-setting select { max-width: 100%; padding: .4rem; color: inherit; background: var(--surface); border: 1px solid var(--line); border-radius: .4rem; }
+.stale-evidence-note { padding: .8rem; border: 1px solid var(--line); border-radius: .6rem; color: var(--muted); }
 .device-button > span:first-child { min-width: 0; }
 .device-identity > span:last-child { min-width: 0; }
 .device-identity, .heading-identity, .hero-identity { display: flex; align-items: center; gap: .75rem; min-width: 0; }

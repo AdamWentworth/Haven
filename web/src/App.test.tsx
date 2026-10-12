@@ -79,7 +79,7 @@ const fixtures = vi.hoisted(() => {
 
 const api = vi.hoisted(() => ({
 	HavenAPIError: class HavenAPIError extends Error { constructor(message: string, readonly status: number) { super(message); } },
-	addPasskey: vi.fn(), collectSnapshot: vi.fn(), getAuthStatus: vi.fn(), getDevice: vi.fn(), getLatestSnapshot: vi.fn(), getNotificationStatus: vi.fn(), getRuntimeStatus: vi.fn(), getSystemDiagnostics: vi.fn(), listAccountProfiles: vi.fn(), listAlerts: vi.fn(), listAuditEvents: vi.fn(), listDevices: vi.fn(), listEvents: vi.fn(), listExpectedServices: vi.fn(), listFindingReviews: vi.fn(), listManagedAppliances: vi.fn(), listObservedListeners: vi.fn(), listPasskeys: vi.fn(), listSecurityActions: vi.fn(), lockAccountNotebook: vi.fn(), loginWithPasskey: vi.fn(), logout: vi.fn(), registerPasskey: vi.fn(), registerPushDestination: vi.fn(), removeAccountProfile: vi.fn(), removeExpectedService: vi.fn(), removePasskey: vi.fn(), removePushDestination: vi.fn(), requestSecurityAction: vi.fn(), runManagedApplianceDeepCheck: vi.fn(), saveAccountProfile: vi.fn(), saveExpectedService: vi.fn(), saveExpectedServices: vi.fn(), saveFindingReview: vi.fn(), touchAccountNotebook: vi.fn(), unlockAccountNotebook: vi.fn(), revokeDevice: vi.fn(),
+	addPasskey: vi.fn(), collectSnapshot: vi.fn(), getAuthStatus: vi.fn(), getDevice: vi.fn(), getLatestSnapshot: vi.fn(), getNotificationStatus: vi.fn(), getRuntimeStatus: vi.fn(), getSystemDiagnostics: vi.fn(), listAccountProfiles: vi.fn(), listAlerts: vi.fn(), listAuditEvents: vi.fn(), listDevices: vi.fn(), listEvents: vi.fn(), listExpectedServices: vi.fn(), listFindingReviews: vi.fn(), listManagedAppliances: vi.fn(), listObservedListeners: vi.fn(), listPasskeys: vi.fn(), listSecurityActions: vi.fn(), lockAccountNotebook: vi.fn(), loginWithPasskey: vi.fn(), logout: vi.fn(), registerPasskey: vi.fn(), registerPushDestination: vi.fn(), removeAccountProfile: vi.fn(), removeExpectedService: vi.fn(), removePasskey: vi.fn(), removePushDestination: vi.fn(), requestSecurityAction: vi.fn(), runManagedApplianceDeepCheck: vi.fn(), saveAccountProfile: vi.fn(), saveExpectedService: vi.fn(), saveExpectedServices: vi.fn(), saveFindingReview: vi.fn(), saveDeviceReportingExpectation: vi.fn(), touchAccountNotebook: vi.fn(), unlockAccountNotebook: vi.fn(), revokeDevice: vi.fn(),
 }));
 
 vi.mock("./api", () => api);
@@ -114,6 +114,37 @@ afterEach(() => {
 });
 
 describe("HAVEN routed console", () => {
+	it("shows expected laptop absence without an attention banner or current firewall claim", async () => {
+		const away = { ...fixtures.device, status: "stale" as const, reportingExpectation: "intermittent" as const, reportingStatus: "away" as const };
+		api.listDevices.mockResolvedValue([away]);
+		api.getDevice.mockResolvedValue({ device: away, snapshot: fixtures.snapshot });
+		render(<App />);
+		expect(await screen.findByRole("heading", { name: "Home security overview" })).toBeInTheDocument();
+		expect(screen.queryByText("Review available")).not.toBeInTheDocument();
+		expect(screen.queryByText("Observed baseline steady")).not.toBeInTheDocument();
+		expect(screen.getByText("1 used intermittently · not currently reporting")).toBeInTheDocument();
+		const user = userEvent.setup();
+		await user.click(screen.getByRole("link", { name: "Devices" }));
+		await user.click(screen.getByRole("button", { name: /ADAM-TEST/ }));
+		expect(await screen.findByText(/protection, findings, services and connections below describe that report/)).toBeInTheDocument();
+		expect(screen.getByRole("heading", { name: "Firewall · last observed" })).toBeInTheDocument();
+	});
+	it("saves an enrolled device reporting expectation and keeps failed changes visible", async () => {
+		const user = userEvent.setup();
+		window.history.replaceState(null, "", "/devices");
+		api.saveDeviceReportingExpectation.mockResolvedValue({ ...fixtures.device, reportingExpectation: "intermittent", reportingStatus: "away", status: "stale" });
+		render(<App />);
+		const setting = await screen.findByRole("combobox", { name: "Reporting expectation for ADAM-TEST" });
+		await user.selectOptions(setting, "intermittent");
+		await waitFor(() => expect(api.saveDeviceReportingExpectation).toHaveBeenCalledWith("device-a", "intermittent"));
+		expect(await screen.findByText("Not currently reporting")).toBeInTheDocument();
+		expect(setting).toHaveValue("intermittent");
+		api.saveDeviceReportingExpectation.mockRejectedValueOnce(new Error("Policy could not be saved"));
+		await waitFor(() => expect(setting).toBeEnabled());
+		await user.selectOptions(setting, "always-on");
+		expect(await screen.findByText("Policy could not be saved")).toBeInTheDocument();
+		expect(setting).toHaveValue("intermittent");
+	});
 	it("moves from the concise overview into a device and its posture without reloading", async () => {
 		const user = userEvent.setup();
 		render(<App />);
