@@ -1,6 +1,7 @@
 import { useMemo } from "react";
 import { componentHealthTone, coverageTone, healthStatusLabel, managedHealthTone, storageSetDetail, storageSetLabel } from "./appliance-health";
 import { visibleFindingLifecycles } from "./findings";
+import { reportingPresentation } from "./fleet";
 import { formatBytes, formatDate, formatDuration, formatRelativeTime } from "./format";
 import { AlertIcon, CheckIcon, LaptopIcon, MonitorIcon, NetworkIcon, ServerIcon } from "./icons";
 import { isPrivateNetworkAddress, liveNetworkRelationships, logicalListeners, expectedServiceMatches, networkServiceLabel, type NetworkDeviceObservation } from "./network";
@@ -44,6 +45,7 @@ type NetworkView = "overview" | "network" | "appliances";
 export function NetworkOverview({ devices, appliances, events, alerts, selectedId, selectDevice, runApplianceDeepCheck, deepCheckBusy, demoMode, view }: { devices: NetworkDeviceObservation[]; appliances: ManagedApplianceStatus[]; events: SecurityEvent[]; alerts: HavenAlert[]; selectedId: string; selectDevice: (id: string) => void; runApplianceDeepCheck: (appliance: ManagedApplianceStatus) => void; deepCheckBusy: string | null; demoMode: boolean; view: NetworkView }) {
 	const summaries = useMemo(() => devices.map((entry) => {
 		const snapshot = entry.snapshot;
+		const reporting = reportingPresentation(entry.device);
 		const listeners = logicalListeners(snapshot?.connections || []);
 		const workloadInventory = snapshot?.linuxBaseline?.workloads ?? null;
 		const unreviewed = listeners.filter((listener) => listener.bindScope !== "local" && !entry.expectedServices.some((service) => expectedServiceMatches(listener, service, workloadInventory)));
@@ -55,20 +57,23 @@ export function NetworkOverview({ devices, appliances, events, alerts, selectedI
 		const highFindings = findingAlerts.filter((alert) => alert.severity === "high").length;
 		const firewallKnown = !!snapshot && snapshot.firewallProfiles.length > 0;
 		const firewallEnabled = firewallKnown && snapshot!.firewallProfiles.every((profile) => profile.enabled === true);
-		const establishedConnections = (snapshot?.connections || []).filter((connection) => connection.state.toLowerCase() === "established").length;
+		const establishedConnections = entry.device.status === "current" ? (snapshot?.connections || []).filter((connection) => connection.state.toLowerCase() === "established").length : 0;
 		let tone: Tone = "healthy";
 		let label = "observed healthy";
 		if (!snapshot) { tone = "unknown"; label = "awaiting report"; }
 		else if (!firewallKnown) { tone = "unknown"; label = "partly verified"; }
 		else if (!firewallEnabled || highFindings > 0) { tone = "danger"; label = !firewallEnabled ? "firewall attention" : "high finding"; }
-		else if (entry.device.status !== "current" || findingAlerts.length > 0 || unreviewed.length > 0) { tone = "attention"; label = entry.device.status !== "current" ? entry.device.status.replaceAll("-", " ") : unreviewed.length > 0 ? "service review" : "finding open"; }
+		else if (findingAlerts.length > 0 || unreviewed.length > 0) { tone = "attention"; label = unreviewed.length > 0 ? "service review" : "finding open"; }
+		else if (entry.device.status !== "current") { tone = reporting.tone; label = reporting.label; }
 		return { ...entry, listeners, unreviewed, recentUnreviewed, findingAlerts, firewallKnown, firewallEnabled, establishedConnections, tone, label };
 	}), [alerts, devices]);
-	const relationships = useMemo(() => liveNetworkRelationships(devices, appliances), [appliances, devices]);
+	const relationships = useMemo(() => liveNetworkRelationships(devices.filter((entry) => entry.device.status === "current"), appliances), [appliances, devices]);
 	const recentChanges = useMemo(() => visibleFindingLifecycles(events, alerts).slice(0, 5), [alerts, events]);
 	const reportingCount = summaries.filter((entry) => entry.device.status === "current" && entry.snapshot).length;
-	const protectedFirewallCount = summaries.filter((entry) => entry.firewallEnabled).length;
-	const knownFirewallCount = summaries.filter((entry) => entry.firewallKnown).length;
+	const protectedFirewallCount = summaries.filter((entry) => entry.device.status === "current" && entry.firewallEnabled).length;
+	const knownFirewallCount = summaries.filter((entry) => entry.device.status === "current" && entry.firewallKnown).length;
+	const overdueCount = summaries.filter((entry) => ["overdue", "pending"].includes(reportingPresentation(entry.device).state)).length;
+	const awayCount = summaries.filter((entry) => ["away", "check-in-due"].includes(reportingPresentation(entry.device).state)).length;
 	const findingCount = summaries.reduce((count, entry) => count + entry.findingAlerts.length, 0);
 	const unreviewedCount = summaries.reduce((count, entry) => count + entry.unreviewed.length, 0);
 	const activeConnectionCount = summaries.reduce((count, entry) => count + entry.establishedConnections, 0);
@@ -80,15 +85,15 @@ export function NetworkOverview({ devices, appliances, events, alerts, selectedI
 	const applianceReviewCount = Math.max(applianceAttentionCount, applianceAlertCount);
 	const urgent = summaries.some((entry) => entry.tone === "danger");
 	const attention = summaries.some((entry) => entry.tone === "attention") || unreviewedCount > 0 || applianceReviewCount > 0;
-	const assuranceTone: Tone = urgent ? "danger" : attention ? "attention" : summaries.some((entry) => entry.tone === "unknown") || appliancePendingCount > 0 ? "unknown" : "healthy";
+	const assuranceTone: Tone = urgent ? "danger" : attention ? "attention" : summaries.some((entry) => entry.tone === "unknown" || entry.device.status !== "current") || appliancePendingCount > 0 ? "unknown" : "healthy";
 	const assuranceLabel = urgent ? "Action recommended" : attention ? "Review available" : assuranceTone === "unknown" ? "Partly verified" : "Observed baseline steady";
 	const attentionReasons = [
-		findingCount > 0 ? `${findingCount} current finding${findingCount === 1 ? "" : "s"}` : "",
+		findingCount > 0 ? `${findingCount} open finding${findingCount === 1 ? "" : "s"}` : "",
 		unreviewedCount > 0 ? `${unreviewedCount} service review${unreviewedCount === 1 ? "" : "s"}` : "",
-		reportingCount < summaries.length ? `${summaries.length - reportingCount} device${summaries.length - reportingCount === 1 ? "" : "s"} not current` : "",
+		overdueCount > 0 ? `${overdueCount} reporting review${overdueCount === 1 ? "" : "s"}` : "",
 		applianceReviewCount > 0 ? `${applianceReviewCount} appliance alert${applianceReviewCount === 1 ? "" : "s"}` : "",
 	].filter(Boolean);
-	const attentionItemCount = findingCount + unreviewedCount + summaries.length - reportingCount + applianceReviewCount;
+	const attentionItemCount = findingCount + unreviewedCount + overdueCount + applianceReviewCount;
 	const visibleRelationships = relationships.slice(0, 12);
 
 	return (
@@ -99,20 +104,20 @@ export function NetworkOverview({ devices, appliances, events, alerts, selectedI
 			{view === "overview" && <>
 			<div className={`network-assurance ${assuranceTone}`}>
 				<span className="network-assurance-icon">{urgent || attention ? <AlertIcon size={20} /> : <CheckIcon size={20} />}</span>
-				<div><strong>{assuranceLabel}</strong><p>{urgent ? "At least one reporting device has a high finding or firewall problem." : attention ? `${attentionReasons.join(" · ")} ${attentionItemCount === 1 ? "remains" : "remain"} visible across monitored systems.` : assuranceTone === "unknown" ? "No urgent issue is derived, but one or more devices has incomplete current evidence." : "Every reporting device matches its reviewed baseline, and no required managed-appliance service is failing."}</p></div>
+				<div><strong>{assuranceLabel}</strong><p>{urgent ? "Latest reported evidence includes a high finding or a firewall problem." : attention ? `${attentionReasons.join(" · ")} ${attentionItemCount === 1 ? "remains" : "remain"} visible across monitored systems.` : assuranceTone === "unknown" ? "No urgent issue is derived, but one or more devices has incomplete current evidence." : "Every reporting device matches its reviewed baseline, and no required managed-appliance service is failing."}</p></div>
 				<StatusChip label={assuranceLabel} tone={assuranceTone} />
 			</div>
 			<div className="network-metrics" aria-label="Network coverage summary">
-				<article><span>Reporting now</span><strong>{reportingCount}/{summaries.length}</strong><small>enrolled devices current</small></article>
+				<article><span>Reporting now</span><strong>{reportingCount}/{summaries.length}</strong><small>{awayCount ? `${awayCount} used intermittently · not currently reporting` : "enrolled devices current"}</small></article>
 				<article><span>Protected firewalls</span><strong>{protectedFirewallCount}/{knownFirewallCount || summaries.length}</strong><small>{knownFirewallCount === summaries.length ? "verified devices" : `${summaries.length - knownFirewallCount} not verified`}</small></article>
-				<article><span>Open findings</span><strong>{findingCount}</strong><small>across current posture</small></article>
+				<article><span>Open findings</span><strong>{findingCount}</strong><small>across latest reports</small></article>
 				<article><span>Service reviews</span><strong>{unreviewedCount}</strong><small>non-local listeners</small></article>
 				<article><span>Appliances reachable</span><strong>{applianceReachableCount}/{appliances.length}</strong><small>{appliances.length ? "required services reachable" : "none configured"}</small></article>
 			</div>
 			<section className="network-alert-watch" aria-labelledby="network-alerts-title">
 				<div className="network-subheading"><div><p className="eyebrow">ACTIVE ALERTS</p><h3 id="network-alerts-title">What currently needs attention</h3></div><span>{alerts.length} active</span></div>
 				<p className="network-privacy-note">Alerts come only from authenticated report freshness, evaluated posture findings, and owner-reviewed service baselines. An alert is a review prompt—not a claim that an attack occurred.</p>
-				{alerts.length === 0 ? <p className="alert-watch-clear"><CheckIcon size={18} /><span><strong>No active alerts.</strong><small>Current reports match the reviewed baseline.</small></span></p> : <ol className="network-alert-list">{alerts.slice(0, 8).map((alert) => {
+				{alerts.length === 0 ? <p className="alert-watch-clear"><CheckIcon size={18} /><span><strong>No active alerts.</strong><small>Latest reports match the reviewed baseline; report age is shown separately.</small></span></p> : <ol className="network-alert-list">{alerts.slice(0, 8).map((alert) => {
 					const tone: Tone = alert.severity === "high" ? "danger" : alert.severity === "medium" ? "attention" : "configured";
 					const endpointDevice = !alert.deviceId.startsWith("appliance:");
 					return <li key={alert.id}><button type="button" onClick={() => { if (endpointDevice) selectDevice(alert.deviceId); }}><span className={`alert-watch-icon ${alert.severity}`}><AlertIcon size={17} /></span><span><strong>{alert.title}</strong><small>{alert.deviceName} · active since {formatRelativeTime(alert.startedAt)} · {alert.evidence}</small><em>{alert.summary}</em></span><StatusChip label={alert.severity} tone={tone} /></button></li>;
@@ -134,7 +139,7 @@ export function NetworkOverview({ devices, appliances, events, alerts, selectedI
 					<div className="network-device-grid">
 						{summaries.map((entry) => <button className={`network-device-card ${selectedId === entry.device.id ? "selected" : ""}`} type="button" key={entry.device.id} onClick={() => selectDevice(entry.device.id)} aria-pressed={selectedId === entry.device.id} disabled={!entry.snapshot}>
 							<div className="network-device-heading"><span className="device-icon">{entry.device.operatingSystem.toLowerCase().includes("server") ? <ServerIcon /> : entry.device.displayName.toLowerCase().includes("laptop") ? <LaptopIcon /> : <MonitorIcon />}</span><span><strong>{entry.device.displayName}</strong><small>{entry.device.operatingSystem || "Awaiting first report"}</small></span><StatusChip label={entry.label} tone={entry.tone} /></div>
-							<dl><div><dt>Last report</dt><dd>{formatRelativeTime(entry.device.lastCollectedAt)}</dd></div><div><dt>Host firewall</dt><dd>{entry.firewallKnown ? entry.firewallEnabled ? "Protected" : "Attention" : "Not verified"}</dd></div><div><dt>Findings</dt><dd>{entry.findingAlerts.length}</dd></div><div><dt>Services</dt><dd>{entry.unreviewed.length > 0 ? `${entry.unreviewed.length} to review${entry.recentUnreviewed > 0 ? ` · ${entry.recentUnreviewed} new` : ""}` : `${entry.listeners.length} classified/local`}</dd></div></dl>
+							<dl><div><dt>Last report</dt><dd>{formatRelativeTime(entry.device.lastCollectedAt)}</dd></div><div><dt>{entry.device.status === "current" ? "Host firewall" : "Firewall · last observed"}</dt><dd>{entry.firewallKnown ? entry.firewallEnabled ? "Protected" : "Attention" : "Not verified"}</dd></div><div><dt>{entry.device.status === "current" ? "Findings" : "Findings · last observed"}</dt><dd>{entry.findingAlerts.length}</dd></div><div><dt>Services</dt><dd>{entry.unreviewed.length > 0 ? `${entry.unreviewed.length} to review${entry.recentUnreviewed > 0 ? ` · ${entry.recentUnreviewed} new` : ""}` : `${entry.listeners.length} classified/local`}</dd></div></dl>
 						</button>)}
 					</div>
 				</section>

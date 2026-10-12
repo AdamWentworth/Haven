@@ -136,6 +136,7 @@ func (server *Server) Handler() http.Handler {
 	mux.Handle("GET /api/appliances", server.protected(http.HandlerFunc(server.managedAppliances)))
 	mux.Handle("POST /api/appliances/{applianceID}/deep-check", server.mutating(http.HandlerFunc(server.deepCheckManagedAppliance)))
 	mux.Handle("POST /api/devices/{deviceID}/revoke", server.mutating(http.HandlerFunc(server.revokeDevice)))
+	mux.Handle("POST /api/devices/{deviceID}/reporting-expectation", server.mutating(http.HandlerFunc(server.saveReportingExpectation)))
 	mux.Handle("GET /api/events", server.protected(http.HandlerFunc(server.securityEvents)))
 	mux.Handle("GET /api/alerts", server.protected(http.HandlerFunc(server.currentAlerts)))
 	mux.Handle("GET /api/finding-reviews", server.protected(http.HandlerFunc(server.findingReviews)))
@@ -322,7 +323,11 @@ func (server *Server) deviceDetail(writer http.ResponseWriter, request *http.Req
 	}
 	detail.Device = fleet.Present(detail.Device)
 	if detail.Snapshot != nil {
-		evaluated := posture.Evaluate(*detail.Snapshot, time.Now().UTC())
+		evaluationTime := time.Now().UTC()
+		if detail.Device.Status == "stale" {
+			evaluationTime = detail.Snapshot.CollectedAt
+		}
+		evaluated := posture.Evaluate(*detail.Snapshot, evaluationTime)
 		detail.Snapshot = &evaluated
 	}
 	server.writeJSON(writer, http.StatusOK, detail)

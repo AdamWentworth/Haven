@@ -64,7 +64,11 @@ func (projector *Projector) Current(ctx context.Context, demoMode bool) ([]model
 			return nil, fmt.Errorf("load alert device %s: %w", device.ID, err)
 		}
 		if detail.Snapshot != nil {
-			evaluated := posture.Evaluate(*detail.Snapshot, now)
+			evaluationTime := now
+			if detail.Device.Status == "stale" {
+				evaluationTime = detail.Snapshot.CollectedAt
+			}
+			evaluated := posture.Evaluate(*detail.Snapshot, evaluationTime)
 			detail.Snapshot = &evaluated
 		}
 		expected, err := projector.store.ListExpectedServicesIncludingExpired(ctx, device.ID)
@@ -113,18 +117,32 @@ func Derive(devices []DeviceObservation, events []model.SecurityEvent, freshness
 				lastSeen = *device.Device.LastSeenAt
 			}
 			startedAt := lastSeen.Add(freshnessAllowance)
-			alerts = append(alerts, model.Alert{
-				ID:         "stale-agent:" + device.Device.ID,
-				InstanceID: "stale-agent:" + device.Device.ID + ":" + timestampIdentity(lastSeen),
-				DeviceID:   device.Device.ID,
-				DeviceName: device.Device.DisplayName,
-				Kind:       "stale-agent",
-				Severity:   "medium",
-				Title:      "Authenticated agent report is overdue",
-				Summary:    fmt.Sprintf("HAVEN has not received a report within the server's %d-minute freshness allowance.", int(freshnessAllowance.Minutes())),
-				Evidence:   "Last authenticated contact: " + lastSeen.UTC().Format(time.RFC3339),
-				StartedAt:  startedAt,
-			})
+			if device.Device.ReportingExpectation == "intermittent" {
+				if evaluatedAt.Sub(lastSeen) > storage.IntermittentDeviceReminderAfter {
+					alerts = append(alerts, model.Alert{
+						ID:         "check-in-reminder:" + device.Device.ID,
+						InstanceID: "check-in-reminder:" + device.Device.ID + ":" + timestampIdentity(lastSeen),
+						DeviceID:   device.Device.ID, DeviceName: device.Device.DisplayName,
+						Kind: "check-in-reminder", Severity: "low", Title: "Device check-in reminder",
+						Summary:   "This device is used intermittently and has not reported for over a week. Check its agent when you next use it.",
+						Evidence:  "Last authenticated contact: " + lastSeen.UTC().Format(time.RFC3339),
+						StartedAt: lastSeen.Add(storage.IntermittentDeviceReminderAfter),
+					})
+				}
+			} else {
+				alerts = append(alerts, model.Alert{
+					ID:         "stale-agent:" + device.Device.ID,
+					InstanceID: "stale-agent:" + device.Device.ID + ":" + timestampIdentity(lastSeen),
+					DeviceID:   device.Device.ID,
+					DeviceName: device.Device.DisplayName,
+					Kind:       "stale-agent",
+					Severity:   "medium",
+					Title:      "Authenticated agent report is overdue",
+					Summary:    fmt.Sprintf("HAVEN has not received a report within the server's %d-minute freshness allowance.", int(freshnessAllowance.Minutes())),
+					Evidence:   "Last authenticated contact: " + lastSeen.UTC().Format(time.RFC3339),
+					StartedAt:  startedAt,
+				})
+			}
 		} else if device.Device.Status == "awaiting-first-report" {
 			enrolledAt := device.Device.EnrolledAt
 			alerts = append(alerts, model.Alert{
@@ -152,6 +170,10 @@ func Derive(devices []DeviceObservation, events []model.SecurityEvent, freshness
 			if event, exists := opened[device.Device.ID+":"+finding.ID]; exists && !event.OccurredAt.IsZero() {
 				startedAt = event.OccurredAt
 			}
+			evidence := "Current evaluated endpoint posture"
+			if device.Device.Status == "stale" {
+				evidence = "Last observed endpoint posture: " + device.Snapshot.CollectedAt.UTC().Format(time.RFC3339)
+			}
 			alerts = append(alerts, model.Alert{
 				ID:         "finding:" + device.Device.ID + ":" + finding.ID,
 				InstanceID: "finding:" + device.Device.ID + ":" + finding.ID + ":" + timestampIdentity(startedAt) + ":" + finding.Severity,
@@ -161,7 +183,7 @@ func Derive(devices []DeviceObservation, events []model.SecurityEvent, freshness
 				Severity:   finding.Severity,
 				Title:      finding.Title,
 				Summary:    finding.Summary,
-				Evidence:   "Current evaluated endpoint posture",
+				Evidence:   evidence,
 				StartedAt:  startedAt,
 			})
 		}

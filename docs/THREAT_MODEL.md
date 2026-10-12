@@ -178,6 +178,7 @@ Current mitigations:
 - Keep low-severity items visible without desktop interruption.
 - Deduplicate medium/high notifications with durable per-destination receipts keyed by stable alert identity plus recurrence-specific evidence.
 - Publish the server-owned freshness threshold through the authenticated runtime API instead of duplicating it in browser logic.
+- Keep owner reporting expectations separate from evidence freshness. Expected intermittent absence stays neutral without certifying old evidence as current; known findings remain visible. Policy changes require the existing authenticated origin and CSRF checks and an atomic audit entry.
 - Test direction, deduplication, privacy projection, baseline ownership, lifecycle state, alert severity, subscription validation, baselining, retry delay, expiry, generic payload content, and notification recurrence in CI with enforced coverage thresholds.
 
 ## Security gates

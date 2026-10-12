@@ -1,7 +1,7 @@
 import type { DeviceRecord } from "./types";
 import type { Tone } from "./ui";
 
-export type FleetLifecycle = "ready" | "compatible" | "overdue" | "pending" | "revoked" | "legacy" | "development" | "version-drift" | "revision-drift" | "local" | "demo";
+export type FleetLifecycle = "ready" | "compatible" | "overdue" | "away" | "check-in-due" | "pending" | "revoked" | "legacy" | "development" | "version-drift" | "revision-drift" | "local" | "demo";
 
 export interface FleetPresentation {
 	state: FleetLifecycle;
@@ -10,12 +10,21 @@ export interface FleetPresentation {
 	detail: string;
 }
 
+export function reportingPresentation(device: DeviceRecord): FleetPresentation {
+	const state = device.reportingStatus ?? (device.status === "stale" ? "overdue" : device.status);
+	if (state === "away") return { state: "away", label: "Not currently reporting", tone: "configured", detail: "Intermittent reporting is expected; the last report remains visible" };
+	if (state === "check-in-due") return { state: "check-in-due", label: "Check-in reminder", tone: "configured", detail: "No report for over a week; check the agent when you next use this device" };
+	if (state === "overdue") return { state: "overdue", label: "Report overdue", tone: "attention", detail: "Authenticated reporting is outside the freshness allowance for an always-on device" };
+	if (state === "awaiting-first-report") return { state: "pending", label: "Awaiting report", tone: "attention", detail: "Enrollment has not produced an observation" };
+	if (state === "revoked") return { state: "revoked", label: "Revoked", tone: "danger", detail: "This identity can no longer report" };
+	return { state: "ready", label: "Reporting now", tone: "healthy", detail: "The hub has a recent authenticated report" };
+}
+
 export function fleetPresentation(device: DeviceRecord): FleetPresentation {
 	if (device.trustState === "synthetic") return { state: "demo", label: "Synthetic", tone: "configured", detail: "Invented portfolio fixture" };
 	if (device.trustState === "local") return { state: "local", label: "Local collector", tone: "configured", detail: "Collected inside this development hub" };
 	if (device.status === "revoked") return { state: "revoked", label: "Revoked", tone: "danger", detail: "This identity can no longer report" };
-	if (device.status === "awaiting-first-report") return { state: "pending", label: "Awaiting report", tone: "attention", detail: "Enrollment has not produced an observation" };
-	if (device.status === "stale") return { state: "overdue", label: "Report overdue", tone: "attention", detail: "Authenticated reporting is outside the freshness allowance" };
+	if (device.status !== "current") return reportingPresentation(device);
 	if (!device.agent) return { state: "legacy", label: "Legacy reporter", tone: "attention", detail: "Reporting normally, but without 0.14 build evidence" };
 	switch (device.agent.compatibility) {
 		case "current": return { state: "ready", label: "Build verified", tone: "healthy", detail: "Agent version and immutable revision match this hub" };

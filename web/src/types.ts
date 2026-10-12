@@ -172,7 +172,7 @@ export interface SecurityEvent {
 }
 
 export type AlertSeverity = "high" | "medium" | "low";
-export type AlertKind = "finding" | "stale-agent" | "awaiting-agent" | "new-service" | "service-drift" | "expired-service-expectation" | "appliance-stale" | "appliance-unreachable" | "appliance-service" | "appliance-certificate" | "appliance-health" | "appliance-disk" | "appliance-raid" | "appliance-capacity" | "appliance-temperature";
+export type AlertKind = "finding" | "check-in-reminder" | "stale-agent" | "awaiting-agent" | "new-service" | "service-drift" | "expired-service-expectation" | "appliance-stale" | "appliance-unreachable" | "appliance-service" | "appliance-certificate" | "appliance-health" | "appliance-disk" | "appliance-raid" | "appliance-capacity" | "appliance-temperature";
 
 export interface HavenAlert {
   id: string;
@@ -305,6 +305,8 @@ export interface DeviceRecord {
   architecture: string;
   trustState: "local" | "enrolled" | "synthetic" | "revoked";
   status: "current" | "stale" | "awaiting-first-report" | "revoked";
+  reportingExpectation?: "always-on" | "intermittent";
+  reportingStatus?: "current" | "overdue" | "away" | "check-in-due" | "awaiting-first-report" | "revoked";
   enrolledAt: string;
   lastSeenAt: string | null;
   lastCollectedAt: string | null;

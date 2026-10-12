@@ -105,6 +105,9 @@ export const listEvents = (deviceId?: string, signal?: AbortSignal) => {
 
 export const listAlerts = (signal?: AbortSignal) => getJSON<HavenAlert[]>("/api/alerts", signal);
 
+export const saveDeviceReportingExpectation = (deviceId: string, reportingExpectation: "always-on" | "intermittent") =>
+  postJSON<DeviceRecord>(`/api/devices/${encodeURIComponent(deviceId)}/reporting-expectation`, { reportingExpectation });
+
 export const getNotificationStatus = (signal?: AbortSignal) => getJSON<PushNotificationStatus>("/api/notifications", signal);
 
 export const registerPushDestination = (subscription: SerializedPushSubscription, label: string) =>

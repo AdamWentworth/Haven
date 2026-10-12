@@ -39,7 +39,7 @@ HAVEN turns native security evidence into one explainable household view without
 - **Managed appliance health** — explicit, credential-bounded NAS reachability, capacity, disk, temperature, storage-set, and firmware evidence.
 - **Browser hardening** — privacy-bounded browser, extension, and cookie-domain metadata with finite cleanup and incident guidance—never cookie contents.
 - **Account hygiene notebook** — encrypted owner-reported MFA, recovery, backup-code, and session-review checklists without provider credentials.
-- **Evidence-based alerting** — alerts derive only from current verified posture, authenticated freshness, and reviewed service expectations; they never claim an attack occurred.
+- **Evidence-based alerting** — alerts derive from evaluated posture, authenticated reporting, and reviewed service expectations. [Per-device reporting expectations](docs/REPORTING.md) keep ordinary laptop absence neutral and label older evidence as last observed.
 - **Constrained control plane** — fixed, capability-advertised actions require a fresh passkey and cannot become an arbitrary shell.
 - **Portable by design** — reusable public product code remains separate from private network configuration and recoverable local state.
 - **Operationally explainable** — authenticated system diagnostics, redacted recovery guidance, and read-only hub/agent doctor commands distinguish repair from re-enrollment.

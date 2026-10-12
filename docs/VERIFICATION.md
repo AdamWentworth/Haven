@@ -7,6 +7,7 @@ HAVEN treats security statements as testable claims. A green test does not prove
 | Claim | Evidence boundary | Automated guardrail |
 | --- | --- | --- |
 | One missed 15-minute agent run does not create a false stale alert | Server-owned freshness policy and authenticated `last_seen_at` | Go storage boundary tests at 34 and 36 minutes; runtime API test prevents the browser threshold from drifting from the server |
+| Ordinary intermittent absence stays neutral without hiding findings or claiming current coverage | Owner policy separate from raw freshness, server-owned seven-day reminder | Migration/backup and atomic-audit tests; authenticated mutation rejection tests; alert boundary and finding-retention tests; rendered UI coverage and save-failure tests |
 | A transient report failure does not silently discard a valid observation | Certificate-bound observation ID and monotonic sequence | Agent integration tests require a bounded retry after a transient hub response; storage tests accept only the exact duplicate idempotently and reject conflicting sequence reuse |
 | Hub readiness is not declared when persistence is unavailable | SQLite connection required by every useful hub operation | Health endpoint tests close persistence and require HTTP 503 plus `not-ready` rather than an unconditional success |
 | The displayed release can be tied to the deployed source | Shared build version and linker-injected revision | Health/runtime API tests require both values; frontend Settings and footer render the authenticated runtime identity |

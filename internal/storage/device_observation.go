@@ -309,7 +309,7 @@ func (store *Store) ListDevices(ctx context.Context, now time.Time) ([]model.Dev
 			trust_state, enrolled_at, last_seen_at, last_collected_at,
 			certificate_not_after, revoked_at, agent_schema_version,
 			agent_version, agent_revision, agent_platform, agent_installation,
-			agent_capabilities_json, agent_collection_notices
+			agent_capabilities_json, agent_collection_notices, reporting_expectation
 		 FROM devices
 		 ORDER BY display_name COLLATE NOCASE, id`,
 	)
@@ -412,7 +412,7 @@ func (store *Store) DeviceDetail(ctx context.Context, deviceID string, now time.
 			trust_state, enrolled_at, last_seen_at, last_collected_at,
 			certificate_not_after, revoked_at, agent_schema_version,
 			agent_version, agent_revision, agent_platform, agent_installation,
-			agent_capabilities_json, agent_collection_notices
+			agent_capabilities_json, agent_collection_notices, reporting_expectation
 		 FROM devices WHERE id = ?`,
 		deviceID,
 	)
