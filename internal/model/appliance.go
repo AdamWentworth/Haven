@@ -15,12 +15,13 @@ type ManagedApplianceDefinition struct {
 }
 
 type ManagedServiceDefinition struct {
-	ID       string `json:"id"`
-	Name     string `json:"name"`
-	Protocol string `json:"protocol"`
-	Port     int    `json:"port"`
-	TLS      bool   `json:"tls"`
-	Required bool   `json:"required"`
+	ID                    string `json:"id"`
+	Name                  string `json:"name"`
+	Protocol              string `json:"protocol"`
+	Port                  int    `json:"port"`
+	TLS                   bool   `json:"tls"`
+	Required              bool   `json:"required"`
+	CertificateExpiryOnly bool   `json:"certificateExpiryOnly,omitempty"`
 }
 
 // ManagedHealthDefinition describes an explicitly configured, read-only
@@ -52,19 +53,20 @@ type ManagedApplianceStatus struct {
 }
 
 type ManagedServiceStatus struct {
-	ID                  string                    `json:"id"`
-	Name                string                    `json:"name"`
-	Protocol            string                    `json:"protocol"`
-	Port                int                       `json:"port"`
-	TLS                 bool                      `json:"tls"`
-	Required            bool                      `json:"required"`
-	Reachable           bool                      `json:"reachable"`
-	ConsecutiveFailures int                       `json:"consecutiveFailures"`
-	FirstCheckedAt      *time.Time                `json:"firstCheckedAt"`
-	LastCheckedAt       *time.Time                `json:"lastCheckedAt"`
-	LastChangedAt       *time.Time                `json:"lastChangedAt"`
-	ErrorClass          string                    `json:"errorClass,omitempty"`
-	Certificate         *ManagedCertificateStatus `json:"certificate,omitempty"`
+	ID                    string                    `json:"id"`
+	Name                  string                    `json:"name"`
+	Protocol              string                    `json:"protocol"`
+	Port                  int                       `json:"port"`
+	TLS                   bool                      `json:"tls"`
+	Required              bool                      `json:"required"`
+	CertificateExpiryOnly bool                      `json:"certificateExpiryOnly,omitempty"`
+	Reachable             bool                      `json:"reachable"`
+	ConsecutiveFailures   int                       `json:"consecutiveFailures"`
+	FirstCheckedAt        *time.Time                `json:"firstCheckedAt"`
+	LastCheckedAt         *time.Time                `json:"lastCheckedAt"`
+	LastChangedAt         *time.Time                `json:"lastChangedAt"`
+	ErrorClass            string                    `json:"errorClass,omitempty"`
+	Certificate           *ManagedCertificateStatus `json:"certificate,omitempty"`
 }
 
 type ManagedCertificateStatus struct {

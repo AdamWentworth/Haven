@@ -413,6 +413,7 @@ export interface ManagedTemperature {
 }
 
 export interface ManagedServiceStatus {
+  certificateExpiryOnly?: boolean;
   id: string;
   name: string;
   protocol: "TCP";

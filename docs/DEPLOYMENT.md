@@ -2,6 +2,10 @@
 
 HAVEN's production hub is designed for a resource-bounded container on an always-on Linux host. Development workstations can run the Go process directly; Docker is not required there.
 
+## Per-service certificate reminders
+
+Private managed-appliance configuration may set `"certificateExpiryOnly": true` on an individual TLS service. This suppresses only pre-expiry reminders, including the final 14-day warning. The expiry date remains visible and an alert appears when that date is reached. Required-service outage checks are unchanged. Omit the field or set it to `false` to retain the default 30-day reminders. This setting neither renews certificates nor changes TLS probes or trust validation.
+
 ## Delivery model
 
 The public repository does not use a persistent self-hosted GitHub Actions runner. GitHub-hosted CI performs the tests and publishes one immutable GHCR image for each successful push to `main`. A private operations repository can own the production runner, Compose model, DNS and TLS configuration, backup service, health checks, and rollback procedure. HAVEN's reference deployment sends only an allowlisted repository identity and full approved commit hash across that boundary.

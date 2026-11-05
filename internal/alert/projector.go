@@ -522,7 +522,7 @@ func bindScopeLabel(scope string) string {
 		storage.BindScopeAny:      "Any bind",
 		storage.BindScopeLocal:    "This host only",
 		storage.BindScopePrivate:  "Private address",
-		storage.BindScopeWildcard: "All interfaces",
+		storage.BindScopeWildcard: "Wildcard address",
 		storage.BindScopeSpecific: "Specific address",
 	}[scope]
 }

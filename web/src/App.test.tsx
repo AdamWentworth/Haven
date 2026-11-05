@@ -213,7 +213,11 @@ describe("HAVEN routed console", () => {
 		const user = userEvent.setup();
 		const appliance: ManagedApplianceStatus = {
 			id: "example-nas", displayName: "Example NAS", kind: "nas", address: "192.0.2.69", status: "healthy",
-			configuredAt: "2026-09-04T08:00:00Z", lastCheckedAt: "2026-09-07T20:00:00Z", services: [],
+			configuredAt: "2026-09-04T08:00:00Z", lastCheckedAt: "2026-09-07T20:00:00Z", services: [{
+                id: "https", name: "HTTPS", protocol: "TCP", port: 443, tls: true, required: true,
+                reachable: true, consecutiveFailures: 0, firstCheckedAt: null, lastCheckedAt: null, lastChangedAt: null,
+                certificateExpiryOnly: true,
+            }],
 			health: {
 				provider: "terramaster-tos5", status: "healthy", deepCheckMode: "manual", deepCheckAvailable: true,
 				lastDeepCheckedAt: "2026-09-07T14:00:00Z", lastCheckedAt: "2026-09-07T20:00:00Z", lastChangedAt: null,
@@ -230,6 +234,7 @@ describe("HAVEN routed console", () => {
 
 		const button = await screen.findByRole("button", { name: "Run deep check" });
 		expect(screen.getByText(/runs only when requested/i)).toBeInTheDocument();
+        expect(screen.getByText("Early certificate reminders muted; expiry alerts remain on.")).toBeInTheDocument();
 		await user.click(button);
 		expect(window.confirm).toHaveBeenCalledWith(expect.stringContaining("may trigger the appliance's login notification"));
 		await waitFor(() => expect(api.runManagedApplianceDeepCheck).toHaveBeenCalledWith("example-nas"));

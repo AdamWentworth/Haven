@@ -2,6 +2,16 @@
 
 HAVEN's notable user-facing and operational changes are recorded here. The README describes the product as it exists today; it does not duplicate this history.
 
+## 0.28.0 - 2026-11-05
+
+### Changed
+
+- Explain owner-attributed virtual-machine DNS/DHCP and file-manager discovery listeners, and preserve Linux interface bindings instead of presenting them as all-interface exposure.
+- Offer explicit, owner-constrained expectations for these services without automatically trusting them.
+- Allow individual managed HTTPS services to mute early certificate reminders while retaining expiry and required-service failure alerts. The appliance view shows this policy; existing configurations retain their current reminders.
+- Refresh the Go toolchain, Electron, and web development dependencies to pass current vulnerability gates.
+- Add database migration 18 and a distinct expired-certificate notification identity. Agent observation compatibility is unchanged.
+
 ## 0.27.1 - 2026-10-11
 
 ### Changed

@@ -216,7 +216,14 @@ func TestParseLinuxIPv6Endpoint(t *testing.T) {
 		t.Fatalf("unexpected IPv4-mapped endpoint parse: %q %d %t", address, port, ok)
 	}
 	address, port, ok = parseLinuxEndpoint("[fe80::1%enp2s0]:5353")
-	if !ok || address != "fe80::1" || port != 5353 {
+	if !ok || address != "fe80::1%enp2s0" || port != 5353 {
 		t.Fatalf("unexpected zoned endpoint parse: %q %d %t", address, port, ok)
+	}
+}
+
+func TestParseDHCPInterfaceRestriction(t *testing.T) {
+	connection, ok := parseSSLine("UNCONN 0 0 0.0.0.0%virbr9:67 0.0.0.0:* cgroup:/system.slice/libvirtd.service", "UDP")
+	if !ok || connection.LocalAddress != "0.0.0.0%virbr9" || connection.LocalPort != 67 {
+		t.Fatalf("DHCP bridge restriction was lost: %#v", connection)
 	}
 }

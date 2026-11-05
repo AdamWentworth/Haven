@@ -171,3 +171,56 @@ func TestManagedApplianceHealthPersistsCurrentEvidenceAndFailureCount(t *testing
 func testPrivateApplianceAddress() string {
 	return strings.Join([]string{"192", "168", "1", "69"}, ".")
 }
+
+func TestManagedCertificatePolicyPersistsAndResetsWithoutLosingEvidence(t *testing.T) {
+	ctx := context.Background()
+	file := filepath.Join(t.TempDir(), "haven.db")
+	store, err := Open(ctx, file)
+	if err != nil {
+		t.Fatal(err)
+	}
+	now := time.Now().UTC()
+	definitions := []model.ManagedApplianceDefinition{{ID: "nas", DisplayName: "NAS", Kind: "nas", Address: testPrivateApplianceAddress(), Services: []model.ManagedServiceDefinition{{ID: "https", Name: "HTTPS", Protocol: "TCP", Port: 443, TLS: true, Required: true}}}}
+	if err := store.SyncManagedAppliances(ctx, definitions, now); err != nil {
+		t.Fatal(err)
+	}
+	if err := store.RecordManagedApplianceProbe(ctx, "nas", []model.ManagedServiceStatus{{ID: "https", Reachable: true, Certificate: &model.ManagedCertificateStatus{NotBefore: now.Add(-time.Hour), NotAfter: now.Add(time.Hour)}}}, now); err != nil {
+		t.Fatal(err)
+	}
+	statuses, err := store.ListManagedAppliances(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if statuses[0].Services[0].CertificateExpiryOnly {
+		t.Fatal("default policy changed")
+	}
+	definitions[0].Services[0].CertificateExpiryOnly = true
+	if err := store.SyncManagedAppliances(ctx, definitions, now); err != nil {
+		t.Fatal(err)
+	}
+	store.Close()
+	store, err = Open(ctx, file)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer store.Close()
+	statuses, err = store.ListManagedAppliances(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	service := statuses[0].Services[0]
+	if !service.CertificateExpiryOnly || !service.Reachable || service.Certificate == nil {
+		t.Fatalf("policy or evidence lost on restart: %#v", service)
+	}
+	definitions[0].Services[0].CertificateExpiryOnly = false
+	if err := store.SyncManagedAppliances(ctx, definitions, now); err != nil {
+		t.Fatal(err)
+	}
+	statuses, err = store.ListManagedAppliances(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if statuses[0].Services[0].CertificateExpiryOnly || statuses[0].Services[0].Certificate == nil {
+		t.Fatal("policy reset lost evidence or failed")
+	}
+}

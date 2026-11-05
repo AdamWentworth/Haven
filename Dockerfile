@@ -8,7 +8,7 @@ COPY testdata/ /source/testdata/
 COPY web/ ./
 RUN npm run build
 
-FROM golang:1.26.9-alpine@sha256:3082400e369fa24d5fc60bca20edab3f6d604e0c5a690ec66b295eff4dd87ade AS go-build
+FROM golang:1.26.10-alpine@sha256:df23b876380eb556f22bbba2fa57493e8684fc4fcabf06399fbfb65359978d28 AS go-build
 ARG HAVEN_BUILD_SHA=development
 WORKDIR /source
 RUN apk add --no-cache ca-certificates

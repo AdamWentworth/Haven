@@ -188,6 +188,9 @@ func LoadDefinitions(path string) ([]model.ManagedApplianceDefinition, error) {
 			if service.Port < 1 || service.Port > 65535 {
 				return nil, fmt.Errorf("managed appliance %q service %q has an invalid port", definition.ID, service.ID)
 			}
+			if service.CertificateExpiryOnly && !service.TLS {
+				return nil, fmt.Errorf("managed appliance %q service %q requires TLS for certificateExpiryOnly", definition.ID, service.ID)
+			}
 			endpoint := fmt.Sprintf("%s:%d", service.Protocol, service.Port)
 			if _, exists := seenEndpoints[endpoint]; exists {
 				return nil, fmt.Errorf("managed appliance %q endpoint %s is duplicated", definition.ID, endpoint)
@@ -531,23 +534,28 @@ func DeriveAlerts(appliances []model.ManagedApplianceStatus, evaluatedAt time.Ti
 				continue
 			}
 			remaining := service.Certificate.NotAfter.Sub(evaluatedAt)
-			if remaining > 30*24*time.Hour {
+			if remaining > 30*24*time.Hour || (service.CertificateExpiryOnly && remaining > 0) {
 				continue
 			}
 			severity := "low"
+			phase := ""
+			summary := "The certificate presented by this explicitly configured private appliance is near the end of its validity period."
+			startedAt := service.Certificate.NotAfter.Add(-30 * 24 * time.Hour)
 			title := service.Name + " certificate expires soon"
 			if remaining <= 0 {
 				severity = "medium"
 				title = service.Name + " certificate has expired"
+				phase = ":expired"
+				startedAt = service.Certificate.NotAfter
+				summary = "The certificate presented by this explicitly configured private appliance has passed its expiry date."
 			} else if remaining <= 14*24*time.Hour {
 				severity = "medium"
 			}
-			startedAt := service.Certificate.NotAfter.Add(-30 * 24 * time.Hour)
 			alerts = append(alerts, model.Alert{
 				ID:         "appliance-certificate:" + appliance.ID + ":" + service.ID,
-				InstanceID: "appliance-certificate:" + appliance.ID + ":" + service.ID + ":" + service.Certificate.NotAfter.UTC().Format(time.RFC3339Nano) + ":" + severity,
+				InstanceID: "appliance-certificate:" + appliance.ID + ":" + service.ID + ":" + service.Certificate.NotAfter.UTC().Format(time.RFC3339Nano) + ":" + severity + phase,
 				DeviceID:   "appliance:" + appliance.ID, DeviceName: appliance.DisplayName, Kind: "appliance-certificate", Severity: severity,
-				Title: title, Summary: "The certificate presented by this explicitly configured private appliance is near the end of its validity period.",
+				Title: title, Summary: summary,
 				Evidence: "Expires: " + service.Certificate.NotAfter.UTC().Format(time.RFC3339), StartedAt: startedAt,
 			})
 		}

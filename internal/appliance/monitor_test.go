@@ -307,3 +307,66 @@ func TestMonitorObservesTLSWithoutIssuingApplicationRequest(t *testing.T) {
 		t.Fatalf("credential-free TLS observation sent %d application requests", requestCount)
 	}
 }
+
+func TestCertificateExpiryOnlyPreservesExpiryOutagesAndOtherServices(t *testing.T) {
+	now := time.Date(2026, time.November, 5, 12, 0, 0, 0, time.UTC)
+	for _, remaining := range []time.Duration{31 * 24 * time.Hour, 30 * 24 * time.Hour, 14 * 24 * time.Hour, time.Nanosecond, 0, -time.Second} {
+		for _, expiryOnly := range []bool{false, true} {
+			service := model.ManagedServiceStatus{ID: "https", Name: "HTTPS", TLS: true, Required: true, Reachable: true, CertificateExpiryOnly: expiryOnly, Certificate: &model.ManagedCertificateStatus{NotAfter: now.Add(remaining)}}
+			status := model.ManagedApplianceStatus{ID: "nas", LastCheckedAt: &now, Services: []model.ManagedServiceStatus{service}}
+			alerts := DeriveAlerts([]model.ManagedApplianceStatus{status}, now)
+			expected := remaining <= 30*24*time.Hour && (!expiryOnly || remaining <= 0)
+			if (len(alerts) == 1) != expected {
+				t.Fatalf("remaining=%v expiryOnly=%v: %#v", remaining, expiryOnly, alerts)
+			}
+			if expected && remaining <= 0 && (!strings.HasSuffix(alerts[0].InstanceID, ":expired") || alerts[0].Title != "HTTPS certificate has expired" || !alerts[0].StartedAt.Equal(service.Certificate.NotAfter)) {
+				t.Fatalf("expiry transition missing: %#v", alerts)
+			}
+		}
+	}
+	certificate := &model.ManagedCertificateStatus{NotAfter: now.Add(time.Hour)}
+	status := model.ManagedApplianceStatus{ID: "nas", LastCheckedAt: &now, Services: []model.ManagedServiceStatus{
+		{ID: "muted", TLS: true, Reachable: true, CertificateExpiryOnly: true, Certificate: certificate},
+		{ID: "default", TLS: true, Reachable: true, Certificate: certificate},
+		{ID: "failed", TLS: true, Required: true, CertificateExpiryOnly: true, ConsecutiveFailures: 2},
+		{ID: "working", Required: true, Reachable: true},
+	}}
+	alerts := DeriveAlerts([]model.ManagedApplianceStatus{status}, now)
+	if len(alerts) != 2 || alerts[0].Kind != "appliance-service" || alerts[1].ID != "appliance-certificate:nas:default" {
+		t.Fatalf("unrelated alerts changed: %#v", alerts)
+	}
+	status.Services = []model.ManagedServiceStatus{{ID: "https", TLS: true, Reachable: true, Certificate: certificate}}
+	soon := DeriveAlerts([]model.ManagedApplianceStatus{status}, now)[0]
+	later := now.Add(time.Hour)
+	status.LastCheckedAt = &later
+	expired := DeriveAlerts([]model.ManagedApplianceStatus{status}, later)[0]
+	if soon.Severity != expired.Severity || soon.InstanceID == expired.InstanceID {
+		t.Fatalf("expiry must notify even after a medium early reminder: %#v %#v", soon, expired)
+	}
+}
+
+func TestLoadDefinitionsCertificateExpiryOnly(t *testing.T) {
+	for _, tc := range []struct {
+		field      string
+		tls        bool
+		valid      bool
+		expiryOnly bool
+	}{
+		{``, true, true, false}, {`,"certificateExpiryOnly":false`, true, true, false},
+		{`,"certificateExpiryOnly":true`, true, true, true}, {`,"certificateExpiryOnly":true`, false, false, false},
+		{`,"certificateExpiryOnly":"true"`, true, false, false},
+	} {
+		file := filepath.Join(t.TempDir(), "appliances.json")
+		input := fmt.Sprintf(`{"appliances":[{"id":"nas","displayName":"NAS","kind":"nas","address":%q,"services":[{"id":"https","name":"HTTPS","protocol":"TCP","port":443,"tls":%t%s}]}]}`, strings.Join([]string{"192", "168", "1", "69"}, "."), tc.tls, tc.field)
+		if err := os.WriteFile(file, []byte(input), 0600); err != nil {
+			t.Fatal(err)
+		}
+		definitions, err := LoadDefinitions(file)
+		if (err == nil) != tc.valid {
+			t.Fatalf("field=%s tls=%v err=%v", tc.field, tc.tls, err)
+		}
+		if err == nil && definitions[0].Services[0].CertificateExpiryOnly != tc.expiryOnly {
+			t.Fatalf("policy lost: %#v", definitions)
+		}
+	}
+}

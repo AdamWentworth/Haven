@@ -1,4 +1,5 @@
 import { bindScopeLabel, canonicalOwnerName, expectedServiceMatches, listenerOwnerSummary, workloadAttribution, type LogicalListener } from "./network";
+import { isGvfsDynamicDiscovery, listenerPurpose } from "./listener-purpose";
 import type { ExpectedService, ExpectedServiceInput, WorkloadInventory } from "./types";
 
 export interface BaselineSuggestion {
@@ -50,6 +51,15 @@ export function suggestedBaseline(deviceId: string, operatingSystem: string, lis
 			});
 			continue;
 		}
+		const purpose = isWindows ? null : listenerPurpose(listener, listeners);
+		if (purpose && !isGvfsDynamicDiscovery(listener, listeners)) {
+			suggestions.push({
+				id: `purpose:${listener.key}`, title: purpose.title, description: `${purpose.description} Current owner: ${listenerOwnerSummary(listener)}.`,
+				listenerKeys: [listener.key],
+				services: [{ deviceId, label: purpose.title, protocol: listener.protocol, port: listener.port, portEnd: listener.port, bindScope: listener.bindScope, processNames: listener.processes, workloadNames: [], systemdUnits: listener.systemdUnits }],
+			});
+			continue;
+		}
 		const knownUnitLabels = listener.systemdUnits.map(knownSystemdLabel);
 		if (knownUnitLabels.length > 0 && knownUnitLabels.every(Boolean) && new Set(knownUnitLabels).size === 1) {
 			const title = knownUnitLabels[0];
@@ -94,6 +104,22 @@ export function suggestedBaseline(deviceId: string, operatingSystem: string, lis
 			});
 		}
 	} else {
+		const discoveryGroups = new Map<string, LogicalListener[]>();
+		for (const listener of unreviewed) {
+			if (!isGvfsDynamicDiscovery(listener, listeners)) continue;
+			const key = JSON.stringify([listener.bindScope, listener.processes.map((process) => canonicalOwnerName(process)).sort()]);
+			discoveryGroups.set(key, [...(discoveryGroups.get(key) || []), listener]);
+		}
+		for (const [key, grouped] of discoveryGroups) {
+			const first = grouped[0];
+			suggestions.push({
+				id: `gvfs-discovery:${key}`,
+				title: "File manager discovery reply sockets",
+				description: `Review ${grouped.length} changing UDP port${grouped.length === 1 ? "" : "s"} together. UDP 3702 has matching ownership. Approval covers UDP 32768–60999 with this bind scope and owner: ${listenerOwnerSummary(first)}. GVfs can run other helpers; this is a service-level expectation, not proof of the individual program.`,
+				listenerKeys: grouped.map((listener) => listener.key),
+				services: [{ deviceId, label: "File manager discovery reply sockets", protocol: "UDP", port: 32768, portEnd: 60999, bindScope: first.bindScope, processNames: first.processes, workloadNames: [], systemdUnits: first.systemdUnits }],
+			});
+		}
 		const containerdByScope = new Map<LogicalListener["bindScope"], LogicalListener[]>();
 		for (const listener of unreviewed) {
 			const units = listener.systemdUnits.map((unit) => canonicalOwnerName(unit));

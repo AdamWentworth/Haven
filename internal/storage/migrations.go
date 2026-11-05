@@ -407,4 +407,10 @@ var migrations = []migration{
 			 CHECK (reporting_expectation IN ('always-on', 'intermittent'))`,
 		},
 	},
+	{
+		version: 18,
+		statements: []string{
+			`ALTER TABLE managed_appliance_services ADD COLUMN certificate_expiry_only INTEGER NOT NULL DEFAULT 0 CHECK (certificate_expiry_only IN (0, 1))`,
+		},
+	},
 }

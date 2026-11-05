@@ -69,15 +69,16 @@ func (store *Store) SyncManagedAppliances(ctx context.Context, definitions []mod
 			endpointChanged := serviceErr == nil && (previousProtocol != service.Protocol || previousPort != service.Port || previousTLS != boolInt(service.TLS))
 			if _, err := transaction.ExecContext(ctx,
 				`INSERT INTO managed_appliance_services (
-					appliance_id, service_id, name, protocol, port, tls, required
-				 ) VALUES (?, ?, ?, ?, ?, ?, ?)
+					appliance_id, service_id, name, protocol, port, tls, required, certificate_expiry_only
+				 ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
 				 ON CONFLICT(appliance_id, service_id) DO UPDATE SET
 					name = excluded.name,
 					protocol = excluded.protocol,
 					port = excluded.port,
 					tls = excluded.tls,
-					required = excluded.required`,
-				definition.ID, service.ID, service.Name, service.Protocol, service.Port, boolInt(service.TLS), boolInt(service.Required),
+					required = excluded.required,
+					certificate_expiry_only = excluded.certificate_expiry_only`,
+				definition.ID, service.ID, service.Name, service.Protocol, service.Port, boolInt(service.TLS), boolInt(service.Required), boolInt(service.CertificateExpiryOnly),
 			); err != nil {
 				return fmt.Errorf("save managed appliance %q service %q: %w", definition.ID, service.ID, err)
 			}
@@ -399,7 +400,7 @@ func (store *Store) ListManagedAppliances(ctx context.Context) ([]model.ManagedA
 
 func (store *Store) listManagedApplianceServices(ctx context.Context, applianceID string) ([]model.ManagedServiceStatus, error) {
 	rows, err := store.database.QueryContext(ctx,
-		`SELECT service_id, name, protocol, port, tls, required, reachable, consecutive_failures,
+		`SELECT service_id, name, protocol, port, tls, required, certificate_expiry_only, reachable, consecutive_failures,
 		        first_checked_at, last_checked_at, last_changed_at, error_class,
 		        certificate_subject, certificate_issuer, certificate_fingerprint,
 		        certificate_not_before, certificate_not_after,
@@ -414,12 +415,12 @@ func (store *Store) listManagedApplianceServices(ctx context.Context, applianceI
 	services := make([]model.ManagedServiceStatus, 0)
 	for rows.Next() {
 		var service model.ManagedServiceStatus
-		var tlsEnabled, required int
+		var tlsEnabled, required, certificateExpiryOnly int
 		var reachable, systemTrust, nameValid sql.NullInt64
 		var firstChecked, lastChecked, lastChanged sql.NullString
 		var subject, issuer, fingerprint, notBefore, notAfter sql.NullString
 		if err := rows.Scan(
-			&service.ID, &service.Name, &service.Protocol, &service.Port, &tlsEnabled, &required,
+			&service.ID, &service.Name, &service.Protocol, &service.Port, &tlsEnabled, &required, &certificateExpiryOnly,
 			&reachable, &service.ConsecutiveFailures, &firstChecked, &lastChecked, &lastChanged, &service.ErrorClass,
 			&subject, &issuer, &fingerprint, &notBefore, &notAfter, &systemTrust, &nameValid,
 		); err != nil {
@@ -427,6 +428,7 @@ func (store *Store) listManagedApplianceServices(ctx context.Context, applianceI
 		}
 		service.TLS = tlsEnabled != 0
 		service.Required = required != 0
+		service.CertificateExpiryOnly = certificateExpiryOnly != 0
 		service.Reachable = reachable.Valid && reachable.Int64 != 0
 		var err error
 		if service.FirstCheckedAt, err = optionalDatabaseTime(firstChecked); err != nil {

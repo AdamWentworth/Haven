@@ -156,7 +156,7 @@ export function NetworkOverview({ devices, appliances, events, alerts, selectedI
 						{appliance.health && <ApplianceHealthPanel health={appliance.health} runDeepCheck={() => runApplianceDeepCheck(appliance)} busy={deepCheckBusy === appliance.id} />}
 						<ul>{appliance.services.map((service) => {
 							const serviceTone: Tone = service.reachable ? "healthy" : !service.lastCheckedAt ? "unknown" : service.required && service.consecutiveFailures >= 2 ? "attention" : "configured";
-							return <li key={service.id}><span><strong>{service.name}</strong><small>{service.protocol} {service.port}{service.tls ? " · TLS" : ""}{service.required ? " · required" : " · visibility only"}</small>{service.certificate && <small>Certificate valid until {formatDate(service.certificate.notAfter)} · {service.certificate.nameValid ? "address matches" : "address does not match certificate name"}</small>}</span><StatusChip label={service.reachable ? "reachable" : !service.lastCheckedAt ? "pending" : "not reached"} tone={serviceTone} /></li>;
+							return <li key={service.id}><span><strong>{service.name}</strong><small>{service.protocol} {service.port}{service.tls ? " · TLS" : ""}{service.required ? " · required" : " · visibility only"}</small>{service.certificateExpiryOnly && <small>Early certificate reminders muted; expiry alerts remain on.</small>}{service.certificate && <small>Certificate valid until {formatDate(service.certificate.notAfter)} · {service.certificate.nameValid ? "address matches" : "address does not match certificate name"}</small>}</span><StatusChip label={service.reachable ? "reachable" : !service.lastCheckedAt ? "pending" : "not reached"} tone={serviceTone} /></li>;
 						})}</ul>
 					</article>;
 				})}</div>}

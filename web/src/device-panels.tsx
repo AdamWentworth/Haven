@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { listenerPurpose } from "./listener-purpose";
 import { suggestedBaseline } from "./baseline";
 import { actionableFindings, visibleFindingLifecycles } from "./findings";
 import { booleanValue, formatBytes, formatDate, formatPortBinding, formatRelativeTime, formatTimeRemaining, policyValue } from "./format";
 import { ActivityIcon, AlertIcon, CheckIcon, ChipIcon, DefenderIcon, FirewallIcon, HelpIcon, LockIcon, NetworkIcon, RemoteAccessIcon, ServerIcon, UpdateIcon, UsersIcon, WorkloadIcon } from "./icons";
-import { bindScopeLabel, endpoint, endpointScope, expectedServiceMatches, expectedServiceOwnerConstrained, logicalListeners, workloadAttribution, type LogicalListener } from "./network";
+import { bindScopeLabel, listenerBindScopeLabel, endpoint, endpointScope, expectedServiceMatches, expectedServiceOwnerConstrained, logicalListeners, workloadAttribution, type LogicalListener } from "./network";
 import { PanelHeading } from "./panel-heading";
 import type {
   BaselineCheck,
@@ -234,7 +235,7 @@ export function ConnectionsPanel({ deviceId, operatingSystem, connections, workl
 	const ownerAttributionAvailable = connections.some((connection) => connection.processName || connection.processId > 0 || connection.systemdUnit);
 	const beginExpected = (listener: LogicalListener, durationHours = 0) => {
 		setEditingListenerKey(listener.key);
-		setListenerLabel(`${listener.protocol} ${listener.port}`);
+		setListenerLabel(listenerPurpose(listener, listeners)?.title || `${listener.protocol} ${listener.port}`);
 		setListenerDurationHours(durationHours);
 	};
 	const markExpected = (event: React.FormEvent, listener: LogicalListener) => {
@@ -265,7 +266,7 @@ export function ConnectionsPanel({ deviceId, operatingSystem, connections, workl
 		<div className="heading-identity"><span className="section-icon cyan"><NetworkIcon /></span><div><p className="eyebrow">SERVICE EXPOSURE · NOT A THREAT LIST</p><h2 id="connections-title">Listener review</h2></div></div>
 		<p>{listeners.length} logical service endpoint{listeners.length === 1 ? "" : "s"} from {connections.filter((item) => ["listen", "open", "bound"].includes(item.state.toLowerCase())).length} raw sockets</p>
 	  </div>
-	  <p className="service-explainer">HAVEN groups IPv4/IPv6 duplicates and asks you to classify intended services. “Unreviewed” means no expectation has been saved yet—it does not mean malicious or Internet-accessible.</p>
+	  <p className="service-explainer">HAVEN groups IPv4/IPv6 duplicates and asks you to classify intended services. “Unreviewed” means no expectation has been saved yet—it does not mean malicious or Internet-accessible. “New” means recently observed or seen again, not newly installed. Wildcard addresses may still be restricted by an interface or firewall; older agents may omit interface details.</p>
 	  {baselineSuggestions.length > 0 && <section className="baseline-review" aria-labelledby="baseline-review-title">
 		<div className="baseline-review-heading"><div><p className="eyebrow">ONE-TIME REVIEW</p><h3 id="baseline-review-title">Suggested service baseline</h3></div><StatusChip label={`${baselineSuggestions.length} suggestion${baselineSuggestions.length === 1 ? "" : "s"}`} tone="configured" /></div>
 		<p>These are high-confidence suggestions derived from platform roles, current process or system-service ownership, and Docker workload mappings. Nothing becomes trusted until you approve it; unchecked listeners remain visible for individual review.</p>
@@ -283,6 +284,7 @@ export function ConnectionsPanel({ deviceId, operatingSystem, connections, workl
 	  {view !== "active" && <div className="service-grid">
 		{shownListeners.length === 0 ? <p className="activity-empty"><strong>{view === "review" ? "No unreviewed non-local listeners." : `No ${view === "expected" ? "expected" : "unclassified local-only"} listeners are active.`}</strong><span>{view === "review" ? "New non-local services will appear here for classification." : "Choose another category or inspect the raw technical details below."}</span></p> : shownListeners.map((listener) => {
 		  const expectation = expectedFor(listener);
+		  const purpose = listenerPurpose(listener, listeners);
 		  const observation = observationFor(listener);
 		  const attributions = workloadAttribution(listener, workloads);
 		  const recentlyAppeared = !!observation && Date.now() - new Date(observation.appearedAt).valueOf() < 24 * 60 * 60 * 1000;
@@ -290,8 +292,9 @@ export function ConnectionsPanel({ deviceId, operatingSystem, connections, workl
 		  const ownerConstraints = [...listener.processes, ...listener.systemdUnits, ...attributions.map(({ workload }) => workload.name)];
 		  return <article className={`service-card ${expectation ? "expected" : listener.bindScope === "local" ? "local" : "review"}`} key={listener.key}>
 			<div className="service-card-heading"><div><span className="protocol">{listener.protocol}</span><strong>Port {listener.port}</strong></div><StatusChip label={statusLabel} tone={expectation ? "healthy" : listener.bindScope === "local" ? "configured" : "attention"} /></div>
-			<h3>{expectation?.label || (attributions.length === 1 ? attributions[0].workload.name : `${listener.protocol} service on port ${listener.port}`)}</h3>
-			<dl><div><dt>Bind scope</dt><dd>{bindScopeLabel(listener.bindScope)}</dd></div><div><dt>State</dt><dd>{listener.state}</dd></div><div><dt>Addresses</dt><dd className="endpoint">{listener.addresses.join(", ") || "Not reported"}</dd></div>{listener.processes.length > 0 && <div><dt>Host process</dt><dd>{listener.processes.join(", ")}</dd></div>}{listener.systemdUnits.length > 0 && <div><dt>System service</dt><dd>{listener.systemdUnits.join(", ")}</dd></div>}{attributions.length > 0 && <><div><dt>Runtime owner</dt><dd>{attributions.map(({ workload }) => workload.name).join(", ")}</dd></div><div><dt>Docker mapping</dt><dd className="endpoint">{attributions.flatMap(({ bindings }) => bindings).map(formatPortBinding).join(", ")}</dd></div></>}</dl>
+			<h3>{expectation?.label || (attributions.length === 1 ? attributions[0].workload.name : purpose?.title || `${listener.protocol} service on port ${listener.port}`)}</h3>
+			<dl><div><dt>Bind scope</dt><dd>{listenerBindScopeLabel(listener)}</dd></div><div><dt>State</dt><dd>{listener.state}</dd></div><div><dt>Addresses</dt><dd className="endpoint">{listener.addresses.join(", ") || "Not reported"}</dd></div>{listener.processes.length > 0 && <div><dt>Host process</dt><dd>{listener.processes.join(", ")}</dd></div>}{listener.systemdUnits.length > 0 && <div><dt>System service</dt><dd>{listener.systemdUnits.join(", ")}</dd></div>}{attributions.length > 0 && <><div><dt>Runtime owner</dt><dd>{attributions.map(({ workload }) => workload.name).join(", ")}</dd></div><div><dt>Docker mapping</dt><dd className="endpoint">{attributions.flatMap(({ bindings }) => bindings).map(formatPortBinding).join(", ")}</dd></div></>}</dl>
+			{purpose && <p>{purpose.description}</p>}
 			<p>{observation ? `First observed ${formatDate(observation.firstSeenAt)} · continuously present since ${formatDate(observation.appearedAt)} · last confirmed ${formatRelativeTime(observation.lastSeenAt)}` : "Appearance history will begin with the next agent report."}{listener.rawCount > 1 ? ` · ${listener.rawCount} raw sockets grouped` : ""}</p>
 			{expectation?.expiresAt && <p className="footnote"><strong>Temporary expectation.</strong> Expires in {formatTimeRemaining(expectation.expiresAt)} on {formatDate(expectation.expiresAt)}; this listener will require review again if it is still present.</p>}
 			{expectation && !expectedServiceOwnerConstrained(expectation) && <p className="footnote"><strong>Port-only expectation.</strong> HAVEN checks this endpoint and bind scope, but any reported owner can satisfy the saved rule.</p>}
@@ -308,7 +311,7 @@ export function ConnectionsPanel({ deviceId, operatingSystem, connections, workl
 	  <details className="expectation-registry">
 		<summary>Manage expected-service registry ({expectedServices.length})</summary>
 		<p>Expectations are local HAVEN metadata. They do not open ports or change firewall rules.</p>
-		<form className="expectation-form" onSubmit={addManual}><label><span>Friendly label</span><input maxLength={80} value={manualLabel} onChange={(event) => setManualLabel(event.target.value)} placeholder="SSH" /></label><label><span>Protocol</span><select value={manualProtocol} onChange={(event) => setManualProtocol(event.target.value as "TCP" | "UDP")}><option>TCP</option><option>UDP</option></select></label><label><span>Port</span><input type="number" min={1} max={65535} value={manualPort} onChange={(event) => setManualPort(event.target.value)} placeholder="22" /></label><label><span>Expected bind</span><select value={manualScope} onChange={(event) => setManualScope(event.target.value as BindScope)}><option value="any">Any bind</option><option value="local">This host only</option><option value="private">Private address</option><option value="wildcard">All interfaces</option><option value="specific">Specific address</option></select></label><button type="submit" disabled={busy || !manualLabel.trim() || !manualPort}>Add expectation</button></form>
+		<form className="expectation-form" onSubmit={addManual}><label><span>Friendly label</span><input maxLength={80} value={manualLabel} onChange={(event) => setManualLabel(event.target.value)} placeholder="SSH" /></label><label><span>Protocol</span><select value={manualProtocol} onChange={(event) => setManualProtocol(event.target.value as "TCP" | "UDP")}><option>TCP</option><option>UDP</option></select></label><label><span>Port</span><input type="number" min={1} max={65535} value={manualPort} onChange={(event) => setManualPort(event.target.value)} placeholder="22" /></label><label><span>Expected bind</span><select value={manualScope} onChange={(event) => setManualScope(event.target.value as BindScope)}><option value="any">Any bind</option><option value="local">This host only</option><option value="private">Private address</option><option value="wildcard">Wildcard address</option><option value="specific">Specific address</option></select></label><button type="submit" disabled={busy || !manualLabel.trim() || !manualPort}>Add expectation</button></form>
 		{expectedServices.length > 0 && <ul className="registry-list">{expectedServices.map((service) => <li key={service.id}><span><strong>{service.label}</strong><small>{service.protocol} {service.portEnd > service.port ? `${service.port}–${service.portEnd}` : service.port} · {bindScopeLabel(service.bindScope)}{service.processNames?.length ? ` · processes: ${service.processNames.join(", ")}` : ""}{service.workloadNames?.length ? ` · workloads: ${service.workloadNames.join(", ")}` : ""}{service.systemdUnits?.length ? ` · services: ${service.systemdUnits.join(", ")}` : ""}{!expectedServiceOwnerConstrained(service) ? " · owner not constrained" : ""}{service.expiresAt ? ` · temporary, expires ${formatDate(service.expiresAt)}` : ""}</small></span><button type="button" disabled={busy} onClick={() => removeExpectation(service)}>Remove</button></li>)}</ul>}
 	  </details>
 	  <details className="raw-endpoints">

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import serviceExpectationCases from "../../testdata/service_expectation_cases.json";
-import { bindScopeLabel, canonicalOwnerName, endpoint, endpointBindScope, endpointScope, expectedServiceMatches, expectedServiceOwnerConstrained, isLoopbackAddress, isMulticastAddress, isPrivateNetworkAddress, isUnspecifiedAddress, listenerOwnerSummary, liveNetworkRelationships, logicalListeners, networkServiceLabel, normalizeAddress, workloadAttribution, type NetworkDeviceObservation } from "./network";
+import { listenerBindScopeLabel, bindScopeLabel, canonicalOwnerName, endpoint, endpointBindScope, endpointScope, expectedServiceMatches, expectedServiceOwnerConstrained, isLoopbackAddress, isMulticastAddress, isPrivateNetworkAddress, isUnspecifiedAddress, listenerOwnerSummary, liveNetworkRelationships, logicalListeners, networkServiceLabel, normalizeAddress, workloadAttribution, type NetworkDeviceObservation } from "./network";
 import type { DeviceRecord, ExpectedService, NetworkConnection, SecuritySnapshot, WorkloadInventory } from "./types";
 
 const at = "2026-09-02T20:00:00Z";
@@ -187,5 +187,38 @@ describe("live relationship projection", () => {
     const external = liveNetworkRelationships([windows]).find((item) => item.peerKind === "external")!;
     expect(external).toMatchObject({ sourceName: "Windows Workstation", targetName: "Internet", connectionCount: 2, destinationCount: 2 });
     expect(JSON.stringify(external)).not.toContain("203.0.113");
+  });
+});
+
+
+describe("interface-aware listener presentation", () => {
+  it("retains bridge restrictions while keeping existing expectation keys", () => {
+    const listener = logicalListeners([
+      connection({ protocol: "UDP", localPort: 67, localAddress: "0.0.0.0%virbr8" }),
+      connection({ protocol: "UDP", localPort: 67, localAddress: "0.0.0.0%virbr9" }),
+    ])[0];
+    expect(listener.key).toBe("UDP:67:wildcard");
+    expect(listener.addresses).toEqual(["0.0.0.0%virbr8", "0.0.0.0%virbr9"]);
+    expect(listenerBindScopeLabel(listener)).toBe("Specific interfaces");
+    expect(endpoint("[fe80::1%eth0]", 3702)).toBe("[fe80::1%eth0]:3702");
+    expect(endpointScope(connection({ localAddress: "0.0.0.0%virbr9" }))).toBe("Specific interface");
+    expect(endpointScope(connection({ localAddress: "ff02::c%eth0" }))).toBe("Multicast group");
+    expect(expectedServiceMatches(listener, expected({ protocol: "UDP", port: 67, portEnd: 67, processNames: ["caddy"] }), null)).toBe(true);
+  });
+
+  it("does not infer restrictions from partial or absent interface evidence", () => {
+    for (const addresses of [["0.0.0.0"], ["0.0.0.0%eth0", "::"], ["0.0.0.0%"], []]) {
+      const listener = { ...logicalListeners([connection()])[0], addresses };
+      expect(listenerBindScopeLabel(listener)).toBe("Wildcard address");
+    }
+    expect(listenerBindScopeLabel(logicalListeners([connection({ localAddress: "0.0.0.0%eth0" }), connection({ localAddress: "" })])[0])).toBe("Wildcard address");
+    expect(listenerBindScopeLabel(logicalListeners([connection({ localAddress: "127.0.0.1" })])[0])).toBe("This host only");
+    expect(listenerBindScopeLabel(logicalListeners([connection({ localAddress: "ff02::c%eth0" })])[0])).toBe("Multicast group");
+  });
+
+  it("still attributes workloads when a concrete address contains an interface", () => {
+    const listener = logicalListeners([connection({ localAddress: "192.0.2.4%eth0" })])[0];
+    const inventory: WorkloadInventory = { runtime: "docker", collectedAt: at, workloads: [{ name: "gateway", state: "running", ports: [{ protocol: "TCP", containerPort: 443, published: true, hostAddress: "192.0.2.4", hostPort: 443 }] }] };
+    expect(workloadAttribution(listener, inventory)).toHaveLength(1);
   });
 });

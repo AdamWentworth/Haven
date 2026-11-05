@@ -1,7 +1,7 @@
 {
   "name": "@haven/web",
   "private": true,
-  "version": "0.27.1",
+  "version": "0.28.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -22,11 +22,11 @@
     "@types/react": "19.2.18",
     "@types/react-dom": "19.2.5",
     "@vitejs/plugin-react": "6.1.1",
-    "@vitest/coverage-v8": "4.1.11",
+    "@vitest/coverage-v8": "4.1.12",
     "axe-core": "4.13.0",
     "jsdom": "30.0.1",
     "typescript": "7.0.2",
-    "vite": "8.2.2",
-    "vitest": "4.1.11"
+    "vite": "8.3.6",
+    "vitest": "4.1.12"
   }
 }

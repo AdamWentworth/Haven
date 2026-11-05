@@ -85,3 +85,22 @@ describe("device evidence panels", () => {
 		expect(screen.queryByText(/attack occurred/i)).not.toBeInTheDocument();
 	});
 });
+
+
+it("explains VM interfaces and lets the owner review changing discovery ports together", async () => {
+  const saveExpectations = vi.fn();
+  const socket = (port: number, unit: string, address = "0.0.0.0"): NetworkConnection => ({ protocol: "UDP", localAddress: address, localPort: port, remoteAddress: "", remotePort: 0, state: "Bound", processId: 0, processName: "", systemdUnit: unit });
+  render(<ConnectionsPanel deviceId="device-test" operatingSystem="Ubuntu" connections={[
+    socket(67, "libvirtd.service", "0.0.0.0%virbr9"),
+    socket(3702, "gvfs-daemon.service", "239.255.255.250"),
+    socket(40000, "gvfs-daemon.service"), socket(50000, "gvfs-daemon.service"),
+  ]} workloads={null} expectedServices={[]} observations={[]} saveExpectation={vi.fn()} saveExpectations={saveExpectations} removeExpectation={vi.fn()} busy={false} />);
+  expect(screen.getByText("Specific interfaces")).toBeInTheDocument();
+  expect(screen.getByText("0.0.0.0%virbr9")).toBeInTheDocument();
+  expect(screen.getAllByText("Multicast group").length).toBeGreaterThan(0);
+  expect(screen.getAllByRole("heading", { name: "File manager discovery reply socket" })).toHaveLength(2);
+  expect(screen.getByText(/not newly installed/)).toBeInTheDocument();
+  expect(saveExpectations).not.toHaveBeenCalled();
+  await userEvent.setup().click(screen.getByRole("button", { name: "Approve selected baseline (3)" }));
+  expect(saveExpectations).toHaveBeenCalledWith(expect.arrayContaining([expect.objectContaining({ protocol: "UDP", port: 32768, portEnd: 60999, systemdUnits: ["gvfs-daemon.service"] })]));
+});

@@ -48,8 +48,20 @@ export function normalizeAddress(value: string) {
   return address.toLowerCase();
 }
 
+function addressWithInterface(value: string) {
+  const address = value.trim().replace(/^\[|\]$/g, "");
+  const zone = address.lastIndexOf("%");
+  return normalizeAddress(address) + (zone >= 0 ? address.slice(zone) : "");
+}
+
+export function listenerBindScopeLabel(listener: LogicalListener) {
+  if (listener.bindScope === "wildcard" && listener.addresses.length > 0 && listener.addresses.every((address) => /%[^%]+$/.test(address))) return "Specific interfaces";
+  if (listener.addresses.length > 0 && listener.addresses.every(isMulticastAddress)) return "Multicast group";
+  return bindScopeLabel(listener.bindScope);
+}
+
 export function endpoint(address: string, port: number) {
-  const normalized = normalizeAddress(address);
+  const normalized = addressWithInterface(address);
   if (!normalized || port === 0) return "—";
   const host = normalized.includes(":") ? `[${normalized}]` : normalized;
   return `${host}:${port}`;
@@ -67,11 +79,13 @@ export function endpointBindScope(connection: NetworkConnection): Exclude<BindSc
 }
 
 export function bindScopeLabel(scope: BindScope) {
-  return ({ any: "Any bind", local: "This host only", private: "Private address", wildcard: "All interfaces", specific: "Specific address" } satisfies Record<BindScope, string>)[scope];
+  return ({ any: "Any bind", local: "This host only", private: "Private address", wildcard: "Wildcard address", specific: "Specific address" } satisfies Record<BindScope, string>)[scope];
 }
 
 export function endpointScope(connection: NetworkConnection) {
   if (connection.state.toLowerCase() === "established") return "Active connection";
+  if (endpointBindScope(connection) === "wildcard" && /%[^%]+$/.test(connection.localAddress)) return "Specific interface";
+  if (isMulticastAddress(connection.localAddress)) return "Multicast group";
   return bindScopeLabel(endpointBindScope(connection));
 }
 
@@ -82,8 +96,8 @@ export function logicalListeners(connections: NetworkConnection[]) {
     const bindScope = endpointBindScope(connection);
     const key = `${protocol}:${connection.localPort}:${bindScope}`;
     const current = grouped.get(key) || { key, protocol, port: connection.localPort, bindScope, addresses: [], processes: [], systemdUnits: [], rawCount: 0, state: protocol === "UDP" ? "Bound" : "Listening" };
-    const address = normalizeAddress(connection.localAddress);
-    if (address && !current.addresses.includes(address)) current.addresses.push(address);
+    const address = addressWithInterface(connection.localAddress) || "Not reported";
+    if (!current.addresses.includes(address)) current.addresses.push(address);
     if (connection.processName && !current.processes.includes(connection.processName)) current.processes.push(connection.processName);
     if (connection.systemdUnit && !current.systemdUnits.includes(connection.systemdUnit)) current.systemdUnits.push(connection.systemdUnit);
     current.rawCount += 1;
@@ -98,7 +112,7 @@ export function workloadAttribution(listener: LogicalListener, inventory: Worklo
     const bindings = workload.ports.filter((binding) => binding.published && binding.protocol === listener.protocol && binding.hostPort === listener.port && (() => {
       const address = normalizeAddress(binding.hostAddress || "");
       if (!address || address === "0.0.0.0" || address === "::") return listener.bindScope === "wildcard";
-      return listener.addresses.includes(address);
+      return listener.addresses.some((observed) => normalizeAddress(observed) === address);
     })());
     return bindings.length > 0 ? [{ workload, bindings }] : [];
   });

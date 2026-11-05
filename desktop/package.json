@@ -1,7 +1,7 @@
 {
   "name": "haven-desktop",
   "productName": "HAVEN",
-  "version": "0.27.1",
+  "version": "0.28.0",
   "private": true,
   "description": "Native, isolated desktop client for the HAVEN personal security observatory",
   "author": "Adam Wentworth",
@@ -21,7 +21,7 @@
   },
   "devDependencies": {
     "@electron/fuses": "2.1.3",
-    "electron": "44.2.0",
+    "electron": "44.10.2",
     "electron-builder": "26.15.3"
   },
   "overrides": {
