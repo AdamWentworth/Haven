@@ -2,6 +2,12 @@
 
 HAVEN's notable user-facing and operational changes are recorded here. The README describes the product as it exists today; it does not duplicate this history.
 
+## 0.28.1 - 2026-11-05
+
+### Fixed
+
+- Normalize Linux IPv6 sockets whose interface suffix appears outside the address brackets, preserving their private-address classification and existing expectations.
+
 ## 0.28.0 - 2026-11-05
 
 ### Changed

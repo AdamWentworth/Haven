@@ -227,3 +227,12 @@ func TestParseDHCPInterfaceRestriction(t *testing.T) {
 		t.Fatalf("DHCP bridge restriction was lost: %#v", connection)
 	}
 }
+
+func TestLinuxEndpointInterfaceOutsideIPv6Brackets(t *testing.T) {
+	for _, endpoint := range []string{"[fe80::1]%enp2s0:546", "[fe80::1%enp2s0]:546"} {
+		address, port, ok := parseLinuxEndpoint(endpoint)
+		if !ok || address != "fe80::1%enp2s0" || port != 546 {
+			t.Fatalf("parseLinuxEndpoint(%q) = %q, %d, %t", endpoint, address, port, ok)
+		}
+	}
+}

@@ -584,6 +584,7 @@ func parseLinuxEndpoint(value string) (string, int, bool) {
 
 func normalizeLinuxAddress(value string) string {
 	address, zone, zoned := strings.Cut(value, "%")
+	address = strings.Trim(address, "[]")
 	if parsed := net.ParseIP(strings.TrimPrefix(address, "::ffff:")); strings.HasPrefix(address, "::ffff:") && parsed != nil {
 		address = parsed.String()
 	}
